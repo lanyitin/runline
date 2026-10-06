@@ -35,6 +35,18 @@
 | 單實例的實作限度 | run 排程佇列在記憶體，重啟時進行中的 run 一律中斷；cron 排程器與啟動時將待處理觸發標記為中斷的步驟都假設單一行程；資料庫沒有連線池，每次呼叫開新連線，每個執行中的 run 持有一條 log 連線；每行 log 為一次同步寫入 | v1 接受；輸出量大的 pipeline 與多實例部署前需改為連線池、批次寫入與共享的排程狀態；多實例時啟動步驟可能把他實例進行中的觸發誤標為中斷 |
 | 設定與建立 run 的競態 | 讀取 unsafe 設定到寫入 run 之間有極短的時間窗，期間設定被變更會使 run 記錄的設定與實際判斷不一致 | 接受；run 記錄的是建立時讀到的設定 |
 | 錄製涵蓋不全 | 只含錄製時走過的路徑 | 提案僅供參考，採用前人工檢視 |
+| 瀏覽器內 token 外洩（XSS） | Console 把長效且無法單獨撤銷的 Bearer token 放進瀏覽器；pipeline 名稱、參數、log 與錯誤訊息都是不可信內容 | 嚴格同源 CSP、不可信內容一律以純文字渲染、token 存 sessionStorage 加分頁間同步、不放進網址；token 登入是過渡機制（[ADR-017](adr/ADR-017-console-websocket-and-token.md)）；XSS 緩解是 Console 的上線條件 |
+| Token 不可單獨撤銷 | token 由組態提供，輪替需重啟（ADR-012）；Console 使外洩的影響變大 | 接受；管理員與開發人員使用不同 token；日後改為可撤銷的憑證需另開 ADR |
+| Log 輪詢的查詢量 | Console 以輪詢取代 WebSocket，每個檢視進行中 run 的分頁約每秒一次查詢 | 僅在分頁可見且 run 未結束時輪詢，以序號索引查詢；超出時改採一次性 ticket 方案（另開 ADR）|
+| 前端供應鏈 | npm 相依與前端工具鏈進入建置 | 以鎖定檔固定版本、本機可執行的相依漏洞檢查納入發佈建置、建置不在執行階段下載相依（[ADR-015](adr/ADR-015-console-frontend.md)）|
+| Console 與 Engine 同步發佈 | 前端改版需重新發佈 Engine，造成重啟與進行中 run 中斷 | 接受；版本與 API 永遠一致是對應的好處 |
+| 版本資訊公開 | `GET /api/v1/info` 免認證，公開完整 commit hash，可協助比對已知漏洞 | 接受（[ADR-016](adr/ADR-016-engine-build-info-endpoint.md)）；內部工具，對外暴露由入口層控管，速率限制由部署層負責 |
+| 發佈產物無法追溯 | 未提交變更或無 commit 的建置被當成發佈產物 | 發佈建置在 dirty 或取不到 commit 時失敗；產物位元組級可重現，可由 commit 與雜湊稽核（固定建置平台，跨平台為盡力而為）|
+| 探測誤判造成重啟 | 存活若檢查資料庫，資料庫短暫中斷會使平台重啟 Engine，中斷所有進行中的 run | 存活不檢查依賴；依 unhealthy 重啟的編排器只用存活（[ADR-018](adr/ADR-018-liveness-readiness-probes.md)）|
+| 平台停止等待小於寬限時間 | Docker 預設停止等待 10 秒小於 Engine 寬限時間 30 秒，優雅關閉被強制終止 | 停止等待設為寬限時間加 15 秒（[04](04-deployment.md)）|
+| 單機 Docker 不因卡死而重啟 | 行程卡死而未結束時，單機 Docker 不會重啟 | 接受；以監控告警補位 |
+| 單實例就緒為否即服務暫停 | 只有一個實例時，就緒失敗沒有其他實例可接流量 | v1 接受；比持續回 500 更明確 |
+| 存活無法偵測 run 執行緒被占滿 | 存活只表示 HTTP 能回應 | 接受；以並行上限與 metric 觀察 |
 
 ## 可觀測性
 
@@ -45,6 +57,7 @@
 ## 安全
 
 - 管理與上傳 API 需認證與授權（[ADR-012](adr/ADR-012-api-authentication.md)）。
+- Console 的 token 保存與 XSS 原則見 [ADR-017](adr/ADR-017-console-websocket-and-token.md)：token 不放進網址、不使用 localStorage、pipeline 內容與 log 以純文字渲染；傳輸機密性由 TLS 終止於入口負責。
 - Webhook 密鑰與 API token 不得出現在 log、trace 或錯誤訊息；資料庫只保存 webhook 密鑰的雜湊。
 - 執行 unsafe pipeline 需有該 pipeline 的明確授權，並記錄在 run 上。
 

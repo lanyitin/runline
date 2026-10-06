@@ -19,9 +19,63 @@
 
 **未預期的伺服器錯誤。** 任何未預期的失敗回應 500，本文為 `{"error": "internal_error", "message": "...", "errorId": "<識別碼>"}`，不含例外的原因、堆疊、SQL 或設定值。完整原因寫在 log 中，以 `errorId` 可查到對應的那一筆（log 訊息為 `Unexpected error <errorId> while ...`，附例外）。回報問題時請提供 `errorId`。Run 記錄的 `failure`（見 `GET /api/v1/runs/{runId}`）是 pipeline 自己的失敗內容，不屬於這一類。Webhook 入口的 500 另有固定本文，見該端點。
 
-**關閉中。** Engine 收到終止訊號後不再接受新請求：新的請求回應 503 `shutting_down`（並關閉連線），進行中的請求在寬限時間（`RUNLINE_SHUTDOWN_GRACE_SECONDS`，預設 30 秒）內完成；超過寬限時間仍未完成的請求被中止。已開啟的 WebSocket 不計入進行中的請求，關閉時一併中斷。呼叫端遇到 503 `shutting_down` 時，稍後重試即可。
+**關閉中。** Engine 收到終止訊號後不再接受新請求：新的請求回應 503 `shutting_down`（並關閉連線），進行中的請求在寬限時間（`RUNLINE_SHUTDOWN_GRACE_SECONDS`，預設 30 秒）內完成；超過寬限時間仍未完成的請求被中止。已開啟的 WebSocket 不計入進行中的請求，關閉時一併中斷。呼叫端遇到 503 `shutting_down` 時，稍後重試即可。兩個探測端點（`GET /api/v1/health/live`、`GET /api/v1/health/ready`）是例外：關閉期間 `live` 仍回 200，`ready` 回 503 且 `status` 為 `shutting_down`，兩者都不關閉連線（[ADR-018](adr/ADR-018-liveness-readiness-probes.md)）。
+
+**路徑範圍。** `/api` 之下不存在的路徑一律回 404，不回傳 Console 的入口頁（[ADR-015](adr/ADR-015-console-frontend.md)）。
+
+**版本資訊與登入。** `GET /api/v1/info` 免認證；`GET /api/v1/system` 需要 Bearer，Console 以它驗證 token 並取得呼叫者的名稱與角色（[ADR-016](adr/ADR-016-engine-build-info-endpoint.md)）。
 
 **時間。** 一律為 ISO-8601 UTC 字串。
+
+## 版本資訊與探測
+
+### `GET /api/v1/info`
+
+認證：無
+
+Engine 的版本資訊，供 Console 的登入頁與每頁的 Engine 標示使用。只含最小集合，不查詢資料庫，回應不快取。本文：
+
+| 欄位 | 說明 |
+|---|---|
+| `version` | Engine 版本 |
+| `commitHash` | 建置所依據的完整 40 字元 commit hash；取不到時為 `unknown` |
+| `dirty` | 建置時工作樹是否有未提交變更（布林）；取不到 git 資訊時為 true |
+
+### `GET /api/v1/system`
+
+認證：Bearer（developer）
+
+Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 token 無效。本文：
+
+| 欄位 | 說明 |
+|---|---|
+| `version`、`commitHash`、`dirty` | 同 `GET /api/v1/info` |
+| `buildTime` | 建置所依據的 commit 的時間（ISO-8601 UTC），不是建置當下的時鐘；同一 commit 的值固定 |
+| `jdk` | 執行環境的 JDK 版本 |
+| `startedAt`、`uptimeSeconds` | Engine 啟動的時間與已運行的秒數 |
+| `allowListVersion` | 目前生效的白名單版本（文字） |
+| `caller` | `{name, role}`：token 對應的名稱與角色（`developer` 或 `admin`） |
+
+### `GET /api/v1/health/live`
+
+認證：無
+
+存活探測，供部署平台使用（[ADR-018](adr/ADR-018-liveness-readiness-probes.md)）。Engine 的行程能回應請求即為 200，本文 `{"status": "up"}`。不檢查資料庫、目錄或 run，不因資料庫故障而失敗；優雅關閉期間仍回 200。回應不快取，不含版本與組態。
+
+### `GET /api/v1/health/ready`
+
+認證：無
+
+就緒探測，供部署平台決定是否導流。全部檢查通過回 200 `{"status": "ready"}`；任何一項未通過回 503，本文 `{"status": "not_ready", "checks": {...}}`。`checks` 的鍵固定為 `startup`、`database`、`runtime`、`shutdown`，值為 `ok` 或 `failed`（`startup` 另可為 `pending`），不含原因細節。
+
+| 檢查 | 通過條件 |
+|---|---|
+| `startup` | 啟動階段已完成（遷移確認、執行期目錄檢查、進行中 run 的中斷標記、待處理觸發的啟動處理、排程器啟動）|
+| `database` | PostgreSQL 在短逾時內可連線並完成輕量查詢（結果可短暫快取）|
+| `runtime` | run 執行期目錄仍存在且必要的部分齊全 |
+| `shutdown` | Engine 未處於關閉流程中 |
+
+收到終止訊號後立即轉為 503，`status` 為 `shutting_down`，早於寬限時間開始。就緒只影響導流，不停止 run 或排程。
 
 ## 上傳與查詢
 
@@ -137,7 +191,7 @@ Run 的欄位：`runId`、`state`、`contentHash`、`pipeline`、`className`、`
 
 認證：Bearer（developer）
 
-WebSocket。先以一般 HTTP 升級（需要 Bearer 標頭；不可見的 run 在升級前就回 404 `run_not_found`），之後每個 log 項目是一個 JSON 文字框 `{seq, at, stream, line}`，直到 run 結束且所有項目都送出，Engine 以正常代碼（1000，原因 `run ended`）關閉連線。查詢參數 `after` 指定從哪個序號之後開始。串流途中發生未預期的錯誤時，以 1011 關閉，原因為 `internal error <errorId>`，不含內部原因。串流途中該 run 因超過保留期限被清理時，已送出的項目維持完整、連續，連線以正常代碼關閉，不以錯誤收場；之後該 run 回 404 `run_not_found`。
+WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設定標頭，Console 不使用此端點，改以 `GET /api/v1/runs/{runId}/log?after=` 輪詢（[ADR-017](adr/ADR-017-console-websocket-and-token.md)）；本端點的契約不變。先以一般 HTTP 升級（需要 Bearer 標頭；不可見的 run 在升級前就回 404 `run_not_found`），之後每個 log 項目是一個 JSON 文字框 `{seq, at, stream, line}`，直到 run 結束且所有項目都送出，Engine 以正常代碼（1000，原因 `run ended`）關閉連線。查詢參數 `after` 指定從哪個序號之後開始。串流途中發生未預期的錯誤時，以 1011 關閉，原因為 `internal error <errorId>`，不含內部原因。串流途中該 run 因超過保留期限被清理時，已送出的項目維持完整、連續，連線以正常代碼關閉，不以錯誤收場；之後該 run 回 404 `run_not_found`。
 
 ### `PUT /api/v1/definitions/{contentHash}/{pipeline}/unsafe-execution`
 
@@ -348,5 +402,17 @@ Swagger UI 讀取的 OpenAPI 文件。目前是範本留下的空文件，並未
 認證：無
 
 Swagger UI 附帶的頁面。
+
+### Console 的靜態檔與入口頁
+
+Engine 在 `/` 提供 Console（Svelte 靜態 SPA，隨 `engine.jar` 發佈，[ADR-015](adr/ADR-015-console-frontend.md)）。這些路由免認證（不含機密，資料一律經 Bearer API 取得），不保證穩定。規則：
+
+- `GET /` 回傳入口頁；雜湊命名的資源檔在固定前綴下，可長期快取；入口頁不快取。
+- `GET` 請求對應到實際存在的資源檔時回傳該檔；對應不到、不在 `/api` 與 `/openapi` 之下、且不像資源檔時，回傳入口頁（200），由前端路由處理。
+- `/api/**` 與 `/openapi/**` 先於靜態檔與 fallback；`/api` 下不存在的路徑回 404。非 GET 請求不適用 fallback。
+- 回應帶限制為同源的內容安全政策、禁止被嵌入框架與 `nosniff` 標頭。Engine 不啟用 CORS。
+- 前端建置被略過的本機建置中，`/` 回 404，API 不受影響。
+
+這一組路由在 `ApiDocumentationTest` 的處置見 [WI-31](work-items/WI-31-frontend-build-and-static-serving.md)。
 
 Engine 沒有 HTTP 關閉端點：關閉只由終止訊號觸發（[04](04-deployment.md)、[ADR-012](adr/ADR-012-api-authentication.md)）。範本遺留的回聲 WebSocket、範例 JSON 與關閉端點已移除，對這些路徑的請求得到 404。

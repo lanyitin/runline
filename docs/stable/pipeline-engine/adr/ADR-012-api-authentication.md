@@ -1,6 +1,6 @@
 # ADR-012 管理與上傳 API 以設定檔提供的 token 認證
 
-狀態：已核可（2026-10-05）。回答：上傳與管理 API 如何辨識呼叫者與其角色，以及哪些端點不需要認證。
+狀態：已核可（2026-10-05）。免認證端點清單由 [ADR-015](ADR-015-console-frontend.md)、[ADR-016](ADR-016-engine-build-info-endpoint.md)、[ADR-018](ADR-018-liveness-readiness-probes.md) 補充。回答：上傳與管理 API 如何辨識呼叫者與其角色，以及哪些端點不需要認證。
 
 ## 背景
 
@@ -21,6 +21,9 @@ Engine 的上傳 API（[WI-06](../work-items/WI-06-upload-and-discovery.md)）�
 - 不需要 Bearer token 的端點只有：
   - API 文件與其 schema（Swagger／OpenAPI）。
   - Webhook 入口，以 per-trigger 密鑰在專用標頭認證。
+  - `GET /api/v1/info`：只回傳版本、完整 commit hash 與是否有未提交變更（ADR-016）。
+  - 存活與就緒探測 `GET /api/v1/health/live`、`GET /api/v1/health/ready`（ADR-018）。
+  - Console 的靜態檔與入口頁（ADR-015）：不含機密，資料一律經 Bearer API 取得。
 - Engine 的關閉不經由 HTTP：關閉由終止訊號觸發（[04](../04-deployment.md)）。範本遺留的關閉端點、回聲 WebSocket 與範例 JSON 端點被移除，不屬於產品的對外介面。
 - 任何新增的端點預設需要認證；不需要認證的端點須在本 ADR 明列。
 
@@ -40,6 +43,8 @@ Engine 的上傳 API（[WI-06](../work-items/WI-06-upload-and-discovery.md)）�
 - 日誌與稽核欄位使用 token 對應的名稱，不使用 token 本身。
 - 需要自助發放、撤銷或大量使用者時，另開 ADR 替換 provider。
 - 測試以列舉所有已註冊的路由驗證：除上述明列的端點外，無 token 一律被拒絕。
+- 呼叫者的身分與角色由 `GET /api/v1/system`（Bearer）回報（ADR-016），Console 以它驗證 token。
+- Token 登入是 Console 的過渡機制；日後 OIDC 與帳號密碼登入須另開 ADR 修訂本 ADR（[ADR-017](ADR-017-console-websocket-and-token.md)）。
 
 ## 待確認問題
 

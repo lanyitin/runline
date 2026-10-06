@@ -28,6 +28,10 @@
 | API 認證 | 上傳與管理 API 以設定檔提供的 Bearer token 認證，兩種角色（開發人員、管理員），provider 可替換 | [ADR-012](adr/ADR-012-api-authentication.md) |
 | 網路與行程比對 | 網路以主機名稱（不分大小寫、無萬用字元、不比埠號）、行程以指令第一個元素完全比對；空清單全拒絕 | [ADR-010](adr/ADR-010-access-allow-list-matching.md) |
 | 共享資源 | 管理員在 Engine 定義命名資源與容量；pipeline 宣告，run 初始化階段整體取得，鎖由 Engine 持有 | [ADR-007](adr/ADR-007-shared-resources.md) |
+| Console 前端 | Svelte 靜態 SPA 打包進 engine.jar，由 Engine 在 `/` 提供；同源、不啟用 CORS；首版 zh-TW 與 en | [ADR-015](adr/ADR-015-console-frontend.md) |
+| 版本與 commit hash | 免認證的 `GET /api/v1/info` 公開版本與完整 hash；詳細資訊與呼叫者身分在 Bearer 的 `GET /api/v1/system`；建置時注入，發佈 jar 位元組級可重現 | [ADR-016](adr/ADR-016-engine-build-info-endpoint.md) |
+| Console 的 log 與 token | log 以輪詢顯示（不用 WebSocket）；token 存 sessionStorage 並以 BroadcastChannel 跨分頁同步；登入與憑證種類脫鉤，token 登入為過渡機制 | [ADR-017](adr/ADR-017-console-websocket-and-token.md) |
+| 探測端點 | 免認證的存活與就緒探測；存活不檢查依賴，就緒檢查啟動、資料庫、執行期目錄與關閉狀態；Docker 與 systemd 皆支援 | [ADR-018](adr/ADR-018-liveness-readiness-probes.md) |
 
 ## 元件關係
 
@@ -56,10 +60,10 @@ flowchart LR
 | 1 需求摘要 | [01-requirements.md](01-requirements.md) | 已核可 |
 | 2 現況觀察 | [02-current-state.md](02-current-state.md) | 已核可 |
 | 3 方案比較 | [03-options.md](03-options.md) | 已核可 |
-| 4 部署架構 | [04-deployment.md](04-deployment.md) | 已核可 |
+| 4 部署架構 | [04-deployment.md](04-deployment.md)（平台指南：[Docker](04-deployment-docker.md)、[systemd](04-deployment-systemd.md)） | 已核可 |
 | 5 IPC 模型 | [05-ipc.md](05-ipc.md) | 已核可 |
 | 6 資料模型 | [06-data-model.md](06-data-model.md) | 已核可 |
 | 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
 | 8 API | [08-api.md](08-api.md) | 已核可 |
-| 決策記錄（ADR-001 至 014） | [adr/](adr/) | 已核可 |
+| 決策記錄（ADR-001 至 018） | [adr/](adr/) | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |

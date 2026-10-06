@@ -8,6 +8,8 @@ import dev.lawlan.runline.engine.auth.TokenAuthenticator
 import dev.lawlan.runline.engine.config.EngineConfig
 import dev.lawlan.runline.engine.config.RunRuntime
 import dev.lawlan.runline.engine.db.dataSourceOf
+import dev.lawlan.runline.engine.info.BuildInfo
+import dev.lawlan.runline.engine.info.SystemStatus
 import dev.lawlan.runline.engine.resource.*
 import dev.lawlan.runline.engine.retention.*
 import dev.lawlan.runline.engine.run.*
@@ -34,6 +36,7 @@ fun Application.configureDependencyInjection() {
     provide<OpenTelemetry> {
       getOpenTelemetry(serviceName = resolve<EngineConfig>().telemetry.serviceName)
     }
+    provide<BuildInfo> { BuildInfo.load() }
     provide<TokenAuthenticator> { ConfiguredTokenAuthenticator(resolve<EngineConfig>().tokens) }
     provide<AllowListStore> { PostgresAllowListStore(resolve<DataSource>()) }
     provide<AllowListProvider> { DatabaseAllowListProvider(resolve<AllowListStore>()) }
@@ -46,6 +49,9 @@ fun Application.configureDependencyInjection() {
           resolve<AllowListTelemetry>(),
           Path.of(System.getProperty("java.io.tmpdir")),
       )
+    }
+    provide<SystemStatus> {
+      SystemStatus(resolve<BuildInfo>(), resolve<Clock>(), resolve<AllowListStore>())
     }
     provide<DataSource> { dataSourceOf(resolve<EngineConfig>().database) }
     provide<ArtifactStore> { PostgresArtifactStore(resolve<DataSource>()) }

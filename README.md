@@ -89,6 +89,13 @@ An unexpected failure is answered 500 `internal_error` with a generic message an
 
 Database migrations are a separate one-off process (`./gradlew :engine:migrate`, or `java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt`); the Engine only checks that the schema is current. `./gradlew :engine:packagedTest` starts the packaged Engine as its own process against a real PostgreSQL (Docker needed) and checks, among other things, that a run cannot see Engine classes; it is part of `:engine:check`.
 
+## Build info and release builds (WI-28, ADR-016)
+The build writes what it knows about itself into `engine.jar` (resource `runline-build-info.properties`, made by `gradle/build-info.gradle.kts`): the project version, the full hash of `HEAD`, whether the working tree is dirty (a tracked file changed, or an untracked file that is not ignored; ignored build output does not count), and the time of the `HEAD` commit (`buildTime`, UTC; never the clock of the build). Nothing else goes in: no host, user, path or environment, so the same commit gives the same bytes. Without git information (no repository, no commit yet, git not installed) the hash is `unknown`, `dirty` is true and `buildTime` is `1970-01-01T00:00:00Z`. The task `generateBuildInfo` rewrites the file only when one of these values changes, so nothing after it is redone for the same `HEAD` and tree state.
+
+`GET /api/v1/info` (no token: `version`, `commitHash`, `dirty`; reads only the jar's resource, so it answers when the database does not) and `GET /api/v1/system` (developer or administrator token: the same plus `buildTime`, `jdk`, `startedAt`, `uptimeSeconds`, `allowListVersion` and `caller` with the name and role of the token) are described in [docs/stable/pipeline-engine/08-api.md](docs/stable/pipeline-engine/08-api.md). Neither is cached; neither holds a token, a path, a host name or any configuration value.
+
+**Release flag.** `-Prunline.release=true` (a Gradle property, for example `./gradlew :engine:engineDistribution -Prunline.release=true`) marks a release build: when the hash is `unknown` or the working tree is dirty, `generateBuildInfo`, and so every build that needs it, fails and says why. An ordinary build is not affected. Nothing deployed should be built without it.
+
 ## Shared resources (WI-09, ADR-007)
 Administrators define named resources with a capacity (1 is mutual exclusion) through `/api/v1/resources` (administrator token only; developers get 403, even to look). A pipeline declares the names it needs in its metadata; the Engine takes all of them together, with a concurrency slot, before the pipeline body starts, and gives them back when the run ends in any way. A run that waits holds no slot and waits in first-in-first-out order. Definitions (name, capacity, enabled, who changed them) are in PostgreSQL (migration `V3__shared_resource.sql`); holders and waiters live in the Engine's memory only and are gone after a restart, when unfinished runs become interrupted anyway.
 
@@ -163,3 +170,11 @@ Kotlin sources (`main` and `test` of `core`, `runner`, `analyzer`, `devkit`, `en
 | `./gradlew :core:ktfmtFormat` | Format a single module |
 
 `ktfmtCheck` is intentionally not wired into `check` or `build`; run it explicitly. The commands are identical in the devcontainer and on a local machine (JDK 25 via the Gradle toolchain, no extra installation). The first run needs network access to resolve the plugin and ktfmt from the Gradle plugin portal / Maven Central; if they cannot be resolved the build fails explicitly.
+
+## Node toolchain (WI-30, ADR-015)
+The Console frontend is built with Node. Node is a build-time tool only: it is not part of the runtime environment or of any release artifact.
+
+- **Version pin:** the version is written once, in `.node-version` at the repository root (an exact version, currently the Node 24 LTS line). Both the devcontainer and `mise` read this file; to change the version, edit only this file (then rebuild the devcontainer).
+- **Devcontainer:** `.devcontainer/Dockerfile` installs exactly that version from nodejs.org (checksum-verified) on top of the JDK 25 image. After a rebuild, `node` and `npm` are on the `PATH`; nothing needs to be installed by hand.
+- **Local machine (no devcontainer):** install [mise](https://mise.jdx.dev) and run `mise install` in the repository root. `mise` picks up `.node-version` when the idiomatic version file setting is enabled for node; `mise.toml` is a personal, untracked file, so add this to yours once: `[settings]` / `idiomatic_version_file_enable_tools = ["node"]` (or run `mise settings add idiomatic_version_file_enable_tools node`).
+- **Verify:** `node --version` must print the version in `.node-version`; `npm --version` must also work. In a mise-managed shell, `mise ls --current` lists node with the source `.node-version`.

@@ -22,6 +22,7 @@ ktor:
       - dev.lawlan.runline.engine.WebsocketsKt.configureWebsockets
       - dev.lawlan.runline.engine.ServerOpenTelemetryKt.configureOpenTelemetry
       - dev.lawlan.runline.engine.RunRecoveryKt.configureRunRecovery
+      - dev.lawlan.runline.engine.InfoRoutesKt.configureInfoRoutes
       - dev.lawlan.runline.engine.ArtifactRoutesKt.configureArtifactRoutes
       - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
       - dev.lawlan.runline.engine.ResourceRoutesKt.configureResourceRoutes

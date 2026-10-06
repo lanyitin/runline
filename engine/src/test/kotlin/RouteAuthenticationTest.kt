@@ -22,6 +22,7 @@ class RouteAuthenticationTest {
   private fun exempt(path: String): Boolean =
       path == "/openapi" ||
           path.startsWith("/openapi/") || // API documentation and its schema
+          path == "/api/v1/info" || // the version and hash, for the login page (ADR-016)
           path.startsWith("/api/v1/webhooks/") // per-trigger secret in its own header
 
   private fun ApplicationTestBuilder.registered(): List<Registered> {

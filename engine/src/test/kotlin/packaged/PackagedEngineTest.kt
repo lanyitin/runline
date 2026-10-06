@@ -288,6 +288,28 @@ class PackagedEngineTest {
   }
 
   @Test
+  fun `the packaged Engine reports the commit it was built from, to anyone and with a token`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    startEngine(database, runtime)
+    val head =
+        ProcessBuilder("git", "rev-parse", "HEAD")
+            .directory(Path.of(System.getProperty("runline.repoRoot")).toFile())
+            .start()
+            .let { it.inputStream.bufferedReader().readText().trim() }
+
+    val info = get("/api/v1/info", token = null)
+    val system = get("/api/v1/system", ALICE)
+
+    assertEquals(200, info.statusCode(), info.body())
+    assertEquals(head, json(info)["commitHash"]!!.jsonPrimitive.content)
+    assertEquals(200, system.statusCode(), system.body())
+    assertEquals(head, json(system)["commitHash"]!!.jsonPrimitive.content)
+    assertEquals("alice", json(system)["caller"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+  }
+
+  @Test
   fun `the packaged Engine refuses a run runtime directory that holds the Engine`() {
     val database = PostgresTestContainer.newDatabase()
     migrate(database, dist.resolve("run-runtime"))

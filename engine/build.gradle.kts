@@ -41,6 +41,12 @@ dependencies {
   testImplementation(libs.testcontainers.postgresql)
 }
 
+// What the Engine knows about its own build, in a resource of the jar (WI-28). The release flag is
+// `-Prunline.release=true` (see the README).
+apply(from = rootProject.file("gradle/build-info.gradle.kts"))
+
+tasks.processResources { from(tasks.named("generateBuildInfo")) }
+
 tasks.test {
   useJUnitPlatform()
   // Runs against the packaged Engine have their own task (packagedTest).
@@ -105,6 +111,16 @@ val packagedTest by
       useJUnitPlatform()
       filter { includeTestsMatching("*.packaged.*") }
       dependsOn(engineDistribution)
+      // The build info is checked by building real projects with the script the Engine applies.
+      systemProperty(
+          "runline.buildInfoScript",
+          rootProject.file("gradle/build-info.gradle.kts").absolutePath,
+      )
+      systemProperty("runline.repoRoot", rootProject.projectDir.absolutePath)
+      systemProperty("runline.gradlew", rootProject.file("gradlew").absolutePath)
+      inputs
+          .file(rootProject.file("gradle/build-info.gradle.kts"))
+          .withPropertyName("buildInfoScript")
       val dist = layout.buildDirectory.dir("engine-dist")
       val launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
       doFirst {

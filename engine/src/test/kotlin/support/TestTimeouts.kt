@@ -46,6 +46,9 @@ object TestTimeouts {
   /** How long a process gets to die after it is killed, which only a stuck kernel prevents. */
   val processKill: Duration = seconds(10)
 
+  /** A Gradle build of a small project of a test's own, in a process of its own. */
+  val gradleBuild: Duration = seconds(180)
+
   /** A state that the system under test reaches by itself: a run's state, a file, a span. */
   val condition: Duration = seconds(60)
 

@@ -2,7 +2,9 @@
 # Services are located purely through environment variables; see devcontainer.json.
 services:
   workspace:
-    image: mcr.microsoft.com/devcontainers/java:1-25-bookworm
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
     volumes:
       - ..:/workspaces/runline:cached
     command: sleep infinity

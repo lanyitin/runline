@@ -125,6 +125,21 @@ The build writes what it knows about itself into `engine.jar` (resource `runline
 
 **Release flag.** `-Prunline.release=true` (a Gradle property, for example `./gradlew :engine:engineDistribution -Prunline.release=true`) marks a release build: when the hash is `unknown` or the working tree is dirty, `generateBuildInfo`, and so every build that needs it, fails and says why. An ordinary build is not affected. Nothing deployed should be built without it.
 
+## Reproducible release builds (WI-32, ADR-016)
+A release build of the same commit gives the same bytes: `engine.jar` and every jar of `engineDistribution` have the same SHA-256 each time. What makes it so: the build info holds only values of the commit (above); Gradle writes the jars with sorted entries, a fixed entry time and fixed permissions; the Console is built from `package-lock.json` (`npm ci`) with the Node of `.node-version`, and Vite names files by the hash of their content and writes no time or path.
+
+**The fixed build platform** (a proposal, to be confirmed by the architect): the image of `release/Dockerfile`, run as **linux/amd64** (on an Apple Silicon machine that is emulation, so it is slow). It is Eclipse Temurin 25 (the project's JDK) pinned by digest, plus exactly the Node of `.node-version` (checksum-verified), git and nothing else that matters to the jars. The guarantee is given only there; the same commit built on another operating system or CPU architecture is expected to give the same bytes but is not guaranteed.
+
+**Verify** (needs Docker; with colima set `DOCKER_HOST` as in `dev/README.md`):
+
+```
+./gradlew :engine:verifyReproducibleRelease
+```
+
+It refuses a working tree with changes (HEAD is what is verified), builds the platform image, packs HEAD as a git bundle, and has the container build it twice with `-Prunline.release=true`, each time from a fresh clone and a fresh npm cache (no build output, `node_modules` or frontend cache of the first build is left for the second). `compareReleaseBuilds` then prints the SHA-256 of every jar and fails, naming each jar that differs or that only one build made. The jars of both builds stay in `engine/build/reproducibility/{first,second}`. It is not part of `check` and no CI runs it. The container needs the network for Maven Central and npm; a run took about 16 minutes on an Apple Silicon machine under emulation (about 10 and 6 minutes for the two builds). Other platforms are not guaranteed, but measured once: two release builds on macOS arm64 (JDK 25 from the Gradle toolchain, Node 24.21.0) gave the same SHA-256 for all five jars as the platform did.
+
+To build a release yourself: a clean checkout of a commit, then `./gradlew :engine:engineDistribution -Prunline.release=true`. To get the guaranteed bytes, do it in the platform (`release/reproduce.sh` shows how).
+
 ## Shared resources (WI-09, ADR-007)
 Administrators define named resources with a capacity (1 is mutual exclusion) through `/api/v1/resources` (administrator token only; developers get 403, even to look). A pipeline declares the names it needs in its metadata; the Engine takes all of them together, with a concurrency slot, before the pipeline body starts, and gives them back when the run ends in any way. A run that waits holds no slot and waits in first-in-first-out order. Definitions (name, capacity, enabled, who changed them) are in PostgreSQL (migration `V3__shared_resource.sql`); holders and waiters live in the Engine's memory only and are gone after a restart, when unfinished runs become interrupted anyway.
 

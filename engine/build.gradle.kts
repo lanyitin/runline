@@ -131,12 +131,20 @@ val packagedTest by
           "runline.consoleScript",
           rootProject.file("gradle/console-build.gradle.kts").absolutePath,
       )
+      // The comparison of two release builds is checked with the script the Engine applies (WI-32).
+      systemProperty(
+          "runline.reproducibleReleaseScript",
+          rootProject.file("gradle/reproducible-release.gradle.kts").absolutePath,
+      )
       systemProperty("runline.consoleDir", rootProject.file("console").absolutePath)
       systemProperty("runline.repoRoot", rootProject.projectDir.absolutePath)
       systemProperty("runline.gradlew", rootProject.file("gradlew").absolutePath)
       inputs
           .file(rootProject.file("gradle/build-info.gradle.kts"))
           .withPropertyName("buildInfoScript")
+      inputs
+          .file(rootProject.file("gradle/reproducible-release.gradle.kts"))
+          .withPropertyName("reproducibleReleaseScript")
       inputs
           .file(rootProject.file("gradle/console-build.gradle.kts"))
           .withPropertyName("consoleScript")
@@ -153,3 +161,7 @@ val packagedTest by
     }
 
 tasks.check { dependsOn(packagedTest) }
+
+// Verification that a release build is byte-reproducible, on the fixed build platform (WI-32,
+// ADR-016): `./gradlew :engine:verifyReproducibleRelease`. Not part of check.
+apply(from = rootProject.file("gradle/reproducible-release.gradle.kts"))

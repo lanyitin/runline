@@ -2,13 +2,20 @@
 // The endpoint needs no token, so the Console can show it before anyone has signed in. It is the
 // only call of the Console that is made without the authentication boundary (WI-34).
 
+import type { SystemDetails } from './system.ts';
+
 export interface EngineInfo {
   version: string;
   /** The full 40 character hash, or `unknown`. */
   commitHash: string;
   /** Whether the working tree had uncommitted changes when the Engine was built. */
   dirty: boolean;
+  /** The details of `GET /api/v1/system`: only there once someone is signed in. */
+  system?: SystemSnapshot;
 }
+
+/** The details of the Engine's system, with the moment they were read (`Date.now()`). */
+export type SystemSnapshot = SystemDetails & { receivedAt: number };
 
 /** The Engine did not give its info: not reachable, not in time, an error status, or nonsense. */
 export class EngineInfoError extends Error {

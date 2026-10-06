@@ -40,6 +40,14 @@ export async function watch(page: Page, origin: string): Promise<Problems> {
   return problems;
 }
 
+/** Everything the page writes to its console, whatever the level: for what must never be in it. */
+export function consoleLog(page: Page): string[] {
+  const lines: string[] = [];
+  page.on('console', (message) => lines.push(message.text()));
+  page.on('pageerror', (error) => lines.push(String(error)));
+  return lines;
+}
+
 export const violations = (page: Page): Promise<string[]> =>
   page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? []);
 
@@ -56,3 +64,21 @@ export async function newContext(
   }
   return context;
 }
+
+/** Types [token] into the sign-in of the token method and sends it. */
+export async function signInWith(page: Page, token: string): Promise<void> {
+  await page.locator('form input').fill(token);
+  await page.locator('form button[type="submit"]').click();
+}
+
+/** The tab of the Console that has opened, signed in or at the sign-in: waits for either. */
+export async function settled(page: Page): Promise<'signed-in' | 'sign-in'> {
+  const shell = page.locator('aside nav');
+  const form = page.locator('form input');
+  await shell.or(form).first().waitFor({ timeout: 10_000 });
+  return (await shell.count()) > 0 ? 'signed-in' : 'sign-in';
+}
+
+/** What the tab keeps of its session: the content of its sessionStorage, as a record. */
+export const sessionContent = (page: Page): Promise<Record<string, string>> =>
+  page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)));

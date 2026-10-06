@@ -129,3 +129,116 @@ describe('the details of the Engine chip', () => {
     );
   });
 });
+
+describe('what the details of the Engine chip hold', () => {
+  const opened = async (identity?: { name: string; role: 'developer' | 'admin' }, languages = ['en']) => {
+    app = await createTestApp({ identity, languages });
+    const view = app.mount(EngineChip);
+    await ready(view);
+    if (identity) await vi.waitFor(() => expect(view.querySelector('button.toggle')).not.toBeNull());
+    view.querySelector<HTMLButtonElement>('button.toggle')!.click();
+    flushSync();
+    return view;
+  };
+
+  test('before anyone has signed in: the public fields only, and no word of the system', async () => {
+    const view = await opened();
+    const details = view.querySelector('[role="dialog"]')!.textContent!;
+
+    expect(details).toContain('Version');
+    expect(details).toContain(FULL_HASH);
+    expect(details).not.toContain('JDK');
+    expect(details).not.toContain('Uptime');
+    expect(details).not.toContain('Build time');
+    expect(details).not.toContain('Allow-list version');
+  });
+
+  test('once signed in: the build time with what it means, the JDK, the uptime, the allow-list version, the address', async () => {
+    const view = await opened({ name: 'Ada', role: 'developer' });
+    await vi.waitFor(() =>
+      expect(view.querySelector('[role="dialog"]')!.textContent).toContain('25.0.4+1-LTS'),
+    );
+    const details = view.querySelector('[role="dialog"]')!;
+
+    expect(details.textContent).toContain('Build time');
+    expect(details.textContent).toContain('2026');
+    expect(details.textContent).toContain('not the time it was built');
+    expect(details.querySelector('time')!.getAttribute('datetime')).toBe('2026-10-05T08:30:00Z');
+    expect(details.textContent).toContain('Uptime');
+    expect(details.textContent).toMatch(/1d\s*3h/);
+    expect(details.textContent).toContain('Allow-list version');
+    expect(details.textContent).toContain('3');
+    expect(details.textContent).toContain(location.origin);
+    expect(details.textContent).toContain(FULL_HASH);
+  });
+
+  test('keeps open while the details of the system arrive after signing in', async () => {
+    const view = await opened();
+    app.engine.callers = [{ name: 'Ada', role: 'developer', token: 'tok-late' }];
+
+    await app.session.signIn('tok-late');
+
+    await vi.waitFor(() =>
+      expect(view.querySelector('[role="dialog"]')!.textContent).toContain('JDK'),
+    );
+  });
+
+  test('in the language of the screen', async () => {
+    const view = await opened({ name: 'Ada', role: 'developer' }, ['zh-TW']);
+    await vi.waitFor(() => expect(view.querySelector('[role="dialog"]')!.textContent).toContain('建置時間'));
+    expect(view.querySelector('[role="dialog"]')!.textContent).toContain('運行時間');
+  });
+});
+
+describe('the status dot of the Engine chip', () => {
+  const dotOf = (view: HTMLElement) => view.querySelector('.toggle .dot')!.className;
+  const systemRead = () =>
+    vi.waitFor(() =>
+      expect(app.context.engineInfo.state).toMatchObject({
+        status: 'ready',
+        info: { system: expect.anything() },
+      }),
+    );
+
+  test('is green and silent while the last call to the Engine got an answer', async () => {
+    app = await createTestApp({ identity: { name: 'Ada', role: 'developer' } });
+    const view = app.mount(EngineChip);
+    await ready(view);
+
+    expect(dotOf(view)).toContain('success');
+    expect(view.textContent).not.toContain('No connection');
+  });
+
+  test('turns red and says so in words when the last call to the Engine got none, and back with the next answer', async () => {
+    app = await createTestApp({ identity: { name: 'Ada', role: 'developer' } });
+    const view = app.mount(EngineChip);
+    await ready(view);
+    await systemRead();
+
+    app.engine.mode = 'internal-error';
+    await app.session.request('/api/v1/system');
+    flushSync();
+    expect(dotOf(view)).toContain('danger');
+    expect(view.textContent).toContain('No connection');
+
+    app.engine.mode = 'normal';
+    await app.session.request('/api/v1/system');
+    flushSync();
+    expect(dotOf(view)).toContain('success');
+    expect(view.textContent).not.toContain('No connection');
+  });
+
+  test('asks nothing of the Engine to tell: no call of its own', async () => {
+    app = await createTestApp({ identity: { name: 'Ada', role: 'developer' } });
+    const view = app.mount(EngineChip);
+    await ready(view);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    app.engine.log.length = 0;
+
+    app.context.connection.record(false);
+    flushSync();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(app.engine.log).toEqual([]);
+  });
+});

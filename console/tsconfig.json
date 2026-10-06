@@ -21,7 +21,6 @@
     "vitest.apidoc.config.ts",
     "vitest.e2e.config.ts",
     "checks/**/*.ts",
-    "preview/**/*.ts",
     "e2e/**/*.ts"
   ]
 }

@@ -6,14 +6,14 @@
   import Breadcrumb, { type Crumb } from './Breadcrumb.svelte';
 
   // The top bar of a signed-in user: where the user is, the language, the Engine's version (wide
-  // screens; the sidebar has it always), and who is signed in, with the role in words.
+  // screens; the sidebar has it always), and who is signed in, with the role in words, and the way to sign out.
   interface Props {
     crumbs: Crumb[];
     identity: Identity;
   }
   let { crumbs, identity }: Props = $props();
 
-  const { i18n } = useApp();
+  const { i18n, session } = useApp();
 </script>
 
 <header class="topbar">
@@ -25,6 +25,9 @@
       <span class="name">{identity.name}</span>
       <span class="role {identity.role}">{i18n.t(`role.${identity.role}`)}</span>
     </div>
+    <button class="sign-out" type="button" onclick={() => session.signOut()}>
+      {i18n.t('user.signOut')}
+    </button>
   </div>
 </header>
 
@@ -69,6 +72,19 @@
   .role.admin {
     background: var(--indigo-tint);
     color: var(--indigo-text);
+  }
+  .sign-out {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+  .sign-out:hover {
+    background: var(--surface-subtle);
   }
   /* The sidebar always shows the Engine; the top bar repeats it where there is room. */
   @media (max-width: 1100px) {

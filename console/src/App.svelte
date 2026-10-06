@@ -3,17 +3,18 @@
   import { useApp } from './app/context';
   import { matchRoute, type AppRoute } from './app/routes';
   import Forbidden from './pages/Forbidden.svelte';
+  import EnginePage from './pages/EnginePage.svelte';
   import NotFound from './pages/NotFound.svelte';
   import PagePlaceholder from './pages/PagePlaceholder.svelte';
-  import SignInPending from './pages/SignInPending.svelte';
+  import SignIn from './pages/SignIn.svelte';
   import AppShell from './shell/AppShell.svelte';
   import type { Crumb } from './shell/Breadcrumb.svelte';
   import PublicLayout from './shell/PublicLayout.svelte';
 
-  const { i18n, identity, router } = useApp();
+  const { i18n, session, router } = useApp();
 
   const route = $derived<AppRoute | null>(matchRoute(router.path));
-  const signedIn = $derived(identity.state.status === 'authenticated' ? identity.state.identity : null);
+  const signedIn = $derived(session.state.status === 'authenticated' ? session.state.identity : null);
   const allowed = $derived(route !== null && (!route.adminOnly || signedIn?.role === 'admin'));
 
   const title = $derived.by(() => {
@@ -50,12 +51,14 @@
       <NotFound />
     {:else if !allowed}
       <Forbidden role={signedIn.role} />
+    {:else if route.id === 'engine'}
+      <EnginePage />
     {:else}
       <PagePlaceholder id={route.id} />
     {/if}
   </AppShell>
 {:else}
   <PublicLayout>
-    <SignInPending />
+    <SignIn />
   </PublicLayout>
 {/if}

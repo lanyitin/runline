@@ -1,30 +1,33 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { useApp } from '../app/context';
+  import { formatDuration } from '../i18n/format';
+  import CopyButton from '../ui/CopyButton.svelte';
   import StatusDot from '../ui/StatusDot.svelte';
+  import Timestamp from '../ui/Timestamp.svelte';
   import { shortHash } from './info';
 
   // The Engine's version and commit hash, in every layout of the Console, signed in or not (the hard
   // requirement of the design system). Clicking it opens the details: the full hash with a copy
   // button, and the address of the API. The build time, JDK, uptime and allow-list version belong to
-  // the signed-in `GET /api/v1/system` and come with the sign-in (WI-34).
+  // the signed-in `GET /api/v1/system`: before anyone has signed in they are not there. The dot is
+  // green while the last call to the Engine got an answer and red when it did not (no probe of its
+  // own), and the words say it too.
   interface Props {
     /** Where the chip is: only the way the details open depends on it. */
     placement?: 'sidebar' | 'topbar' | 'footer';
   }
   let { placement = 'topbar' }: Props = $props();
 
-  const { i18n, engineInfo } = useApp();
+  const { i18n, engineInfo, connection } = useApp();
   const id = $props.id();
 
   let open = $state(false);
   let toggle: HTMLButtonElement | undefined = $state();
   let close: HTMLButtonElement | undefined = $state();
-  let copyStatus = $state<'idle' | 'copied' | 'failed'>('idle');
 
   async function show() {
     open = true;
-    copyStatus = 'idle';
     await tick();
     close?.focus();
   }
@@ -34,17 +37,12 @@
     toggle?.focus();
   }
 
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      copyStatus = 'copied';
-    } catch {
-      // No clipboard (a page on plain http, an old browser) or the browser refused.
-      copyStatus = 'failed';
-    }
-  }
-
   const current = $derived(engineInfo.state);
+  const down = $derived(connection.state === 'down');
+
+  // How long the Engine has been up now: what it said, and the time since it said it.
+  const uptime = (system: { uptimeSeconds: number; receivedAt: number }) =>
+    formatDuration(system.uptimeSeconds * 1000 + Math.max(0, Date.now() - system.receivedAt), i18n.locale);
 </script>
 
 <div
@@ -77,13 +75,16 @@
       aria-controls="{id}-details"
       onclick={() => (open ? hide() : show())}
     >
-      <StatusDot tone="success" glow />
+      <StatusDot tone={down ? 'danger' : 'success'} glow={!down} />
       <span class="version">v{info.version}</span>
       <span class="hash mono">
         {info.commitHash === 'unknown' ? i18n.t('engine.unknown') : shortHash(info.commitHash)}
       </span>
       {#if info.dirty}
         <span class="dirty" title={i18n.t('engine.dirty')}>{i18n.t('engine.dirtyMark')}</span>
+      {/if}
+      {#if down}
+        <span class="down">{i18n.t('engine.disconnected')}</span>
       {/if}
     </button>
 
@@ -104,22 +105,34 @@
               {info.commitHash === 'unknown' ? i18n.t('engine.unknown') : info.commitHash}
             </span>
             {#if info.commitHash !== 'unknown'}
-              <button class="copy" type="button" onclick={() => copy(info.commitHash)}>
-                {i18n.t('engine.copy')}
-              </button>
+              <CopyButton
+                text={info.commitHash}
+                label={i18n.t('engine.copy')}
+                copied={i18n.t('engine.copied')}
+                failed={i18n.t('engine.copyFailed')}
+              />
             {/if}
           </dd>
           {#if info.dirty}
             <dt>{i18n.t('engine.commit')}</dt>
             <dd>{i18n.t('engine.dirty')}</dd>
           {/if}
+          {#if info.system}
+            <dt>{i18n.t('engine.buildTime')}</dt>
+            <dd>
+              <Timestamp iso={info.system.buildTime} />
+              <span class="help">{i18n.t('engine.buildTimeHelp')}</span>
+            </dd>
+            <dt>{i18n.t('engine.jdk')}</dt>
+            <dd class="mono">{info.system.jdk}</dd>
+            <dt>{i18n.t('engine.uptime')}</dt>
+            <dd class="mono">{uptime(info.system)}</dd>
+            <dt>{i18n.t('engine.allowList')}</dt>
+            <dd class="mono">{info.system.allowListVersion}</dd>
+          {/if}
           <dt>{i18n.t('engine.apiBase')}</dt>
           <dd class="mono">{location.origin}</dd>
         </dl>
-        <div role="status" class="copy-status">
-          {#if copyStatus === 'copied'}{i18n.t('engine.copied')}{/if}
-          {#if copyStatus === 'failed'}{i18n.t('engine.copyFailed')}{/if}
-        </div>
         <button class="close" type="button" bind:this={close} onclick={hide}>
           {i18n.t('engine.close')}
         </button>
@@ -186,8 +199,19 @@
     color: var(--warning-text);
     font-weight: 600;
   }
+  .down {
+    border-radius: var(--radius-pill);
+    padding: 0 var(--space-2);
+    background: var(--danger-tint);
+    color: var(--danger-text);
+    font-weight: 600;
+  }
+  .help {
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--text-2xs);
+  }
   .retry,
-  .copy,
   .close {
     font: inherit;
     cursor: pointer;
@@ -248,10 +272,5 @@
   }
   .mono {
     font-family: var(--font-mono);
-  }
-  .copy-status {
-    min-height: 1.25em;
-    margin-bottom: var(--space-2);
-    color: var(--text-secondary);
   }
 </style>

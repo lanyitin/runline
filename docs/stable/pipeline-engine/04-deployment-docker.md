@@ -26,7 +26,7 @@
 |---|---|---|
 | 健康檢查對象 | 就緒（單機）；依 unhealthy 重啟的編排器改用存活 | 單機 Docker 不因 unhealthy 重啟，只用於顯示與相依等待 |
 | 間隔／逾時／重試 | 10 秒／3 秒／3 次 | 服務端的就緒與資料庫檢查逾時須小於 3 秒 |
-| 啟動寬限（`start_period`） | 60 秒；啟動期間探測間隔 2 秒（`start_interval`，若 Docker 版本支援） | 涵蓋 JVM 啟動、遷移確認、中斷標記與觸發處理 |
+| 啟動寬限（`start_period`） | 60 秒；啟動期間探測間隔 2 秒（`start_interval`，若 Docker 版本支援） | 涵蓋 JVM 啟動、遷移確認、中斷標記與觸發處理；這段期間 Engine 尚未綁定連接埠，健康檢查得到連線被拒，期間的失敗不計入重試次數 |
 | 重啟政策 | 除非手動停止否則重啟（`unless-stopped`） | 單機 Docker 只在行程結束時重啟 |
 | 停止等待（`stop_grace_period`） | `RUNLINE_SHUTDOWN_GRACE_SECONDS` 加 15 秒（預設 45 秒） | Docker 預設 10 秒不足 |
 | 結束代碼 | Engine 優雅關閉後以 0 結束 | 平台不需特例（見 WI-38） |

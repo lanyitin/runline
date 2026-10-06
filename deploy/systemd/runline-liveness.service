@@ -1,0 +1,11 @@
+[Unit]
+Description=Runline Engine liveness check (restarts the Engine after 3 failures in a row)
+After=runline-engine.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/runline/runline.env
+# Runs as root only to be allowed to restart the Engine; keeps the failure count between runs.
+RuntimeDirectory=runline-liveness
+RuntimeDirectoryPreserve=yes
+ExecStart=/opt/runline/bin/runline-liveness-check

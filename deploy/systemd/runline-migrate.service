@@ -1,0 +1,13 @@
+[Unit]
+Description=Runline database migration (one-off, before the Engine)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=runline
+Group=runline
+EnvironmentFile=/etc/runline/runline.env
+# The same jar and environment as the Engine; exit code 0 also when already up to date.
+ExecStart=/usr/bin/java -cp /opt/runline/engine.jar dev.lawlan.runline.engine.db.MigrateKt

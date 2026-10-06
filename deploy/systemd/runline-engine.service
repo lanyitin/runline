@@ -1,0 +1,32 @@
+[Unit]
+Description=Runline Engine
+After=network-online.target postgresql.service runline-migrate.service
+Wants=network-online.target
+# A failed migration keeps the Engine from starting.
+Requires=runline-migrate.service
+# At most 5 starts in 300 seconds, then the unit stays failed instead of looping.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+# A plain foreground process: the JVM has no sd_notify, and readiness is waited for below.
+Type=simple
+User=runline
+Group=runline
+EnvironmentFile=/etc/runline/runline.env
+# Persistent shared directories of pipelines (/var/lib/runline) and scratch run directories (/run/runline).
+StateDirectory=runline
+RuntimeDirectory=runline
+ExecStart=/usr/bin/java -jar /opt/runline/engine.jar
+# Waits until the Engine answers ready (60 seconds in total, refused connections are waited out),
+# otherwise the start fails and the unit is stopped.
+ExecStartPost=/opt/runline/bin/runline-wait-ready
+TimeoutStartSec=90
+# Graceful shutdown exits with 0, so no SuccessExitStatus is needed.
+# RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in runline.env) plus 15 seconds.
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

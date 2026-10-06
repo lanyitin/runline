@@ -159,7 +159,7 @@
 
 **WI-38 的結論（2026-10-06）**
 
-- 健康檢查工具：採（b），由打包產物提供自我檢查入口 `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt live|ready`（結束代碼 0 健康、1 不健康或無回應、2 用法錯誤；逾時 2 秒，小於平台的 3 秒）。比較：（a）映像加入 HTTP 用戶端（curl 等）在映像大小上多一個套件，且要隨基底映像追蹤其來源與更新，並不是每個 JDK 基底映像都附帶；（b）映像不增加任何東西，只在既有的 `engine.jar` 多一個小類別，維護成本是一個約四十行的入口，版本與 Engine 一致，在 systemd 主機上同樣可用。對 Engine 命令列契約的影響：沒有，`java -jar engine.jar` 不變，新入口是獨立的主類別，與遷移入口（`MigrateKt`）同一種形式。映像大小尚未實測（Dockerfile 在 [WI-39](../work-items/WI-39-deployment-files.md)）。
+- 健康檢查工具：採（b），由打包產物提供自我檢查入口 `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt live|ready`（結束代碼 0 健康、1 不健康或無回應、2 用法錯誤；逾時 2 秒，小於平台的 3 秒）。比較：（a）映像加入 HTTP 用戶端（curl 等）在映像大小上多一個套件，且要隨基底映像追蹤其來源與更新，並不是每個 JDK 基底映像都附帶；（b）映像不增加任何東西，只在既有的 `engine.jar` 多一個小類別，維護成本是一個約四十行的入口，版本與 Engine 一致，在 systemd 主機上同樣可用。對 Engine 命令列契約的影響：沒有，`java -jar engine.jar` 不變，新入口是獨立的主類別，與遷移入口（`MigrateKt`）同一種形式。映像大小已於 WI-39 實測（`eclipse-temurin:25-jre` 基底加 `engine.jar` 與 `run-runtime/`，arm64）：磁碟用量約 588 MB、壓縮內容約 159 MB；健康檢查入口沒有為映像增加任何套件。
 - 遷移的呼叫方式：沿用既有主類別，`java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt`，與 Gradle 任務同一段程式碼與同一組環境變數；見 [04](../04-deployment.md)「部署入口」。
 - 結束代碼：可行，Engine 優雅關閉後以 0 結束（`packagedTest` 以真實行程驗證）；啟動失敗仍為非 0。systemd 不需把 143 列為成功代碼。
 

@@ -92,6 +92,32 @@ An unexpected failure is answered 500 `internal_error` with a generic message an
 
 Database migrations are a separate one-off process (`./gradlew :engine:migrate`, or, where there is no Gradle, `java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt`; both read `POSTGRES_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, exit 0 on success and 1 with the reason, never the password, on failure); the Engine only checks that the schema is current. For a container health check the jar has its own entry point, `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt live|ready` (asks `http://localhost:$PORT`, exit 0 healthy, 1 not, within 2 seconds). `./gradlew :engine:packagedTest` starts the packaged Engine as its own process against a real PostgreSQL (Docker needed) and checks, among other things, that a run cannot see Engine classes; it is part of `:engine:check`.
 
+## Deployment files: Docker and systemd (WI-39, ADR-018)
+`deploy/` holds the runnable form of `docs/stable/pipeline-engine/04-deployment-docker.md` and `04-deployment-systemd.md` (thresholds and settings are defined there; where a file and the document differ, the document is right). Both platforms run the same artifact, the output of `./gradlew :engine:engineDistribution` (`engine/build/engine-dist/`: `engine.jar` and `run-runtime/`), and need PostgreSQL 17. Use a release build (`-Prunline.release=true`, clean checkout) for anything you deploy. Nothing in `deploy/` holds a secret: the `*.example` files carry placeholders, and the real `.env` / `runline.env` are ignored by git.
+
+Environment variables you must set (the Engine lists every missing one at startup and refuses to start): `POSTGRES_URL` (JDBC URL), `POSTGRES_USER`, `POSTGRES_PASSWORD`, `API_TOKENS` (`name:role:token,...`), `RUNLINE_RUNTIME_DIR`, `RUNLINE_SHARED_ROOT`, `RUNLINE_RUN_ROOT`, `RUNLINE_MAX_CONCURRENT_RUNS`, `RUNLINE_WORKSPACE_MAX_BYTES`, `RUNLINE_FAILED_RUN_RETENTION_SECONDS`. `RUNLINE_SHUTDOWN_GRACE_SECONDS` defaults to 30; the platform's stop timeout (`stop_grace_period`, `TimeoutStopSec`) is that plus 15 and has to be raised with it. Without an OTLP collector, set `OTEL_TRACES_EXPORTER=none`, `OTEL_LOGS_EXPORTER=none` and `OTEL_METRICS_EXPORTER=none`, or a shutdown waits for the exporters to time out.
+
+- **Docker** (`deploy/docker/`): `Dockerfile` (JDK 25 runtime image, unprivileged user, the JVM as the main process; its build context is `engine/build/engine-dist`), `compose.yaml` (`postgres`, the one-off `migrate`, `engine` on port 8080 with a readiness health check) and `.env.example`.
+  ```
+  ./gradlew :engine:engineDistribution
+  docker build -f deploy/docker/Dockerfile -t runline-engine engine/build/engine-dist   # the image alone
+  cp deploy/docker/.env.example deploy/docker/.env                                      # replace every placeholder
+  docker compose -f deploy/docker/compose.yaml up --build -d                            # postgres, migration, engine
+  docker compose -f deploy/docker/compose.yaml ps                                       # engine shows (healthy)
+  ```
+  The shared directories of pipelines and the database are named volumes (`docker compose down -v` deletes them). The health check needs a Docker that supports `start_interval` (25 or later); older ones ignore it and probe every 10 seconds.
+- **systemd** (`deploy/systemd/`): `runline-migrate.service` (one-off), `runline-engine.service`, `runline-wait-ready` (the readiness wait), the optional `runline-liveness.timer` / `.service` / `runline-liveness-check`, and `runline.env.example`. The host needs JDK 25 at `/usr/bin/java` (adjust `ExecStart` otherwise), no Node.
+  ```
+  useradd --system --no-create-home --shell /usr/sbin/nologin runline
+  install -d /opt/runline/bin && cp engine/build/engine-dist/engine.jar /opt/runline/ && cp -r engine/build/engine-dist/run-runtime /opt/runline/
+  install -m 0755 deploy/systemd/runline-wait-ready deploy/systemd/runline-liveness-check /opt/runline/bin/
+  install -d /etc/runline && install -m 0600 deploy/systemd/runline.env.example /etc/runline/runline.env   # then edit it
+  install -m 0644 deploy/systemd/*.service deploy/systemd/*.timer /etc/systemd/system/ && systemctl daemon-reload
+  systemctl enable --now runline-engine.service           # the migration runs first
+  systemctl enable --now runline-liveness.timer           # optional: restart after 3 failed liveness checks
+  ```
+  `ExecStartPost` waits up to 60 seconds for readiness; a failed migration keeps the Engine from starting.
+
 ## Build info and release builds (WI-28, ADR-016)
 The build writes what it knows about itself into `engine.jar` (resource `runline-build-info.properties`, made by `gradle/build-info.gradle.kts`): the project version, the full hash of `HEAD`, whether the working tree is dirty (a tracked file changed, or an untracked file that is not ignored; ignored build output does not count), and the time of the `HEAD` commit (`buildTime`, UTC; never the clock of the build). Nothing else goes in: no host, user, path or environment, so the same commit gives the same bytes. Without git information (no repository, no commit yet, git not installed) the hash is `unknown`, `dirty` is true and `buildTime` is `1970-01-01T00:00:00Z`. The task `generateBuildInfo` rewrites the file only when one of these values changes, so nothing after it is redone for the same `HEAD` and tree state.
 

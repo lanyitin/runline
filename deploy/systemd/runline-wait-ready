@@ -1,0 +1,22 @@
+#!/bin/sh
+# Polls the Engine's readiness (docs/stable/pipeline-engine/04-deployment-systemd.md) until it
+# answers 200, at most RUNLINE_READY_TIMEOUT_SECONDS (60) in total. Run as ExecStartPost of the
+# Engine unit, so it sees the Engine's environment (PORT). Until the Engine has finished starting
+# it does not listen, so a refused connection means "keep waiting", not "failed".
+# Exit 0: ready. Exit 1: not ready in time (the unit fails).
+set -u
+JAVA="${RUNLINE_JAVA:-/usr/bin/java}"
+JAR="${RUNLINE_JAR:-/opt/runline/engine.jar}"
+TIMEOUT="${RUNLINE_READY_TIMEOUT_SECONDS:-60}"
+
+start=$(date +%s)
+while :; do
+  if "$JAVA" -cp "$JAR" dev.lawlan.runline.engine.HealthCheckKt ready; then
+    exit 0
+  fi
+  if [ $(($(date +%s) - start)) -ge "$TIMEOUT" ]; then
+    echo "runline-wait-ready: the Engine was not ready within ${TIMEOUT}s" >&2
+    exit 1
+  fi
+  sleep 1
+done

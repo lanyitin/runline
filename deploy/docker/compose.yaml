@@ -1,0 +1,77 @@
+# Engine + PostgreSQL on one Docker host (docs/stable/pipeline-engine/04-deployment-docker.md).
+#
+#   ./gradlew :engine:engineDistribution        # build the artifact once
+#   cp deploy/docker/.env.example deploy/docker/.env   # then replace every placeholder
+#   docker compose -f deploy/docker/compose.yaml up --build -d
+#
+# Configuration and secrets come only from the environment file .env (never from this file).
+# Compose reads it for the ${...} below, and env_file passes it on to the containers.
+
+x-engine: &engine
+  build:
+    context: ../../engine/build/engine-dist
+    dockerfile: ../../../deploy/docker/Dockerfile
+  image: runline-engine:${RUNLINE_IMAGE_TAG:-local}
+  env_file: .env
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-off: the same artifact and the same environment as the engine, run before it.
+  migrate:
+    <<: *engine
+    entrypoint: ["java", "-cp", "/app/engine.jar", "dev.lawlan.runline.engine.db.MigrateKt"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  engine:
+    <<: *engine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      # The pipelines' shared directories survive restarts (ADR-009); run private directories are
+      # scratch space inside the container.
+      - shared:/var/lib/runline/shared
+    # RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in .env) plus 15 seconds; Docker's default of
+    # 10 seconds would kill the Engine inside its grace time. Raise both together.
+    stop_grace_period: 45s
+    healthcheck:
+      # Readiness, in the Engine's own jar (no HTTP client in the image). Until the Engine has
+      # finished starting it does not listen, so the check is refused; start_period tolerates that.
+      test:
+        - CMD
+        - java
+        - -cp
+        - /app/engine.jar
+        - dev.lawlan.runline.engine.HealthCheckKt
+        - ready
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+
+volumes:
+  postgres-data:
+  shared:

@@ -1,0 +1,29 @@
+#!/bin/sh
+# One liveness probe (docs/stable/pipeline-engine/04-deployment-systemd.md), started by
+# runline-liveness.timer every 15 seconds. The probe times out after 3 seconds; after
+# RUNLINE_LIVENESS_FAILURES (3) failures in a row the Engine unit is restarted. Only a running
+# Engine is checked: while it is starting, stopped or being restarted nothing is counted.
+set -u
+JAVA="${RUNLINE_JAVA:-/usr/bin/java}"
+JAR="${RUNLINE_JAR:-/opt/runline/engine.jar}"
+LIMIT="${RUNLINE_LIVENESS_FAILURES:-3}"
+STATE="${RUNTIME_DIRECTORY:-/run/runline-liveness}/failures"
+
+if ! systemctl is-active --quiet runline-engine.service; then
+  rm -f "$STATE"
+  exit 0
+fi
+
+if timeout 3 "$JAVA" -cp "$JAR" dev.lawlan.runline.engine.HealthCheckKt live; then
+  rm -f "$STATE"
+  exit 0
+fi
+
+failures=$(($(cat "$STATE" 2>/dev/null || echo 0) + 1))
+echo "runline-liveness-check: liveness failed ($failures of $LIMIT)" >&2
+if [ "$failures" -ge "$LIMIT" ]; then
+  rm -f "$STATE"
+  echo "runline-liveness-check: restarting runline-engine.service" >&2
+  exec systemctl restart runline-engine.service
+fi
+echo "$failures" > "$STATE"

@@ -16,7 +16,7 @@
 
 | 單元 | 說明 |
 |---|---|
-| 遷移（一次性） | 使用與 Engine 相同的產物與環境檔，先於 Engine 執行；失敗則 Engine 不啟動 |
+| 遷移（一次性） | 使用與 Engine 相同的產物與環境檔，先於 Engine 執行（`java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt`，成功為 0）；失敗則 Engine 不啟動 |
 | Engine 服務 | 相依於遷移單元與資料庫；一般的前景行程型態 |
 | 存活檢查計時器與其服務（選用） | 定期呼叫存活探測，連續失敗達閾值才重啟 Engine 服務 |
 
@@ -26,9 +26,9 @@
 |---|---|---|
 | 服務型態 | 一般前景行程（不使用 `Type=notify`） | JVM 沒有內建 sd_notify 支援，且已有 HTTP 就緒探測 |
 | 重啟 | 失敗時重啟；間隔 5 秒；300 秒內最多啟動 5 次 | 避免快速重啟迴圈 |
-| 結束代碼 | Engine 優雅關閉後以 0 結束；若不是，須把 143 列為成功代碼 | 否則 `systemctl stop` 後單元被標為 failed |
+| 結束代碼 | Engine 優雅關閉後以 0 結束，不需設定 `SuccessExitStatus` | 已由 `packagedTest` 驗證；`systemctl stop` 後單元不會被標為 failed |
 | 停止等待（`TimeoutStopSec`） | `RUNLINE_SHUTDOWN_GRACE_SECONDS` 加 15 秒（預設 45 秒） | 預設 90 秒夠用，仍建議明確設定並與寬限時間連動 |
-| 就緒等待 | 啟動後步驟輪詢就緒探測，總逾時 60 秒，逾時則單元失敗 | 讓相依單元等到就緒；Engine 啟動完成前尚未綁定連接埠，輪詢會得到連線被拒，須視為「繼續等待」而不是失敗；腳本由 `deploy/` 提供 |
+| 就緒等待 | 啟動後步驟輪詢就緒探測（可用 `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt ready`，以結束代碼判斷），總逾時 60 秒，逾時則單元失敗 | 讓相依單元等到就緒；Engine 啟動完成前尚未綁定連接埠，輪詢會得到連線被拒，須視為「繼續等待」而不是失敗；腳本由 `deploy/` 提供 |
 | 存活檢查（選用） | 計時器 15 秒、單次逾時 3 秒、連續失敗 3 次後重啟 | 取代 `WatchdogSec`（不採用，JVM 需 sd_notify 支援）|
 
 ## 已接受的限度

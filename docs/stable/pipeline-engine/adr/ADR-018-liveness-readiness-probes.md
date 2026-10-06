@@ -149,12 +149,18 @@
 
 結論：產物形態與兩個目標相容，不需改變。兩個平台都只需要 `engine.jar` 與同層的 `run-runtime/` 目錄；Console 在 `engine.jar` 內（[ADR-015](ADR-015-console-frontend.md)），`run-runtime/` 不含它；`packagedTest` 驗證的就是這個形態。
 
-下列事項屬實作層面，由 tdd-coder 評估後回報，經架構決定後定案（[WI-38](../work-items/WI-38-deployment-entry-points.md)）：
+下列事項屬實作層面，已於 [WI-38](../work-items/WI-38-deployment-entry-points.md) 評估並定案（結論在表後）：
 
 | 事項 | 說明 |
 |---|---|
 | 容器內的健康檢查工具 | 映像若只含 JDK，不保證有 HTTP 用戶端；可選：映像加入輕量的 HTTP 工具，或由 Engine 的打包產物提供自我檢查的命令列入口 |
 | 遷移的呼叫方式 | 遷移目前是 Gradle 任務；部署環境沒有 Gradle，須以打包產物執行同一段遷移（行為相同、使用同一組環境變數）|
 | 優雅關閉的結束代碼 | JVM 因終止訊號結束的代碼為 143；建議 Engine 完成優雅關閉後以 0 結束，使平台不需特例 |
+
+**WI-38 的結論（2026-10-06）**
+
+- 健康檢查工具：採（b），由打包產物提供自我檢查入口 `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt live|ready`（結束代碼 0 健康、1 不健康或無回應、2 用法錯誤；逾時 2 秒，小於平台的 3 秒）。比較：（a）映像加入 HTTP 用戶端（curl 等）在映像大小上多一個套件，且要隨基底映像追蹤其來源與更新，並不是每個 JDK 基底映像都附帶；（b）映像不增加任何東西，只在既有的 `engine.jar` 多一個小類別，維護成本是一個約四十行的入口，版本與 Engine 一致，在 systemd 主機上同樣可用。對 Engine 命令列契約的影響：沒有，`java -jar engine.jar` 不變，新入口是獨立的主類別，與遷移入口（`MigrateKt`）同一種形式。映像大小尚未實測（Dockerfile 在 [WI-39](../work-items/WI-39-deployment-files.md)）。
+- 遷移的呼叫方式：沿用既有主類別，`java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt`，與 Gradle 任務同一段程式碼與同一組環境變數；見 [04](../04-deployment.md)「部署入口」。
+- 結束代碼：可行，Engine 優雅關閉後以 0 結束（`packagedTest` 以真實行程驗證）；啟動失敗仍為非 0。systemd 不需把 143 列為成功代碼。
 
 共享目錄的持久化不是新決策：Docker 需掛載磁碟區，systemd 需持久目錄（ADR-009、04），在兩份平台指南寫明。

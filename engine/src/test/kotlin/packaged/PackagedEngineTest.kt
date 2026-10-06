@@ -4,6 +4,8 @@ import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.PostgresTestContainer
+import dev.lawlan.runline.engine.support.StoppablePostgres
+import dev.lawlan.runline.engine.support.StuckServer
 import dev.lawlan.runline.engine.support.TestTimeouts
 import dev.lawlan.runline.engine.support.TimedHttp
 import dev.lawlan.runline.engine.support.awaitCondition
@@ -775,6 +777,138 @@ class PackagedEngineTest {
         Duration.ofNanos(System.nanoTime() - signalled) <= Duration.ofSeconds(10),
         "stopping took longer than the grace time:\n${output("engine.log")}",
     )
+  }
+
+  // ---- deployment entry points (WI-38) ----
+
+  @Test
+  fun `the packaged Engine exits with code 0 after a graceful shutdown on SIGTERM`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    val engine = startEngine(database, runtime)
+
+    engine.terminate() // SIGTERM, as a platform stops a container
+
+    assertEquals(0, engine.awaitExit(TestTimeouts.processExit), output("engine.log"))
+  }
+
+  @Test
+  fun `the packaged Engine exits with a non-zero code when the database is not migrated`() {
+    val database = PostgresTestContainer.newDatabase()
+    val process =
+        launch(
+            "the Engine on a database nobody migrated",
+            environment(database, dist.resolve("run-runtime")),
+            "-jar",
+            dist.resolve("engine.jar").toString(),
+            log = "engine.log",
+        )
+
+    assertNotEquals(0, process.awaitExit(TestTimeouts.processExit), output("engine.log"))
+    assertTrue(output("engine.log").contains("out of date"), output("engine.log"))
+  }
+
+  @Test
+  fun `the packaged Engine exits with a non-zero code when its configuration is wrong`() {
+    val database = PostgresTestContainer.newDatabase()
+    migrate(database, dist.resolve("run-runtime"))
+    val process =
+        launch(
+            "the Engine with a bad configuration",
+            environment(
+                database,
+                dist.resolve("run-runtime"),
+                mapOf("RUNLINE_MAX_CONCURRENT_RUNS" to "not-a-number"),
+            ),
+            "-jar",
+            dist.resolve("engine.jar").toString(),
+            log = "engine.log",
+        )
+
+    assertNotEquals(0, process.awaitExit(TestTimeouts.processExit), output("engine.log"))
+    assertTrue(output("engine.log").contains("runs.maxConcurrent"), output("engine.log"))
+  }
+
+  /** The self-check command of the packaged jar, as a container runs it: exit code and output. */
+  private fun healthCheck(
+      vararg args: String,
+      targetPort: Int = port,
+      limit: Duration = Duration.ofSeconds(8),
+  ): Pair<Int, String> {
+    val log = "health-${healthChecks++}.log"
+    val process =
+        ManagedProcess.start(
+                "the health check",
+                listOf(
+                    javaBin,
+                    "-cp",
+                    dist.resolve("engine.jar").toString(),
+                    "dev.lawlan.runline.engine.HealthCheckKt",
+                    *args,
+                ),
+                work.resolve(log),
+                environment = mapOf("PORT" to targetPort.toString()),
+                directory = work,
+            )
+            .also { processes += it }
+    return process.awaitExit(limit) to output(log)
+  }
+
+  private var healthChecks = 0
+
+  @Test
+  fun `the health check command succeeds against a running Engine for live and for ready`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    startEngine(database, runtime)
+
+    assertEquals(0, healthCheck("live").first)
+    assertEquals(0, healthCheck("ready").first)
+  }
+
+  @Test
+  fun `the health check command fails when nothing listens`() {
+    val (code, output) = healthCheck("ready")
+
+    assertNotEquals(0, code, output)
+  }
+
+  @Test
+  fun `the health check command fails within seconds when the Engine does not answer`() {
+    StuckServer("").use { stuck ->
+      val (code, output) = healthCheck("live", targetPort = stuck.port)
+
+      assertNotEquals(0, code, output)
+    }
+  }
+
+  @Test
+  fun `the health check command fails for ready but not for live while the database is down`() {
+    StoppablePostgres.startMigrated().use { postgres ->
+      val runtime = dist.resolve("run-runtime")
+      val engine = startEngine(postgres.database, runtime)
+      assertEquals(0, healthCheck("ready").first)
+
+      postgres.stop()
+
+      awaitCondition(
+          "ready to fail while the database is down",
+          diagnostics = { engine.outputTail() },
+      ) {
+        healthCheck("ready").first != 0
+      }
+      assertEquals(0, healthCheck("live").first)
+    }
+  }
+
+  @Test
+  fun `the health check command names what it accepts when asked for anything else`() {
+    val (code, output) = healthCheck("whatever")
+
+    assertNotEquals(0, code)
+    assertTrue(output.contains("live") && output.contains("ready"), output)
   }
 
   // ---- configuration through the environment (WI-18) ----

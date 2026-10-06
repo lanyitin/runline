@@ -39,6 +39,18 @@
 
 遷移是獨立的一次性步驟，使用與 Engine 相同的程式碼與設定，於部署時先於 Engine 啟動執行。Engine 啟動時只檢查 schema 是否為最新，不自行遷移，未遷移則啟動失敗。
 
+## 部署入口
+
+打包後的 `engine.jar` 同時是三個入口，部署環境不需要 Gradle；三者都只讀環境變數，不接受命令列參數傳遞機密。
+
+| 入口 | 呼叫 | 結束代碼 |
+|---|---|---|
+| Engine | `java -jar engine.jar` | 收到終止訊號並完成優雅關閉後為 0；啟動失敗（組態錯誤、未遷移、run 執行期目錄不符）為非 0，原因輸出到標準輸出 |
+| 遷移（一次性） | `java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt` | 成功（含已是最新的無操作）為 0；失敗為 1，輸出 `Migration failed: <原因>`，不含密碼。與 Gradle 任務 `./gradlew :engine:migrate` 是同一段程式碼，只讀 `POSTGRES_URL`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
+| 健康檢查 | `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt live` 或 `ready` | 探測回 200 為 0；無回應、逾時（2 秒，小於平台的 3 秒）或非 200 為 1；參數不是 `live`／`ready` 為 2。目標是本機的 `http://localhost:$PORT`（`PORT` 預設 8080） |
+
+優雅關閉後的結束代碼為 0（JVM 對 SIGTERM 的預設是 143），平台不需把 143 列為成功代碼。只有「曾經對外服務、且已完成停止」的行程才以 0 結束；啟動失敗、停止未完成的結束代碼不被改寫，仍為非 0。
+
 ## 擴縮
 
 v1 單實例。Cron 排程、run 並行上限、run 排程佇列與共享資源協調的語意都假設單實例，擴為多實例前需先解決排程重複觸發、佇列與資源狀態共享問題（見 [07](07-nfr-risks.md)）。

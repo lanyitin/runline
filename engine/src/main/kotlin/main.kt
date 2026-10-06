@@ -1,8 +1,12 @@
 package dev.lawlan.runline.engine
 
 import dev.lawlan.runline.engine.config.EngineConfig
+import java.time.Duration
 
 fun main(args: Array<String>) {
+  // A platform's SIGTERM ends the JVM with 143; after a graceful stop the process exits with 0.
+  Runtime.getRuntime()
+      .addShutdownHook(Thread { CleanExit.exitWithZeroOnceStopped(Duration.ofSeconds(120)) })
   io.ktor.server.netty.EngineMain.main(args + shutdownArguments(System.getenv()))
 }
 

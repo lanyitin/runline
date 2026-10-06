@@ -21,7 +21,7 @@
 7. 每個 pipeline 版本各自設定是否允許以 unsafe 執行，預設不允許，新版本不繼承。
 8. 開發人員可在 IDE 以中斷點除錯 pipeline，且執行路徑與 Engine 一致。
 9. 開發用 Runner 可錄製整個 run 的 IO 動作，並據此產出 metadata 提案文件，由開發人員自行採用。
-10. 多個 pipeline 可互斥或限流地使用共享資源（例如 lemonade server）：資源定義在 Engine，pipeline 宣告所需資源，並在 run 的初始化階段整體取得（[ADR-007](adr/ADR-007-shared-resources.md)）。
+10. 多個 pipeline 可互斥或限流地使用共享資源（例如 lemonade server）：資源定義在 Engine，pipeline 宣告所需資源，並在 run 的初始化階段整體取得（[ADR-007](adr/ADR-007-shared-resources.md)）。資源可對應實際的檔案、資料庫連線池與 OpenAI 相容服務，由 Engine 中介存取並以金鑰庫保存機密（[ADR-019](adr/ADR-019-typed-shared-resources.md)）。
 
 ## 非功能需求
 

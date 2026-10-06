@@ -28,6 +28,7 @@
 | API 認證 | 上傳與管理 API 以設定檔提供的 Bearer token 認證，兩種角色（開發人員、管理員），provider 可替換 | [ADR-012](adr/ADR-012-api-authentication.md) |
 | 網路與行程比對 | 網路以主機名稱（不分大小寫、無萬用字元、不比埠號）、行程以指令第一個元素完全比對；空清單全拒絕 | [ADR-010](adr/ADR-010-access-allow-list-matching.md) |
 | 共享資源 | 管理員在 Engine 定義命名資源與容量；pipeline 宣告，run 初始化階段整體取得，鎖由 Engine 持有 | [ADR-007](adr/ADR-007-shared-resources.md) |
+| 型別化共享資源 | 資源有型別（`counter`、`file`、`jdbc-pool`、`openai-compatible`，封閉集合）；Engine 持有實體並以受控存取端中介，機密只存在 PKCS12 金鑰庫（維運以工具管理，Engine 唯讀加重載），資源可刪除與檢查；容量語意仍為 run 級（補充 ADR-007、ADR-009） | [ADR-019](adr/ADR-019-typed-shared-resources.md) |
 | Console 前端 | Svelte 靜態 SPA 打包進 engine.jar，由 Engine 在 `/` 提供；同源、不啟用 CORS；首版 zh-TW 與 en | [ADR-015](adr/ADR-015-console-frontend.md) |
 | 版本與 commit hash | 免認證的 `GET /api/v1/info` 公開版本與完整 hash；詳細資訊與呼叫者身分在 Bearer 的 `GET /api/v1/system`；建置時注入，發佈 jar 位元組級可重現 | [ADR-016](adr/ADR-016-engine-build-info-endpoint.md) |
 | Console 的 log 與 token | log 以輪詢顯示（不用 WebSocket）；token 存 sessionStorage 並以 BroadcastChannel 跨分頁同步；登入與憑證種類脫鉤，token 登入為過渡機制 | [ADR-017](adr/ADR-017-console-websocket-and-token.md) |
@@ -49,6 +50,9 @@ flowchart LR
     Orch --> L1[Run A：獨立 class loader\nRunner + Context + Pipeline]
     Orch --> L2[Run B：獨立 class loader]
     Orch -->|初始化階段取得／終止時釋放| Res[共享資源協調]
+    Res -->|存取端| L1
+    Res --> Ent[檔案／連線池／OpenAI 相容服務]
+    KS[(PKCS12 金鑰庫，唯讀)] --> Res
   end
   Orch --> DB
 ```
@@ -65,5 +69,5 @@ flowchart LR
 | 6 資料模型 | [06-data-model.md](06-data-model.md) | 已核可 |
 | 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
 | 8 API | [08-api.md](08-api.md) | 已核可 |
-| 決策記錄（ADR-001 至 018） | [adr/](adr/) | 已核可 |
+| 決策記錄（ADR-001 至 019） | [adr/](adr/) | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |

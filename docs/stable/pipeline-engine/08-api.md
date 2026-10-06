@@ -203,6 +203,8 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱；規則見 [ADR-007](adr/ADR-007-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
+下列端點描述現行實作（全部資源等同 `counter` 型別）。資源型別化、刪除、檢查與機密端點的決策見 [ADR-019](adr/ADR-019-typed-shared-resources.md)；它們的路由、欄位與錯誤碼由 [WI-40](work-items/WI-40-typed-resources-and-deletion.md) 起的各工作項在實作時同步寫入本文，使本文與 `ApiDocumentationTest` 保持一致。
+
 ### `POST /api/v1/resources`
 
 認證：Bearer（admin）

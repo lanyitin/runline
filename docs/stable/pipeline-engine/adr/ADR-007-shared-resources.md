@@ -1,6 +1,6 @@
 # ADR-007 跨 pipeline 共享資源由 Engine 在初始化階段協調
 
-狀態：已核可（2026-10-03）。回答：多個 pipeline 如何互斥或限流地使用同一個外部資源（例如 lemonade server）。
+狀態：已核可（2026-10-03）；由 [ADR-019](ADR-019-typed-shared-resources.md) 補充（2026-10-06），資源可對應實際的檔案、連線池與服務。回答：多個 pipeline 如何互斥或限流地使用同一個外部資源（例如 lemonade server）。
 
 ## 背景
 每次 run 使用獨立 root class loader（[ADR-001](ADR-001-isolated-classloader.md)），run 內部的鎖無法彼此看見。共享資源的存取必須由 class loader 之外、Engine 持有的機制協調。
@@ -14,8 +14,8 @@
 
 ## 決策
 採用 A（使用者指定）。
-- 資源由管理員在 Engine 定義：名稱與容量（容量 1 即互斥，大於 1 即限流）。
-- Pipeline 在 metadata 宣告所需資源名稱。
+- 資源由管理員在 Engine 定義：名稱與容量（容量 1 即互斥，大於 1 即限流）。資源另有型別：`counter` 只有名稱與容量（即本 ADR 的語意），其他型別對應實際的實體並提供存取端，見 ADR-019；以下取得、等待與釋放的語意適用所有型別。
+- Pipeline 在 metadata 宣告所需資源名稱（可另指定型別，見 ADR-019）。
 - Run 有獨立的「初始化」階段，位於 pipeline 本體執行之前，在此階段取得所有宣告的資源。
 - 取得是整體的：所有宣告的資源與並行額度同時可用時，run 才一併取得並開始執行；不做部分持有，因此沒有死結，也不會有 run 一邊占著資源一邊等額度。
 - 等待者依先進先出順序；有等待逾時，由 Engine 組態設定，pipeline 不能自訂。逾時則 run 失敗並註明原因。
@@ -33,6 +33,6 @@
 
 ## 後果
 - 協調跨越 class loader 邊界，只使用 JDK 內建型別（[05](../05-ipc.md)）。
-- 資源鎖是約定式的：它不綁定 pipeline 實際連到該資源的網路動作，未宣告就連線的 pipeline 不會被攔下。
+- `counter` 型別的資源鎖是約定式的：它不綁定 pipeline 實際連到該資源的網路動作，未宣告就連線的 pipeline 不會被攔下。有實體的型別經 Engine 中介的存取端強制限制（ADR-019）；unsafe 的 pipeline 仍可直接使用 JDK 繞過。
 - 多實例部署前，資源狀態需改為共享儲存（[07](../07-nfr-risks.md)）。
 - 若日後需要細粒度，可另開 ADR 取代本文件。

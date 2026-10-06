@@ -10,7 +10,7 @@
 
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { FakeBackend, type FakeBackendOptions } from './fake-backend';
+import { FakeBackend, type ApiAnswer, type FakeBackendOptions } from './fake-backend';
 
 export interface FakeEngineInfo {
   version: string;
@@ -130,6 +130,14 @@ export class FakeEngine {
         });
         response.end(payload);
       };
+      const reply = (answered: ApiAnswer) => {
+        if (answered.json === undefined) {
+          response.writeHead(answered.status, { 'Content-Length': 0, ...answered.headers });
+          response.end();
+          return;
+        }
+        return json(answered.status, JSON.stringify(answered.json), answered.headers);
+      };
       const fault = engine.faults.find((f) => f.match.test(`${request.method} ${request.url}`));
       if (fault) {
         fault.times -= 1;
@@ -153,6 +161,21 @@ export class FakeEngine {
       switch (engine.mode) {
         case 'normal': {
           if (isInfo && request.method === 'GET') return json(200, JSON.stringify(info));
+          // The webhook entrance has no token: the secret of the trigger is the credential.
+          const hook = request.method === 'POST' ? path.match(/^\/api\/v1\/webhooks\/([^/]+)$/) : null;
+          if (hook) {
+            const header = (name: string) => {
+              const value = request.headers[name];
+              return typeof value === 'string' ? value : undefined;
+            };
+            return reply(
+              engine.backend.triggers.webhook(
+                decodeURIComponent(hook[1]),
+                header('x-runline-webhook-secret'),
+                header('x-runline-delivery-id'),
+              ),
+            );
+          }
           // As the Engine answers a missing or unknown token: 401, Bearer, no body. Beside the
           // Bearer token the Fake knows the header `X-Session-Code`, with the same callers: the
           // second way to sign in of the tests that show the Console does not depend on the kind of
@@ -196,12 +219,7 @@ export class FakeEngine {
             response.end();
             return;
           }
-          if (answered.json === undefined) {
-            response.writeHead(answered.status, { 'Content-Length': 0, ...answered.headers });
-            response.end();
-            return;
-          }
-          return json(answered.status, JSON.stringify(answered.json), answered.headers);
+          return reply(answered);
         }
         case 'shutting-down':
           return json(503, JSON.stringify({ error: 'shutting_down', message: 'Shutting down' }));

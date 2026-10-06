@@ -304,3 +304,8 @@ h3 {
 .rl-nowrap {
   white-space: nowrap;
 }
+
+/* A modal dialog is open: the page behind it does not scroll. */
+body.rl-modal-open {
+  overflow: hidden;
+}

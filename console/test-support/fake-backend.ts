@@ -15,6 +15,20 @@ import {
   type FakeReason,
 } from './fake-jars';
 import { readZip } from './zip';
+import {
+  answer,
+  failure,
+  forbidden,
+  type ApiAnswer,
+  type ApiRequest,
+  type FakeCallerRef,
+  type FakeRoute,
+} from './fake-api';
+import { FakeAllowList, judge } from './fake-allowlist';
+import { FakeResources } from './fake-resources';
+import { FakeTriggers, type FakeTrigger } from './fake-triggers';
+
+export type { ApiAnswer, ApiRequest, FakeCallerRef } from './fake-api';
 
 export type RunState =
   | 'QUEUED'
@@ -35,11 +49,6 @@ const TERMINAL: readonly RunState[] = [
   'INTERRUPTED',
   'TIMED_OUT',
 ];
-
-export interface FakeCallerRef {
-  name: string;
-  role: 'developer' | 'admin';
-}
 
 export interface FakeLogEntry {
   seq: number;
@@ -72,7 +81,7 @@ export interface FakeRun {
   log: FakeLogEntry[];
 }
 
-interface Definition {
+export interface Definition {
   className: string;
   name: string;
   metadata: {
@@ -84,6 +93,10 @@ interface Definition {
   };
   verdict: 'SAFE' | 'UNSAFE';
   reasons: Array<Required<FakeReason>>;
+  /** The reasons that do not depend on the allow-list: the access that is not limited. */
+  fixedReasons: Array<Required<FakeReason>>;
+  /** The classes the pipeline refers to: one that no entry covers is a reason of its own. */
+  references: Array<{ className: string; path: string[] }>;
   allowListVersion: string;
   allowUnsafeExecution: boolean;
   unsafeSetBy: string | null;
@@ -98,32 +111,8 @@ interface Artifact {
   definitions: Definition[];
 }
 
-export interface ApiRequest {
-  method: string;
-  /** The path without the query. */
-  path: string;
-  query: URLSearchParams;
-  caller: FakeCallerRef;
-  body: Buffer;
-}
-
-export interface ApiAnswer {
-  status: number;
-  headers?: Record<string, string>;
-  /** Sent as JSON; none for an answer without a body. */
-  json?: unknown;
-}
-
 const LIMITATIONS =
   'The analysis only checks the class references of the compiled classes (a Fake).';
-
-const answer = (status: number, json?: unknown, headers?: Record<string, string>): ApiAnswer => ({
-  status,
-  json,
-  headers,
-});
-const failure = (status: number, error: string, message: string, extra: object = {}) =>
-  answer(status, { error, message, ...extra });
 
 const RESOURCE_NAME = /^[A-Za-z0-9._-]+$/;
 const PIPELINE_NAME = /^(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
@@ -136,17 +125,43 @@ export interface FakeBackendOptions {
   autoRun?: boolean;
   /** How long a made run stays queued before it starts. */
   startDelayMs?: number;
+  /** How long `demo-resource` holds its shared resource (the sample holds it for 20 seconds). */
+  resourceHoldMs?: number;
 }
 
 export class FakeBackend {
   readonly artifacts = new Map<string, Artifact>();
   readonly runs: FakeRun[] = [];
-  /** The shared resources that are defined, by name: whether each is enabled. */
-  readonly resources = new Map<string, boolean>();
+  /** The shared resources that are defined, who holds them and who waits. */
+  readonly resources = new FakeResources();
   maxUploadBytes: number;
   autoRun: boolean;
   startDelayMs: number;
+  resourceHoldMs: number;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  /** The triggers an admin has bound, and their firings. */
+  readonly triggers = new FakeTriggers(this);
+  /** The entries that decide what is SAFE, and the versions they had. */
+  readonly allowList = new FakeAllowList(this);
+  /** The routes of the parts the backend is made of, apart from its own. */
+  private readonly routes: FakeRoute[] = [
+    ...this.triggers.routes,
+    ...this.allowList.routes,
+    ...this.resources.routes,
+    {
+      method: 'DELETE',
+      pattern: /^\/api\/v1\/artifacts\/([^/]+)$/,
+      admin: true,
+      handle: (_request, match) => this.deleteArtifact(decodeURIComponent(match[1])),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/api\/v1\/definitions\/([^/]+)\/([^/]+)\/unsafe-execution$/,
+      admin: true,
+      handle: (request, match) =>
+        this.setUnsafeExecution(request, decodeURIComponent(match[1]), decodeURIComponent(match[2])),
+    },
+  ];
   /** An answer, once, to the next upload instead of the real one (a refusal the Fake does not make). */
   nextUploadRefusal: ApiAnswer | null = null;
 
@@ -154,6 +169,7 @@ export class FakeBackend {
     this.maxUploadBytes = options.maxUploadBytes ?? 50 * 1024 * 1024;
     this.autoRun = options.autoRun ?? true;
     this.startDelayMs = options.startDelayMs ?? 5;
+    this.resourceHoldMs = options.resourceHoldMs ?? 20_000;
   }
 
   stop() {
@@ -165,6 +181,7 @@ export class FakeBackend {
 
   /** Whether [path] is one of this API for [method]: an answer of 401 and not of 404 without a token. */
   handles(method: string, path: string): boolean {
+    if (this.routes.some((r) => r.method === method && r.pattern.test(path))) return true;
     return [
       ['POST', /^\/api\/v1\/artifacts$/],
       ['GET', /^\/api\/v1\/artifacts\/[^/]+$/],
@@ -180,6 +197,12 @@ export class FakeBackend {
   /** Answers [request], or null when the path is not one of this API. */
   handle(request: ApiRequest): ApiAnswer | null {
     const { method, path } = request;
+    for (const route of this.routes) {
+      const found = route.method === method ? path.match(route.pattern) : null;
+      if (!found) continue;
+      if (route.admin && request.caller.role !== 'admin') return forbidden();
+      return route.handle(request, found);
+    }
     let match: RegExpMatchArray | null;
     if (path === '/api/v1/artifacts' && method === 'POST') return this.upload(request);
     if ((match = path.match(/^\/api\/v1\/artifacts\/([^/]+)$/)) && method === 'GET') {
@@ -248,7 +271,7 @@ export class FakeBackend {
       sizeBytes: body.length,
       uploadedBy: caller.name,
       uploadedAt: new Date().toISOString(),
-      definitions: pipelines.map(describe),
+      definitions: pipelines.map((p) => this.describe(p)),
     };
     this.artifacts.set(contentHash, artifact);
     return answer(201, this.artifactDoc(artifact));
@@ -264,7 +287,7 @@ export class FakeBackend {
       allowListVersion: d.allowListVersion,
       allowUnsafeExecution: d.allowUnsafeExecution,
       warnings: d.metadata.resources.flatMap((resource) => {
-        const enabled = this.resources.get(resource);
+        const enabled = this.resources.enabledOf(resource);
         if (enabled === true) return [];
         return [
           enabled === undefined
@@ -316,6 +339,45 @@ export class FakeBackend {
     return answer(200, { definitions, limitations: LIMITATIONS });
   }
 
+  /** `DELETE /api/v1/artifacts/{contentHash}`: a version that no trigger and no run refers to. */
+  private deleteArtifact(contentHash: string): ApiAnswer {
+    if (!this.artifacts.has(contentHash)) return failure(404, 'not_found', 'No such version.');
+    if (this.triggers.references(contentHash) || this.runs.some((r) => r.contentHash === contentHash)) {
+      return failure(409, 'in_use', 'A trigger or a run still refers to the version.');
+    }
+    this.artifacts.delete(contentHash);
+    return answer(204);
+  }
+
+  /** `PUT .../unsafe-execution`: whether this pipeline of this version may run although UNSAFE. */
+  private setUnsafeExecution(
+    { caller, body }: ApiRequest,
+    contentHash: string,
+    pipeline: string,
+  ): ApiAnswer {
+    let allow: unknown;
+    try {
+      allow = JSON.parse(body.toString('utf8'))?.allow;
+    } catch {
+      allow = undefined;
+    }
+    if (typeof allow !== 'boolean') {
+      return failure(400, 'bad_request', 'The body must be {"allow": true or false}.');
+    }
+    const definition = this.definitionOf(contentHash, pipeline);
+    if (!definition) return failure(404, 'definition_not_found', 'No such version and pipeline.');
+    definition.allowUnsafeExecution = allow;
+    definition.unsafeSetBy = caller.name;
+    definition.unsafeSetAt = new Date().toISOString();
+    return answer(200, {
+      contentHash,
+      pipeline,
+      allow,
+      setBy: definition.unsafeSetBy,
+      setAt: definition.unsafeSetAt,
+    });
+  }
+
   // ---- runs ----------------------------------------------------------------------------------
 
   private runDoc(run: FakeRun) {
@@ -344,13 +406,53 @@ export class FakeBackend {
         'The body must have contentHash, pipeline and parameters.',
       );
     }
+    const made = this.attempt({
+      contentHash,
+      pipeline,
+      parameters: parameters as Record<string, string>,
+      source: { kind: 'MANUAL', name: caller.name },
+      owner: caller.name,
+      mayUse: (uploadedBy) => this.sees(caller, uploadedBy),
+    });
+    return 'run' in made
+      ? answer(201, this.runDoc(made.run), { Location: `/api/v1/runs/${made.run.runId}` })
+      : made.refusal;
+  }
+
+  /** The definition of [pipeline] in the version [contentHash], if there is one. */
+  definitionOf(contentHash: string, pipeline: string): Definition | undefined {
+    return this.artifacts.get(contentHash)?.definitions.find((d) => d.name === pipeline);
+  }
+
+  /** The run that a firing of [trigger] makes, or why it is refused: an admin's, so any version. */
+  runForTrigger(trigger: FakeTrigger): { run: FakeRun } | { refusal: ApiAnswer } {
+    return this.attempt({
+      contentHash: trigger.contentHash,
+      pipeline: trigger.pipeline,
+      parameters: trigger.parameters,
+      source: { kind: 'TRIGGER', name: trigger.name },
+      // A developer sees the runs that triggers make of the versions they uploaded.
+      owner: null,
+      mayUse: () => true,
+    });
+  }
+
+  /** The checks of a new run, in the Engine's order, and the run when they hold. */
+  private attempt(spec: {
+    contentHash: string;
+    pipeline: string;
+    parameters: Record<string, string>;
+    source: FakeRun['source'];
+    owner: string | null;
+    mayUse: (uploadedBy: string) => boolean;
+  }): { run: FakeRun } | { refusal: ApiAnswer } {
+    const { contentHash, pipeline, parameters: supplied } = spec;
     const artifact = this.artifacts.get(contentHash);
     const definition = artifact?.definitions.find((d) => d.name === pipeline);
-    if (!artifact || !definition || !this.sees(caller, artifact.uploadedBy)) {
-      return failure(404, 'definition_not_found', 'No such version and pipeline.');
+    if (!artifact || !definition || !spec.mayUse(artifact.uploadedBy)) {
+      return { refusal: failure(404, 'definition_not_found', 'No such version and pipeline.') };
     }
 
-    const supplied = parameters as Record<string, string>;
     const declared = definition.metadata.parameters;
     const problems = [
       ...Object.keys(supplied)
@@ -361,21 +463,27 @@ export class FakeBackend {
         .map((p) => ({ name: p.name, problem: 'missing' })),
     ];
     if (problems.length > 0) {
-      return failure(422, 'invalid_parameters', 'The parameters do not match.', { problems });
+      return {
+        refusal: failure(422, 'invalid_parameters', 'The parameters do not match.', { problems }),
+      };
     }
     if (definition.verdict === 'UNSAFE' && !definition.allowUnsafeExecution) {
-      return failure(409, 'unsafe_not_allowed', `${pipeline} is UNSAFE and not allowed.`);
+      return {
+        refusal: failure(409, 'unsafe_not_allowed', `${pipeline} is UNSAFE and not allowed.`),
+      };
     }
     const unavailable = definition.metadata.resources
-      .filter((name) => this.resources.get(name) !== true)
+      .filter((name) => this.resources.enabledOf(name) !== true)
       .map((resource) => ({
         resource,
-        problem: this.resources.has(resource) ? 'disabled' : 'unknown',
+        problem: this.resources.enabledOf(resource) === undefined ? 'unknown' : 'disabled',
       }));
     if (unavailable.length > 0) {
-      return failure(409, 'resources_unavailable', 'A shared resource is not available.', {
-        problems: unavailable,
-      });
+      return {
+        refusal: failure(409, 'resources_unavailable', 'A shared resource is not available.', {
+          problems: unavailable,
+        }),
+      };
     }
 
     const effective = Object.fromEntries(
@@ -383,12 +491,12 @@ export class FakeBackend {
     );
     const run: FakeRun = {
       runId: randomUUID(),
-      owner: caller.name,
+      owner: spec.owner ?? artifact.uploadedBy,
       state: 'QUEUED',
       contentHash,
       pipeline,
       className: definition.className,
-      source: { kind: 'MANUAL', name: caller.name },
+      source: spec.source,
       parameters: effective,
       createdAt: new Date().toISOString(),
       startedAt: null,
@@ -402,7 +510,7 @@ export class FakeBackend {
     };
     this.runs.push(run);
     if (this.autoRun) this.later(this.startDelayMs, () => this.begin(run));
-    return answer(201, this.runDoc(run), { Location: `/api/v1/runs/${run.runId}` });
+    return { run };
   }
 
   private find(caller: FakeCallerRef, runId: string): FakeRun | null {
@@ -478,7 +586,7 @@ export class FakeBackend {
       sizeBytes: 1000,
       uploadedBy,
       uploadedAt: options.uploadedAt ?? new Date().toISOString(),
-      definitions: pipelines.map(describe),
+      definitions: pipelines.map((p) => this.describe(p)),
     });
     return contentHash;
   }
@@ -556,10 +664,20 @@ export class FakeBackend {
     if (at >= 0) this.runs.splice(at, 1);
   }
 
+  /** A run that holds the shared resource, as it is. */
+  seedHolder(resource: string, runId: string, pipeline: string) {
+    this.resources.seedHolder(resource, runId, pipeline);
+  }
+
+  /** A run that waits for the shared resource, as it is. */
+  seedWaiter(resource: string, runId: string, pipeline: string) {
+    this.resources.seedWaiter(resource, runId, pipeline);
+  }
+
   /** A shared resource that an admin has defined. */
-  defineResource(name: string, enabled = true) {
+  defineResource(name: string, enabled = true, capacity = 1) {
     if (!RESOURCE_NAME.test(name)) throw new Error('not a resource name');
-    this.resources.set(name, enabled);
+    this.resources.define(name, { enabled, capacity });
   }
 
   // ---- the sample pipelines, run ---------------------------------------------------------------
@@ -576,10 +694,27 @@ export class FakeBackend {
     run.state = state;
     run.finishedAt = new Date().toISOString();
     run.failure = failureOf;
+    this.resources.releaseAll(run.runId);
   }
 
   private begin(run: FakeRun) {
     if (run.state !== 'QUEUED') return; // cancelled while it waited
+    const needs = this.definitionOf(run.contentHash, run.pipeline)?.metadata.resources ?? [];
+    if (needs.length === 0) return this.start(run);
+    const outcome = this.resources.acquire(run, needs, {
+      granted: () => this.start(run),
+      refused: () =>
+        this.finish(run, 'FAILED', {
+          type: 'ResourceUnavailable',
+          message: 'A shared resource the run waited for was disabled.',
+          trace: '',
+        }),
+    });
+    if (outcome === 'waiting') run.state = 'WAITING_FOR_RESOURCES';
+  }
+
+  /** The run holds what it needs: it starts, and the sample pipelines do what they do. */
+  private start(run: FakeRun) {
     run.state = 'RUNNING';
     run.startedAt = new Date().toISOString();
     // A run that was cancelled writes nothing more and does not end again.
@@ -625,39 +760,75 @@ export class FakeBackend {
       } else this.later(delay, next);
       return;
     }
+    if (run.pipeline === 'demo-resource') {
+      say('holding demo-printer for 20 seconds');
+      this.later(this.resourceHoldMs, () => {
+        if (!going()) return;
+        say('released');
+        this.finish(run, 'SUCCEEDED', null);
+      });
+      return;
+    }
     say(`${run.pipeline} ran`);
     this.finish(run, 'SUCCEEDED', null);
   }
-}
 
-function describe(pipeline: FakePipeline): Definition {
-  const reasons = (pipeline.reasons ?? []).map((r) => ({
-    kind: r.kind,
-    category: r.category ?? null,
-    className: r.className ?? null,
-    member: r.member ?? null,
-    path: r.path ?? [],
-    detail: r.detail ?? null,
-  }));
-  return {
-    className: pipeline.className,
-    name: pipeline.name,
-    metadata: {
-      parameters: (pipeline.parameters ?? []).map((p) => ({
-        name: p.name,
-        required: p.required,
-        default: p.default ?? null,
+  /** What the analysis of a pipeline of a jar of the Fake comes to under the allow-list in force. */
+  private describe(pipeline: FakePipeline): Definition {
+    const given = (pipeline.reasons ?? []).map((r) => ({
+      kind: r.kind,
+      category: r.category ?? null,
+      className: r.className ?? null,
+      member: r.member ?? null,
+      path: r.path ?? [],
+      detail: r.detail ?? null,
+    }));
+    const references = [
+      ...given
+        .filter((r) => r.kind === 'NOT_ALLOW_LISTED' && r.className !== null)
+        .map((r) => ({ className: r.className!, path: r.path })),
+      ...(pipeline.references ?? []).map((className) => ({
+        className,
+        path: [pipeline.className, className],
       })),
-      files: pipeline.files ?? [],
-      network: { unrestricted: pipeline.networkUnrestricted ?? false, allow: [] },
-      processes: { unrestricted: pipeline.processesUnrestricted ?? false, allow: [] },
-      resources: pipeline.resources ?? [],
-    },
-    verdict: reasons.length > 0 ? 'UNSAFE' : 'SAFE',
-    reasons,
-    allowListVersion: '1',
-    allowUnsafeExecution: false,
-    unsafeSetBy: null,
-    unsafeSetAt: null,
-  };
+    ];
+    const definition: Definition = {
+      className: pipeline.className,
+      name: pipeline.name,
+      metadata: {
+        parameters: (pipeline.parameters ?? []).map((p) => ({
+          name: p.name,
+          required: p.required,
+          default: p.default ?? null,
+        })),
+        files: pipeline.files ?? [],
+        network: { unrestricted: pipeline.networkUnrestricted ?? false, allow: [] },
+        processes: { unrestricted: pipeline.processesUnrestricted ?? false, allow: [] },
+        resources: pipeline.resources ?? [],
+      },
+      verdict: 'SAFE',
+      reasons: [],
+      fixedReasons: given.filter((r) => r.kind !== 'NOT_ALLOW_LISTED'),
+      references,
+      allowListVersion: String(this.allowList.current.version),
+      allowUnsafeExecution: false,
+      unsafeSetBy: null,
+      unsafeSetAt: null,
+    };
+    // What the author gave as reasons stands as it was given; the references are judged.
+    const judged = judge(definition, this.allowList.entries);
+    const uncovered = judged.reasons.filter(
+      (r) => r.kind === 'NOT_ALLOW_LISTED' && !given.some((g) => g.kind === r.kind && g.className === r.className),
+    );
+    definition.reasons = [...given, ...uncovered];
+    definition.verdict = definition.reasons.length > 0 ? 'UNSAFE' : 'SAFE';
+    return definition;
+  }
+
+  /** Every pipeline of every version, with the hash of the version. */
+  allDefinitions(): Array<{ contentHash: string; definition: Definition }> {
+    return [...this.artifacts.values()].flatMap((a) =>
+      a.definitions.map((definition) => ({ contentHash: a.contentHash, definition })),
+    );
+  }
 }

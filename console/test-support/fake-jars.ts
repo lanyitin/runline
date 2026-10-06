@@ -35,6 +35,8 @@ export interface FakePipeline {
   processesUnrestricted?: boolean;
   resources?: string[];
   reasons?: FakeReason[];
+  /** Classes the pipeline refers to: UNSAFE for as long as no allow-list entry covers one. */
+  references?: string[];
 }
 
 /** A jar of the Fake with these pipelines (and a class file's name, so that it looks like a jar). */
@@ -54,11 +56,14 @@ const slow: FakePipeline = {
     { name: 'steps', required: false, default: '30' },
     { name: 'delayMillis', required: false, default: '1000' },
   ],
+  // As the sample pipelines print: the allow-list has to cover this class, as it does by default.
+  references: ['java.io.PrintStream'],
 };
 const failing: FakePipeline = {
   name: 'demo-failing',
   className: 'samples.failing.FailingPipeline',
   parameters: [{ name: 'reason', required: false, default: 'the demo failed on purpose' }],
+  references: ['java.io.PrintStream'],
 };
 const unsafe: FakePipeline = {
   name: 'demo-unsafe',
@@ -79,6 +84,7 @@ const resource: FakePipeline = {
   name: 'demo-resource',
   className: 'samples.resource.ResourcePipeline',
   resources: ['demo-printer'],
+  references: ['java.io.PrintStream'],
 };
 
 export interface DemoJars {

@@ -2,14 +2,18 @@
   import { tick } from 'svelte';
   import { useApp } from './app/context';
   import { isNavRoute, matchRoute, ROUTES, type MatchedRoute } from './app/routes';
+  import AllowListPage from './pages/AllowListPage.svelte';
   import CreateRunPage from './pages/CreateRunPage.svelte';
   import EnginePage from './pages/EnginePage.svelte';
   import Forbidden from './pages/Forbidden.svelte';
   import NotFound from './pages/NotFound.svelte';
   import OverviewPage from './pages/OverviewPage.svelte';
-  import PagePlaceholder from './pages/PagePlaceholder.svelte';
   import PipelineDetailPage from './pages/PipelineDetailPage.svelte';
+  import TriggerDetailPage from './pages/TriggerDetailPage.svelte';
+  import TriggerFormPage from './pages/TriggerFormPage.svelte';
+  import TriggersPage from './pages/TriggersPage.svelte';
   import PipelinesPage from './pages/PipelinesPage.svelte';
+  import ResourcesPage from './pages/ResourcesPage.svelte';
   import RunDetailPage from './pages/RunDetailPage.svelte';
   import RunsPage from './pages/RunsPage.svelte';
   import UploadPage from './pages/UploadPage.svelte';
@@ -84,8 +88,18 @@
           <RunDetailPage runId={route.params.runId} />
         {:else if route.id === 'engine'}
           <EnginePage />
-        {:else}
-          <PagePlaceholder id={route.id} />
+        {:else if route.id === 'allowlist'}
+          <AllowListPage />
+        {:else if route.id === 'resources'}
+          <ResourcesPage />
+        {:else if route.id === 'triggers'}
+          <TriggersPage />
+        {:else if route.id === 'triggerNew'}
+          <TriggerFormPage mode="create" />
+        {:else if route.id === 'triggerEdit'}
+          <TriggerFormPage mode="edit" />
+        {:else if route.id === 'trigger'}
+          <TriggerDetailPage />
         {/if}
       {/key}
     {/if}

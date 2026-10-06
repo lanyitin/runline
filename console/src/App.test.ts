@@ -71,9 +71,50 @@ describe('the pages of a developer', () => {
     expect(view.querySelector('main')!.textContent).not.toContain('first-one');
   });
 
-  test('the pages of the admin are still not built, and say so', async () => {
-    const view = await withApp({ identity: admin, path: '/triggers' });
-    expect(view.querySelector('main')!.textContent).toContain('This page is not built yet.');
+});
+
+describe('the pages of an admin', () => {
+  test.each([
+    ['/triggers', 'Triggers'],
+    ['/triggers/new', 'New trigger'],
+    ['/allowlist', 'Allow-list'],
+    ['/resources', 'Resources'],
+  ])('%s is the page %s, not a placeholder', async (path, title) => {
+    const view = await withApp({ identity: admin, path });
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toBe(title));
+    expect(view.querySelector('main')!.textContent).not.toContain('This page is not built yet.');
+  });
+
+  test('a page of one trigger, under Triggers in the breadcrumb and the navigation', async () => {
+    app = await createTestApp({ identity: admin, path: '/' });
+    const hash = app.engine.backend.seedArtifact('Ada', [{ name: 'demo-slow', className: 'x.S' }]);
+    app.engine.backend.triggers.seed({ name: 'on.push', contentHash: hash, pipeline: 'demo-slow' });
+    app.context.router.navigate('/triggers/detail?name=on.push');
+    const view = app.mount(App);
+
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toBe('on.push'));
+    const crumbs = [...view.querySelectorAll('header ol li')].map((li) => li.textContent!.replace('›', '').trim());
+    expect(crumbs).toEqual(['Automation', 'Triggers', 'Trigger']);
+    expect(view.querySelector('nav a[href="/triggers"]')!.getAttribute('aria-current')).toBe('true');
+  });
+
+  test('the change of a trigger is its own page', async () => {
+    app = await createTestApp({ identity: admin, path: '/' });
+    const hash = app.engine.backend.seedArtifact('Ada', [{ name: 'demo-slow', className: 'x.S' }]);
+    app.engine.backend.triggers.seed({ name: 'on.push', contentHash: hash, pipeline: 'demo-slow' });
+    app.context.router.navigate('/triggers/edit?name=on.push');
+    const view = app.mount(App);
+
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toBe('Edit trigger'));
+    await vi.waitFor(() => expect(view.querySelector('.fixed-name')!.textContent).toBe('on.push'));
+  });
+
+  test('a developer who opens the page of a trigger is told it is for admins, and the Engine is not asked', async () => {
+    app = await createTestApp({ identity: developer, path: '/triggers/detail?name=x' });
+    const before = app.engine.requests;
+    const view = app.mount(App);
+    expect(view.querySelector('main h1')!.textContent).toBe('Admins only');
+    expect(app.engine.log.slice(before).filter((r) => r.path.includes('/triggers'))).toEqual([]);
   });
 });
 

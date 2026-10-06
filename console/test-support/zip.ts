@@ -89,3 +89,25 @@ export function readZip(bytes: Uint8Array): Map<string, Uint8Array> | null {
   }
   return entries;
 }
+
+/**
+ * [bytes] with [tag] added to the comment of the zip: the same entries, other bytes, so a new
+ * version for the Engine (its identity is the hash of the bytes). A jar may have a comment, and
+ * neither the Engine nor a reader of the entries sees it.
+ */
+export function uniqueJar(bytes: Uint8Array, tag: string): Uint8Array {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let i = buffer.length - 22; i >= Math.max(0, buffer.length - 22 - 65_535); i -= 1) {
+    // The end record whose comment reaches the end of the file is the one.
+    if (buffer.readUInt32LE(i) === 0x06054b50 && i + 22 + buffer.readUInt16LE(i + 20) === buffer.length) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error('not a zip file');
+  const comment = Buffer.concat([buffer.subarray(end + 22), Buffer.from(`${tag};`, 'utf8')]);
+  const record = Buffer.from(buffer.subarray(end, end + 22));
+  record.writeUInt16LE(comment.length, 20);
+  return Buffer.concat([buffer.subarray(0, end), record, comment]);
+}

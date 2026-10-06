@@ -4,7 +4,7 @@
 // enumerations (`state`, `verdict`, `stream`, the kinds of reasons) are kept as they came: one that
 // a newer Engine adds is shown as it is (i18n/enums.ts), not refused.
 
-import { ApiFailure } from './failure.ts';
+import { bool, list, num, obj, str, strOrNull, strings, type Obj } from './parse.ts';
 
 export interface ParameterSpec {
   name: string;
@@ -103,37 +103,6 @@ export interface Cancellation {
   state: string;
   cancellation: string;
 }
-
-const bad = (what: string) =>
-  new ApiFailure(0, null, `an answer of the Engine is not as 08-api.md says: ${what}`);
-
-type Obj = Record<string, unknown>;
-const obj = (value: unknown, what: string): Obj => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw bad(what);
-  return value as Obj;
-};
-const str = (value: unknown, what: string): string => {
-  if (typeof value !== 'string') throw bad(what);
-  return value;
-};
-const strOrNull = (value: unknown, what: string): string | null => {
-  if (value === null || value === undefined) return null;
-  return str(value, what);
-};
-const bool = (value: unknown, what: string): boolean => {
-  if (typeof value !== 'boolean') throw bad(what);
-  return value;
-};
-const num = (value: unknown, what: string): number => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw bad(what);
-  return value;
-};
-const list = <T>(value: unknown, what: string, item: (v: unknown, i: number) => T): T[] => {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) throw bad(what);
-  return value.map(item);
-};
-const strings = (value: unknown, what: string): string[] => list(value, what, (v) => str(v, what));
 
 const access = (value: unknown, what: string) => {
   const record = obj(value, what);

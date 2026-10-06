@@ -2,6 +2,7 @@
   import { createPolled } from '../api/polled.svelte';
   import type { Pipeline } from '../api/model';
   import { useApp } from '../app/context';
+  import PipelineAdminSection from '../admin/PipelineAdminSection.svelte';
   import { newRunHref, pipelineHref } from '../app/links';
   import { enumLabel } from '../i18n/enums';
   import { formatBytes } from '../i18n/format';
@@ -22,7 +23,10 @@
   }
   let { contentHash }: Props = $props();
 
-  const { i18n, api, router } = useApp();
+  const { i18n, api, router, session } = useApp();
+  const isAdmin = $derived(
+    session.state.status === 'authenticated' && session.state.identity.role === 'admin',
+  );
 
   const version = createPolled({
     load: () => api.artifact(contentHash),
@@ -257,6 +261,15 @@
             {/each}
           </ul>
         </section>
+      {/if}
+
+      {#if isAdmin}
+        <PipelineAdminSection
+          {artifact}
+          {pipeline}
+          onchanged={() => version.reload()}
+          ondeleted={() => router.navigate('/pipelines')}
+        />
       {/if}
 
       {#if artifact.limitations}

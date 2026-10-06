@@ -199,10 +199,10 @@ describe('the pipelines', () => {
     const context = await newContext(browser, 'en-US');
     const { page, problems } = await signedIn(context, ada, '/pipelines');
 
-    const slow = page.locator('tbody tr', { hasText: 'demo-slow' });
+    const slow = page.locator('tbody tr', { hasText: 'demo-slow' }).first();
     await slow.waitFor();
     expect(await slow.locator('.badge').innerText()).toContain('SAFE');
-    const unsafe = page.locator('tbody tr', { hasText: 'demo-unsafe' });
+    const unsafe = page.locator('tbody tr', { hasText: 'demo-unsafe' }).first();
     expect(await unsafe.locator('.badge').innerText()).toContain('UNSAFE');
     await shot(page, 'pipelines-en');
 
@@ -216,6 +216,7 @@ describe('the pipelines', () => {
     await page.goto(`${engineUrl}/pipelines`);
     await page
       .locator('tbody tr', { hasText: 'demo-unsafe' })
+      .first()
       .getByRole('link', { name: 'Details' })
       .click();
     await page.getByRole('heading', { name: 'demo-unsafe', level: 1 }).waitFor();
@@ -469,6 +470,15 @@ describe('creating a run and watching it', () => {
       .waitFor();
     await shot(page, 'create-run-unsafe-en');
 
+    // An Engine cannot delete a shared resource: when the admin tests defined demo-printer, it is
+    // disabled here, and the Engine says that instead.
+    const defined = (await api(root, '/api/v1/resources/demo-printer')).status === 200;
+    if (defined) {
+      await api(root, '/api/v1/resources/demo-printer', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: false }),
+      });
+    }
     await page.goto(
       `${engineUrl}/runs/new?contentHash=${resource.contentHash}&pipeline=demo-resource`,
     );
@@ -478,7 +488,7 @@ describe('creating a run and watching it', () => {
       .getByText('A shared resource the pipeline needs is not defined or is disabled.')
       .waitFor();
     expect(await alert.locator('.problems li').allTextContents()).toEqual([
-      'demo-printer: no such shared resource.',
+      defined ? 'demo-printer: the shared resource is disabled.' : 'demo-printer: no such shared resource.',
     ]);
     await shot(page, 'create-run-resource-en');
 

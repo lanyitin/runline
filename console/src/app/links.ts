@@ -17,3 +17,13 @@ export function newRunHref(
   for (const [name, value] of Object.entries(parameters)) query.set(`param.${name}`, value);
   return `/runs/new?${query}`;
 }
+
+/** The page of a trigger, and the page that changes it: the name is in the query (it may have a dot). */
+export const triggerHref = (name: string) => `/triggers/detail?${new URLSearchParams({ name })}`;
+export const triggerEditHref = (name: string) => `/triggers/edit?${new URLSearchParams({ name })}`;
+
+/** The page that makes a trigger, with the version and pipeline it is to run, if they are known. */
+export function newTriggerHref(contentHash?: string, pipeline?: string): string {
+  if (contentHash === undefined || pipeline === undefined) return '/triggers/new';
+  return `/triggers/new?${new URLSearchParams({ contentHash, pipeline })}`;
+}

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { readZip, storedZip } from './zip';
+import { readZip, storedZip, uniqueJar } from './zip';
 
 const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
 
@@ -28,4 +28,22 @@ test('what is not a zip is not read as one', () => {
 test('a zip that is cut short is not read as one', () => {
   const zip = storedZip({ 'a.txt': 'alpha' });
   expect(readZip(zip.slice(0, zip.length - 10))).toBeNull();
+});
+
+test('a jar with a comment is another file with the same entries: a new version of the same pipelines', () => {
+  const zip = storedZip({ 'a.txt': 'alpha', 'b.txt': 'beta' });
+  const first = uniqueJar(zip, 'one');
+  const second = uniqueJar(zip, 'two');
+
+  expect(first).not.toEqual(zip);
+  expect(first).not.toEqual(second);
+  expect([...readZip(first)!.keys()]).toEqual(['a.txt', 'b.txt']);
+  expect(text(readZip(second)!.get('b.txt'))).toBe('beta');
+});
+
+test('a comment is added to a jar that has one already, and the entries are still read', () => {
+  const once = uniqueJar(storedZip({ 'a.txt': 'alpha' }), 'one');
+  const twice = uniqueJar(once, 'two');
+  expect(twice).not.toEqual(once);
+  expect(text(readZip(twice)!.get('a.txt'))).toBe('alpha');
 });

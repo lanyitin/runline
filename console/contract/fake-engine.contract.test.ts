@@ -1,6 +1,7 @@
 import { afterAll, beforeAll } from 'vitest';
 import { FakeEngine } from '../test-support/fake-engine';
 import { demoJars } from '../test-support/fake-jars';
+import { describeAdminContract } from './admin-contract';
 import { describeInfoContract } from './info-contract';
 import { describePipelinesContract } from './pipelines-contract';
 import { describeSystemContract, parseCallers } from './system-contract';
@@ -25,6 +26,12 @@ afterAll(() => engine.stop());
 describeInfoContract('the Fake Engine', () => engine.url);
 describeSystemContract('the Fake Engine', () => engine.url, () => callers);
 describePipelinesContract('the Fake Engine', {
+  baseUrl: () => engine.url,
+  callers: () => callers,
+  jars: demoJars,
+  uploadLimitBytes,
+});
+describeAdminContract('the Fake Engine', {
   baseUrl: () => engine.url,
   callers: () => callers,
   jars: demoJars,

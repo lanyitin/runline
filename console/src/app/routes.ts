@@ -13,10 +13,16 @@ export type RouteId =
   | 'engine'
   | 'pipeline'
   | 'runNew'
-  | 'run';
+  | 'run'
+  | 'triggerNew'
+  | 'triggerEdit'
+  | 'trigger';
 
 /** The pages that the navigation lists: they have a name of their own there (`nav.<id>`). */
-export type NavRouteId = Exclude<RouteId, 'pipeline' | 'runNew' | 'run'>;
+export type NavRouteId = Exclude<
+  RouteId,
+  'pipeline' | 'runNew' | 'run' | 'triggerNew' | 'triggerEdit' | 'trigger'
+>;
 
 export interface AppRoute {
   /** Names the translations of the route (`nav.<id>` for those of the navigation, `page.<id>.title`). */
@@ -64,6 +70,11 @@ export const ROUTES: readonly AppRoute[] = [
   // Before `run`: "new" is no run id.
   { id: 'runNew', path: '/runs/new', group: 'workspace', adminOnly: false, nav: false, parent: 'runs' },
   { id: 'run', path: '/runs/:runId', group: 'workspace', adminOnly: false, nav: false, parent: 'runs' },
+  // The name of a trigger may have a dot, so it is in the query (`?name=`), as the name of a
+  // pipeline is: the Engine would take a path with a dot for a file.
+  { id: 'triggerNew', path: '/triggers/new', group: 'automation', adminOnly: true, nav: false, parent: 'triggers' },
+  { id: 'triggerEdit', path: '/triggers/edit', group: 'automation', adminOnly: true, nav: false, parent: 'triggers' },
+  { id: 'trigger', path: '/triggers/detail', group: 'automation', adminOnly: true, nav: false, parent: 'triggers' },
 ];
 
 const GROUP_ORDER: readonly NavGroupId[] = ['workspace', 'automation', 'admin'];

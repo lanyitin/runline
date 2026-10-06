@@ -5,6 +5,8 @@
 // that is no answer is an `ApiFailure` with status 0.
 
 import { ApiFailure } from './failure.ts';
+import { jsonCall, send, succeed, type Transport } from './call.ts';
+import { createAdminApi } from './admin-api.ts';
 import {
   parseArtifact,
   parseCancellation,
@@ -19,20 +21,6 @@ import {
   type Run,
 } from './model.ts';
 
-/** The parts of the session the API needs. */
-export interface Transport {
-  request(path: string, init?: RequestInit): Promise<Response>;
-  upload(
-    path: string,
-    body: Blob,
-    options?: {
-      contentType?: string;
-      signal?: AbortSignal;
-      onProgress?: (sent: number, total: number) => void;
-    },
-  ): Promise<Response>;
-}
-
 export interface CreateRunRequest {
   contentHash: string;
   pipeline: string;
@@ -44,46 +32,12 @@ export interface UploadOptions {
   onProgress?: (sent: number, total: number) => void;
 }
 
-async function read(response: Response): Promise<unknown> {
-  let text: string;
-  try {
-    text = await response.text();
-  } catch (error) {
-    throw new ApiFailure(0, null, `the answer of the Engine could not be read: ${String(error)}`);
-  }
-  if (text === '') return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return response.ok ? undefined : null;
-  }
-}
-
-/** The body of a success, or the failure the Engine answered. */
-async function succeed(response: Response): Promise<unknown> {
-  const body = await read(response);
-  if (!response.ok) throw new ApiFailure(response.status, body);
-  if (body === undefined) throw new ApiFailure(0, null, 'an answer of the Engine is not JSON');
-  return body;
-}
-
-async function send(transport: Transport, path: string, init?: RequestInit): Promise<Response> {
-  try {
-    return await transport.request(path, init);
-  } catch (error) {
-    throw error instanceof ApiFailure ? error : new ApiFailure(0, null, String(error));
-  }
-}
-
 export function createEngineApi(transport: Transport) {
-  const json = (path: string, init: RequestInit = {}) =>
-    send(transport, path, {
-      ...init,
-      headers: { Accept: 'application/json', ...init.headers },
-      cache: 'no-store',
-    });
+  const json = jsonCall(transport);
 
   return {
+    ...createAdminApi(transport),
+
     /** Puts a jar on the Engine: a new version (201), or the one that has these bytes already (200). */
     async uploadJar(
       file: Blob,

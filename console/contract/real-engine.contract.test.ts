@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { storedZip } from '../test-support/zip';
 import type { DemoJars } from '../test-support/fake-jars';
+import { describeAdminContract } from './admin-contract';
 import { describeInfoContract } from './info-contract';
 import { describePipelinesContract } from './pipelines-contract';
 import { describeSystemContract, parseCallers } from './system-contract';
@@ -50,5 +51,11 @@ describePipelinesContract('the real Engine', {
   baseUrl: () => url,
   callers: () => callers,
   jars,
+  uploadLimitBytes,
+});
+describeAdminContract('the real Engine', {
+  baseUrl: () => url,
+  callers: () => callers,
+  jars: jars,
   uploadLimitBytes,
 });

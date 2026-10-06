@@ -356,10 +356,18 @@ export function describePipelinesContract(name: string, setup: PipelinesContract
 
     test('a shared resource that is not defined is a 409 resources_unavailable, each named', async () => {
       const { contentHash } = await uploaded(ada(), setup.jars().resource);
+      // The Engine cannot delete a shared resource: on an Engine where an earlier run of the
+      // contract tests (the admin's) defined it, it is disabled here, so the problem is the other one.
+      const defined = await call(root(), 'GET', '/api/v1/resources/demo-printer');
+      if (defined.status === 200) {
+        await call(root(), 'PATCH', '/api/v1/resources/demo-printer', JSON.stringify({ enabled: false }), 'application/json');
+      }
       const { status, body } = await createRun(ada(), { contentHash, pipeline: 'demo-resource' });
       expect(status).toBe(409);
       expect(body.error).toBe('resources_unavailable');
-      expect(body.problems).toEqual([{ resource: 'demo-printer', problem: 'unknown' }]);
+      expect(body.problems).toEqual([
+        { resource: 'demo-printer', problem: defined.status === 200 ? 'disabled' : 'unknown' },
+      ]);
     });
 
     test('a version or pipeline that is not there, or is not yours, is a 404 definition_not_found', async () => {

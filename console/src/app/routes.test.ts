@@ -49,6 +49,26 @@ describe('matchRoute', () => {
   );
 });
 
+describe('the pages of one trigger', () => {
+  test.each([
+    ['/triggers/new', 'triggerNew'],
+    ['/triggers/detail', 'trigger'],
+    ['/triggers/edit', 'triggerEdit'],
+  ])('%s is %s: for admins only, not in the navigation, under the triggers', (path, id) => {
+    expect(matchRoute(path)).toMatchObject({
+      id,
+      adminOnly: true,
+      nav: false,
+      group: 'automation',
+      parent: 'triggers',
+    });
+  });
+
+  test('the name of a trigger is in the query, not in the path: a name may have a dot, which the Engine would take for a file', () => {
+    expect(matchRoute('/triggers/hook.one')).toBeNull();
+  });
+});
+
 describe('navGroups', () => {
   test('a developer sees the workspace, the Engine page included, and no admin item', () => {
     const groups = navGroups('developer');

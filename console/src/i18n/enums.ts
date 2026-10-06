@@ -1,7 +1,16 @@
 import type { Translate } from './translator';
 
 /** The enumerations of the API that the Console shows as words, by the group of their keys. */
-export type EnumGroup = 'runState' | 'verdict' | 'reasonKind' | 'runSource' | 'logStream';
+export type EnumGroup =
+  | 'runState'
+  | 'verdict'
+  | 'reasonKind'
+  | 'runSource'
+  | 'logStream'
+  | 'triggerKind'
+  | 'firingOutcome'
+  | 'allowAction'
+  | 'allowKind';
 
 /**
  * The words for a value of an enumeration of the API (`state`, `verdict`, `reasons[].kind`, ...),

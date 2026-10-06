@@ -128,7 +128,7 @@ The build writes what it knows about itself into `engine.jar` (resource `runline
 ## Reproducible release builds (WI-32, ADR-016)
 A release build of the same commit gives the same bytes: `engine.jar` and every jar of `engineDistribution` have the same SHA-256 each time. What makes it so: the build info holds only values of the commit (above); Gradle writes the jars with sorted entries, a fixed entry time and fixed permissions; the Console is built from `package-lock.json` (`npm ci`) with the Node of `.node-version`, and Vite names files by the hash of their content and writes no time or path.
 
-**The fixed build platform** (a proposal, to be confirmed by the architect): the image of `release/Dockerfile`, run as **linux/amd64** (on an Apple Silicon machine that is emulation, so it is slow). It is Eclipse Temurin 25 (the project's JDK) pinned by digest, plus exactly the Node of `.node-version` (checksum-verified), git and nothing else that matters to the jars. The guarantee is given only there; the same commit built on another operating system or CPU architecture is expected to give the same bytes but is not guaranteed.
+**The fixed build platform** (confirmed 2026-10-06): the image of `release/Dockerfile`, run as **linux/amd64** (on an Apple Silicon machine that is emulation, so it is slow). It is Eclipse Temurin 25 (the project's JDK) pinned by digest, plus exactly the Node of `.node-version` (checksum-verified), git and nothing else that matters to the jars. The guarantee is given only there; the same commit built on another operating system or CPU architecture is expected to give the same bytes but is not guaranteed.
 
 **Verify** (needs Docker; with colima set `DOCKER_HOST` as in `dev/README.md`):
 

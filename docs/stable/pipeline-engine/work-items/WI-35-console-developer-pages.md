@@ -5,6 +5,7 @@
 ## 行為與驗收條件
 
 - **總覽**：顯示目前進行中與最近的 run 與重點數字（依呼叫者的可見範圍）。
+- **Engine**：顯示 `GET /api/v1/system` 的內容（版本、完整 commit hash 與是否有未提交變更、commit 時間、JDK、啟動時間與運行時間、白名單版本、呼叫者名稱與角色）。開發人員與管理員都可見，不屬於管理員導覽；欄位語意與 WI-34 的 Engine 晶片一致。
 - **Pipelines**：列出 definition（`GET /api/v1/definitions`），顯示名稱、所屬版本（contentHash）、上傳者與時間、判定（SAFE／UNSAFE）與 `allowListVersion`；詳細頁顯示 metadata（參數、檔案、網路、行程、資源）、`reasons[]`（各 `kind` 的內容與 `path[]`）、`warnings[]`、`limitations`。
 - **上傳**：選擇 jar 上傳（`POST /api/v1/artifacts`）；顯示 201（新版本）與 200（相同內容已存在）的差異；413 與 422 的各錯誤代碼以多語系訊息呈現，指出 `message` 中的項目名稱等具體資訊（以純文字顯示）；上傳中可見進度與可取消。
 - **建立 run**：依 pipeline 宣告的參數產生表單；`invalid_parameters` 的 `problems[]` 對應到欄位；`unsafe_not_allowed`、`resources_unavailable`、`definition_not_found` 以清楚的訊息說明（`problems[]` 逐項呈現）。
@@ -19,10 +20,10 @@
 - 所有文字有 zh-TW 與 en；日期、數字依語系格式化。
 
 **驗收方式**
-- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）、真實編譯的測試 pipeline jar 與真實瀏覽器引擎走完整流程：上傳 → 建立 run → 觀察狀態與 log 輪詢 → 取消。log 輪詢的暫停、退避與停止條件以真實行為驗證（時間由可控制的時鐘或明確的等待條件提供，不以隨意睡眠換取通過）。不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）。
-- 前端單元測試涵蓋游標與去重邏輯、錯誤代碼對應。
+- 前端單元測試涵蓋游標與去重邏輯、錯誤代碼對應，納入 `check`。
+- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）、真實編譯的測試 pipeline jar 與真實瀏覽器引擎走完整流程：上傳 → 建立 run → 觀察狀態與 log 輪詢 → 取消。這些以本機手動執行的腳本驗證（端對端 `npm run e2e`、契約 `npm run test:contract`，不接進 Gradle `check`，見 [ADR-015](../adr/ADR-015-console-frontend.md)），並在回報中附上執行結果。log 輪詢的暫停、退避與停止條件以真實行為驗證（時間由可控制的時鐘或明確的等待條件提供，不以隨意睡眠換取通過）。不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）。
 
 ## 架構約束
 
 - 只使用既有 API，不新增或修改端點；不使用 WebSocket 端點。
-- 不新增 CI；前端測試納入 `check`。
+- 不新增 CI；前端單元測試納入 `check`，真實瀏覽器腳本為手動執行。

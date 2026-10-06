@@ -17,7 +17,7 @@ Token 長效且無法單獨撤銷，XSS 緩解是 Console 的上線條件。本�
 - 驗證結果與發現回報；任何無法通過者停下來回報，不以放寬斷言換取通過。
 
 **驗收方式**
-- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）、真實編譯的 jar 與真實瀏覽器引擎；不使用 Stub 或 Mock。這些驗證納入前端測試（`check`）或明確的本機指令，並在 README 說明。
+- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）、真實編譯的 jar 與真實瀏覽器引擎；不使用 Stub 或 Mock。需要真實瀏覽器與執行中 Engine 的驗證以本機手動執行的腳本進行（不接進 Gradle `check`，見 [ADR-015](../adr/ADR-015-console-frontend.md)），並在 README 說明執行方式、在回報中附上執行結果；靜態檢查規則與相依漏洞檢查等不需要瀏覽器的部分可納入 `check` 或明確的本機指令。
 
 ## 架構約束
 

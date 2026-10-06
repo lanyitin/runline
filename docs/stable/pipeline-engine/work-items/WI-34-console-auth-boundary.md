@@ -13,7 +13,7 @@ Token 登入是過渡機制，日後會被 OIDC 與帳號密碼取代（另開 A
 - Token 的輸入畫面只屬於 token 登入方式；登入頁的外殼（版本與 hash、語系切換）與登入方式無關。
 
 **Token 登入與工作階段**
-- 登入：輸入 token 後以 `GET /api/v1/system` 驗證；401 顯示無效並不保存；成功取得名稱與角色，導覽依角色顯示（管理員專屬頁僅管理員可見，直接輸入網址也被擋並導向適當畫面）。
+- 登入：輸入 token 後以 `GET /api/v1/system` 驗證；401 顯示無效並不保存；成功取得名稱與角色，導覽依角色顯示（管理員專屬頁僅管理員可見，直接輸入網址也被擋並導向適當畫面）；Engine 頁（`GET /api/v1/system` 的內容，開發人員也可存取）對開發人員與管理員都可見，不屬於管理員導覽。
 - 保存在 sessionStorage，不使用 localStorage，不提供「記住我」；token 不出現在網址、路由、歷史、前端 log 與錯誤回報。
 - 跨分頁（BroadcastChannel，同源）：新分頁啟動時向已登入的分頁請求憑證，取得後存入自己的 sessionStorage，逾時沒有回覆則顯示登入畫面；登入、登出與「401 而清除」都廣播，所有分頁同步；登出傳播到所有分頁並回到登入畫面。頻道只傳登入狀態事件與憑證。
 - 競態與邊界有驗收：兩個分頁同時啟動、頻道無人回覆、登出與詢問同時發生、重新整理單一分頁（sessionStorage 保留）、所有分頁關閉後重新開啟（需重新登入）。
@@ -28,12 +28,12 @@ Token 登入是過渡機制，日後會被 OIDC 與帳號密碼取代（另開 A
 - 全部文字經 WI-33 的多語系機制。
 
 **驗收方式**
-- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）與真實瀏覽器引擎（多分頁情境需真實 BroadcastChannel 與 sessionStorage 行為）；單元測試涵蓋邊界的純邏輯。不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）。
-- 以真實 Engine 驗證：開發人員 token 看不到管理員頁，管理員 token 看得到；無效 token 被拒。
+- 單元測試涵蓋邊界的純邏輯，納入 `check`。多分頁情境需真實 BroadcastChannel 與 sessionStorage 行為，使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）與真實瀏覽器引擎，以本機手動執行的腳本驗證（端對端 `npm run e2e`、契約 `npm run test:contract`，不接進 Gradle `check`，見 [ADR-015](../adr/ADR-015-console-frontend.md)），並在回報中附上執行結果。不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）。
+- 以真實 Engine 驗證：開發人員 token 看不到管理員頁但看得到 Engine 頁，管理員 token 都看得到；無效 token 被拒。
 - 驗證邊界可替換：以一個自製的第二種登入方式（Fake，僅用於測試）接上邊界，證明畫面程式不需修改即可運作；此 Fake 不進入產物。
 
 ## 架構約束
 
 - 不改變 API 契約與 [ADR-012](../adr/ADR-012-api-authentication.md)；不新增登入端點或伺服器端工作階段。
 - 不設計 OIDC 或帳號密碼流程。
-- 不新增 CI；前端測試納入 `check`。
+- 不新增 CI；前端單元測試納入 `check`，真實瀏覽器腳本為手動執行。

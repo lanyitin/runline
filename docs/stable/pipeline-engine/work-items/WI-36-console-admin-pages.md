@@ -14,9 +14,10 @@
 - 所有 pipeline 或使用者提供的字串以純文字顯示；所有文字有 zh-TW 與 en。
 
 **驗收方式**
-- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）、真實編譯的測試 jar 與真實瀏覽器引擎，以管理員與開發人員兩種 token 驗證；預覽與套用的結果與 API 一致（含白名單變更後 pipeline 判定的實際變化）。webhook 密鑰只出現一次以真實瀏覽器行為驗證。不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）。
+- 使用真實的打包後 Engine、真實 PostgreSQL（Testcontainers）、真實編譯的測試 jar 與真實瀏覽器引擎，以管理員與開發人員兩種 token 驗證，以本機手動執行的腳本進行（不接進 Gradle `check`，見 [ADR-015](../adr/ADR-015-console-frontend.md)），並在回報中附上執行結果；純邏輯的前端單元測試納入 `check`；預覽與套用的結果與 API 一致（含白名單變更後 pipeline 判定的實際變化）。webhook 密鑰只出現一次以真實瀏覽器行為驗證。不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）。
 
 ## 架構約束
 
 - 只使用既有 API，不新增或修改端點。
-- 不新增 CI；前端測試納入 `check`。
+- 不新增 CI；前端單元測試納入 `check`，真實瀏覽器腳本為手動執行。
+- Engine 頁屬開發人員頁（WI-35），不在本項的管理員頁範圍。

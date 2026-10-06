@@ -28,10 +28,11 @@ export const ROUTES: readonly AppRoute[] = [
   { id: 'pipelines', path: '/pipelines', group: 'workspace', adminOnly: false },
   { id: 'runs', path: '/runs', group: 'workspace', adminOnly: false },
   { id: 'upload', path: '/upload', group: 'workspace', adminOnly: false },
+  // Open to developers: GET /api/v1/system, its data, is for developers and above.
+  { id: 'engine', path: '/engine', group: 'workspace', adminOnly: false },
   { id: 'triggers', path: '/triggers', group: 'automation', adminOnly: true },
   { id: 'allowlist', path: '/allowlist', group: 'admin', adminOnly: true },
   { id: 'resources', path: '/resources', group: 'admin', adminOnly: true },
-  { id: 'engine', path: '/engine', group: 'admin', adminOnly: true },
 ];
 
 const GROUP_ORDER: readonly NavGroupId[] = ['workspace', 'automation', 'admin'];

@@ -47,12 +47,12 @@ describe('before sign-in', () => {
 });
 
 describe('the shell of a signed-in user', () => {
-  test('a developer has the workspace in the navigation and no admin item', async () => {
+  test('a developer has the workspace and the Engine page in the navigation and no admin item', async () => {
     const view = await withApp({ identity: developer });
     const nav = view.querySelector('nav')!;
 
     const links = [...nav.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(links).toEqual(['/', '/pipelines', '/runs', '/upload']);
+    expect(links).toEqual(['/', '/pipelines', '/runs', '/upload', '/engine']);
     expect(nav.textContent).not.toContain('Allow-list');
     expect(nav.textContent).not.toContain('Admin');
   });
@@ -66,17 +66,17 @@ describe('the shell of a signed-in user', () => {
       '/pipelines',
       '/runs',
       '/upload',
+      '/engine',
       '/triggers',
       '/allowlist',
       '/resources',
-      '/engine',
     ]);
     expect([...nav.querySelectorAll('h2')].map((h) => h.textContent?.trim())).toEqual([
       'Workspace',
       'Automation',
       'Admin',
     ]);
-    expect(nav.querySelectorAll('.admin-tag').length).toBe(4);
+    expect(nav.querySelectorAll('.admin-tag').length).toBe(3);
   });
 
   test('says who is signed in and with which role, in words', async () => {
@@ -113,6 +113,12 @@ describe('the shell of a signed-in user', () => {
     const view = await withApp({ identity: developer, path: '/allowlist' });
     expect(view.querySelector('main h1')!.textContent).toBe('Admins only');
     expect(view.querySelector('main')!.textContent).toContain('Developer');
+  });
+
+  test('a developer opens the Engine page without being turned away', async () => {
+    const view = await withApp({ identity: developer, path: '/engine' });
+    expect(view.querySelector('main h1')!.textContent).toBe('Engine');
+    expect(view.querySelector('main')!.textContent).not.toContain('Admins only');
   });
 
   test('an admin opens the same page', async () => {

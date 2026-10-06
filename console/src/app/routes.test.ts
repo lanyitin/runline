@@ -24,10 +24,20 @@ describe('matchRoute', () => {
 });
 
 describe('navGroups', () => {
-  test('a developer sees the workspace and the automation, and no admin item', () => {
+  test('a developer sees the workspace, the Engine page included, and no admin item', () => {
     const groups = navGroups('developer');
     expect(groups.map((g) => g.id)).toEqual(['workspace']);
-    expect(groups[0].routes.map((r) => r.id)).toEqual(['overview', 'pipelines', 'runs', 'upload']);
+    expect(groups[0].routes.map((r) => r.id)).toEqual([
+      'overview',
+      'pipelines',
+      'runs',
+      'upload',
+      'engine',
+    ]);
+  });
+
+  test('the Engine page is open to developers', () => {
+    expect(matchRoute('/engine')).toMatchObject({ group: 'workspace', adminOnly: false });
   });
 
   test('an admin sees every group, the admin items marked', () => {
@@ -36,7 +46,6 @@ describe('navGroups', () => {
     expect(groups.find((g) => g.id === 'admin')!.routes.map((r) => r.id)).toEqual([
       'allowlist',
       'resources',
-      'engine',
     ]);
     expect(groups.find((g) => g.id === 'admin')!.adminOnly).toBe(true);
   });

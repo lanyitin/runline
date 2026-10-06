@@ -145,13 +145,13 @@ describe('the signed-in shell, built as production, behind the Engine headers', 
     return { context, page, problems };
   };
 
-  test('a developer sees the workspace, no admin page, and the Engine twice', async () => {
+  test('a developer sees the workspace and the Engine page, no admin page, and the Engine twice', async () => {
     const { context, page, problems } = await open('/runs?as=developer');
     await page.getByRole('heading', { name: 'Runs', level: 1 }).waitFor();
     await page.locator('aside').getByText(shortHash()).waitFor();
 
     const links = await page.locator('aside nav a').allInnerTexts();
-    expect(links.map((l) => l.trim())).toEqual(['Overview', 'Pipelines', 'Runs', 'Upload']);
+    expect(links.map((l) => l.trim())).toEqual(['Overview', 'Pipelines', 'Runs', 'Upload', 'Engine']);
     await page.locator('header').getByText(shortHash()).waitFor();
     expect(await violations(page)).toEqual([]);
     expect(problems).toEqual({ csp: [], console: [], foreign: [] });
@@ -162,7 +162,7 @@ describe('the signed-in shell, built as production, behind the Engine headers', 
   test('an admin has the admin pages marked, and a developer is turned away from them', async () => {
     const admin = await open('/allowlist?as=admin');
     await admin.page.getByRole('heading', { name: 'Allow-list', level: 1 }).waitFor();
-    expect(await admin.page.locator('aside nav .admin-tag').count()).toBe(4);
+    expect(await admin.page.locator('aside nav .admin-tag').count()).toBe(3);
     if (screenshots) await admin.page.screenshot({ path: `${screenshots}/shell-admin-en.png` });
     await admin.context.close();
 

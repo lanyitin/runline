@@ -1,0 +1,116 @@
+# Configuration comes only from environment variables (12-factor). A variable that is not set
+# yields an empty value; the Engine validates everything at startup and refuses to start when a
+# required one is missing (see EngineConfig).
+ktor:
+  deployment:
+    port: "$PORT:8080"
+    # Requests in flight are waited for by GracefulShutdown (bounded by RUNLINE_SHUTDOWN_GRACE_SECONDS),
+    # so the server itself has no further quiet period to keep. Its overall timeout is set from the
+    # same variable by main (see shutdownArguments).
+    shutdownGracePeriod: 100
+  application:
+    modules:
+      - dev.lawlan.runline.engine.DIKt.configureDependencyInjection
+      - dev.lawlan.runline.engine.LoggingKt.configureLogging
+      - dev.lawlan.runline.engine.GracefulShutdownKt.configureGracefulShutdown
+      - dev.lawlan.runline.engine.StartupKt.configureStartupChecks
+      - dev.lawlan.runline.engine.HttpKt.configureHttp
+      - dev.lawlan.runline.engine.MonitoringKt.configureMonitoring
+      - dev.lawlan.runline.engine.SerializationKt.configureSerialization
+      - dev.lawlan.runline.engine.SecurityKt.configureSecurity
+      - dev.lawlan.runline.engine.StatusPagesKt.configureStatusPages
+      - dev.lawlan.runline.engine.WebsocketsKt.configureWebsockets
+      - dev.lawlan.runline.engine.ServerOpenTelemetryKt.configureOpenTelemetry
+      - dev.lawlan.runline.engine.RunRecoveryKt.configureRunRecovery
+      - dev.lawlan.runline.engine.ArtifactRoutesKt.configureArtifactRoutes
+      - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
+      - dev.lawlan.runline.engine.ResourceRoutesKt.configureResourceRoutes
+      - dev.lawlan.runline.engine.AllowListRoutesKt.configureAllowListRoutes
+      - dev.lawlan.runline.engine.TriggerRoutesKt.configureTriggerRoutes
+      - dev.lawlan.runline.engine.WebhookRoutesKt.configureWebhookRoutes
+      - dev.lawlan.runline.engine.TriggerStartupKt.configureTriggers
+      - dev.lawlan.runline.engine.RetentionStartupKt.configureRetention
+
+# POSTGRES_URL (JDBC url), POSTGRES_USER, POSTGRES_PASSWORD: the database backing service.
+postgres:
+  url: "$POSTGRES_URL:"
+  user: "$POSTGRES_USER:"
+  password: "$POSTGRES_PASSWORD:"
+
+# API_TOKENS: comma separated name:role:token entries; role is developer or admin (ADR-012).
+# Example: alice:developer:<secret>,ops:admin:<secret>. Changing tokens takes effect on restart.
+auth:
+  tokens: "$API_TOKENS:"
+
+# ALLOWLIST_PACKAGES: the content the allow list gets the first time the Engine starts (WI-10);
+# afterwards the allow list lives in the database and is changed through the admin API, and this is
+# not read again. Unset (or blank): the project's default allow list (analyzer's DefaultAllowList);
+# a database that already holds an allow list is never changed by a newer default.
+# Comma separated entries: a package name, a package name followed by ":exact" to exclude its
+# sub-packages, or "class:" followed by a fully qualified class name (that class and its nested
+# classes only, for example class:java.io.PrintStream). A bare name is always a package. An invalid
+# entry fails startup naming analysis.allowlist.
+analysis:
+  allowlist: "$ALLOWLIST_PACKAGES:"
+
+# UPLOAD_MAX_BYTES: largest jar accepted by the upload API. Optional.
+# What a jar may expand to (WI-18), all optional; a jar over any of them is refused before it is
+# analysed: UPLOAD_MAX_ENTRIES (default 20000), UPLOAD_MAX_ENTRY_BYTES (default 64 MiB, one entry
+# inflated) and UPLOAD_MAX_EXPANDED_BYTES (default 256 MiB, all entries together).
+upload:
+  maxBytes: "$UPLOAD_MAX_BYTES:"
+  maxEntries: "$UPLOAD_MAX_ENTRIES:"
+  maxEntryBytes: "$UPLOAD_MAX_ENTRY_BYTES:"
+  maxExpandedBytes: "$UPLOAD_MAX_EXPANDED_BYTES:"
+
+# OTEL_SERVICE_NAME: how the Engine names itself in logs, traces and metrics (default
+# runline-engine). The same name is used for all three.
+telemetry:
+  serviceName: "$OTEL_SERVICE_NAME:"
+
+# Run directories (WI-11). RUNLINE_SHARED_ROOT must be persistent storage; RUNLINE_RUN_ROOT may be
+# scratch space. A failed, cancelled or interrupted run keeps its private directory for
+# RUNLINE_FAILED_RUN_RETENTION_SECONDS; expired ones are swept every
+# RUNLINE_WORKSPACE_SWEEP_INTERVAL_SECONDS (optional, default 300).
+workspace:
+  sharedRoot: "$RUNLINE_SHARED_ROOT:"
+  runRoot: "$RUNLINE_RUN_ROOT:"
+  maxBytes: "$RUNLINE_WORKSPACE_MAX_BYTES:"
+  failedRunRetentionSeconds: "$RUNLINE_FAILED_RUN_RETENTION_SECONDS:"
+  sweepIntervalSeconds: "$RUNLINE_WORKSPACE_SWEEP_INTERVAL_SECONDS:"
+
+# Run execution (WI-08). RUNLINE_MAX_CONCURRENT_RUNS bounds the runs executing at once.
+# RUNLINE_RUNTIME_DIR is a directory with the jars every run's class loader gets (Runner, core and
+# the Kotlin library, and nothing of the Engine). RUNLINE_RUN_TIMEOUT_SECONDS (optional, none by
+# default) is the cooperative limit on a pipeline body; RUNLINE_SHUTDOWN_GRACE_SECONDS (optional,
+# default 30) is how long a shutdown waits, for requests in flight and again for runs it has asked
+# to stop; during it no new request is admitted.
+# RUNLINE_RESOURCE_WAIT_TIMEOUT_SECONDS (optional, default 3600) is how long a run may wait for the
+# shared resources it declares (WI-09, ADR-007) before it fails; pipelines cannot set it.
+runs:
+  maxConcurrent: "$RUNLINE_MAX_CONCURRENT_RUNS:"
+  runtimeDir: "$RUNLINE_RUNTIME_DIR:"
+  timeoutSeconds: "$RUNLINE_RUN_TIMEOUT_SECONDS:"
+  shutdownGraceSeconds: "$RUNLINE_SHUTDOWN_GRACE_SECONDS:"
+  resourceWaitTimeoutSeconds: "$RUNLINE_RESOURCE_WAIT_TIMEOUT_SECONDS:"
+
+# Retention of runs, their logs and trigger firings (WI-20), counted from when a run ended and from
+# when a firing happened; runs not yet ended and firings still pending are never removed. Not the
+# retention of private run directories (RUNLINE_FAILED_RUN_RETENTION_SECONDS), which is separate.
+# RUNLINE_RUN_RETENTION_SECONDS (optional, default 2592000 = 30 days, at least 3600): a run that has
+# ended is removed with its log. RUNLINE_RUN_LOG_RETENTION_SECONDS (optional, default: the run's, at
+# least 3600, not above the run's): the log alone goes earlier.
+# RUNLINE_WEBHOOK_DEDUP_WINDOW_SECONDS (optional, default 604800 = 7 days, at least 86400): how long
+# a webhook firing is kept, which is how long a repeated delivery identifier is recognised
+# (ADR-005); after it the same identifier is accepted again.
+# RUNLINE_CRON_FIRING_RETENTION_SECONDS (optional, default 2592000, at least 3600): cron firings.
+# RUNLINE_RETENTION_INTERVAL_SECONDS (optional, default 3600): how often the clean-up runs (it also
+# runs once at start). RUNLINE_RETENTION_BATCH_SIZE (optional, default 1000): rows one statement
+# removes; a pass removes at most 100 batches of each kind and the rest goes in the next pass.
+retention:
+  runSeconds: "$RUNLINE_RUN_RETENTION_SECONDS:"
+  logSeconds: "$RUNLINE_RUN_LOG_RETENTION_SECONDS:"
+  webhookDedupWindowSeconds: "$RUNLINE_WEBHOOK_DEDUP_WINDOW_SECONDS:"
+  cronFiringSeconds: "$RUNLINE_CRON_FIRING_RETENTION_SECONDS:"
+  intervalSeconds: "$RUNLINE_RETENTION_INTERVAL_SECONDS:"
+  batchSize: "$RUNLINE_RETENTION_BATCH_SIZE:"

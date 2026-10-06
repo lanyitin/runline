@@ -1,0 +1,44 @@
+package dev.lawlan.runline.engine.artifact
+
+import dev.lawlan.runline.analyzer.Verdict
+import java.nio.file.Path
+import java.time.Instant
+
+/** One pipeline definition with what running it needs, found by version and pipeline name. */
+data class StoredDefinition(
+    /** Database identity; what runs refer to. */
+    val id: Long,
+    val contentHash: String,
+    val uploadedBy: String,
+    val className: String,
+    val name: String,
+    val metadata: MetadataDoc,
+    val verdict: Verdict,
+    /** The per-definition unsafe execution setting (ADR-006). */
+    val allowUnsafeExecution: Boolean,
+    val unsafeSettingSetBy: String?,
+    val unsafeSettingSetAt: Instant?,
+)
+
+/** What running a stored pipeline needs from storage, and the administrator's unsafe setting. */
+interface DefinitionStore {
+  /** The definition of pipeline [pipelineName] in the version [contentHash], or null. */
+  fun find(contentHash: String, pipelineName: String): StoredDefinition?
+
+  /**
+   * Records whether the definition may run when unsafe, with who decided and when. Returns the
+   * definition as updated, or null when it does not exist.
+   */
+  fun setUnsafeExecution(
+      contentHash: String,
+      pipelineName: String,
+      allow: Boolean,
+      by: String,
+      at: Instant,
+  ): StoredDefinition?
+
+  /**
+   * Writes the jar of the version [contentHash] to [target]; false when there is no such version.
+   */
+  fun copyContent(contentHash: String, target: Path): Boolean
+}

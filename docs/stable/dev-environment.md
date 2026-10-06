@@ -1,0 +1,29 @@
+# 開發環境需求
+
+本文回答：在本機建置與執行測試需要什麼前置條件，以及 Docker 由 colima 提供時如何設定。狀態：已核可（2026-10-04）。建議併入專案 README 的開發環境段落。
+
+## 前置條件
+
+| 項目 | 說明 |
+|---|---|
+| JDK | 專案基準為 JDK 25。Gradle toolchain 會自動下載，不需手動安裝 |
+| Docker 相容的容器執行環境 | 資料庫測試使用 Testcontainers 啟動真實 PostgreSQL，沒有容器環境時這類測試無法執行，也不會以替身取代 |
+
+## 使用 colima 時的設定
+
+colima 的 socket 不在 Testcontainers 預設尋找的位置，需要在執行測試的 shell 或 IDE 執行組態中設定兩個環境變數。
+
+| 環境變數 | 內容 |
+|---|---|
+| `DOCKER_HOST` | colima 的 Docker socket，格式為 `unix://` 加上 socket 的絕對路徑；位置在使用者家目錄的 colima 預設 profile 目錄下。缺少 `unix://` 前綴時，Docker CLI 可能仍可使用，但 Testcontainers 找不到 Docker |
+| `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` | 固定設為 `/var/run/docker.sock`。它描述容器內部看到的 socket 路徑，不是主機上的 colima 路徑 |
+
+## 環境變數的管理
+
+- 設定只屬於個人環境，不寫入專案的程式或組態檔。
+- 可由 shell 設定檔、IDE 執行組態，或 mise 這類環境管理工具提供；無論來源為何，必須讓執行 Gradle 的程序繼承到。
+- 環境變數未生效時，資料庫測試失敗於 Testcontainers 尋找 Docker 的階段，與專案程式碼無關。
+
+## 待確認問題
+
+- 是否在 devcontainer 內提供統一的容器執行環境，使本機不再需要個別設定。影響：開發環境說明可簡化。

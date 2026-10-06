@@ -1,0 +1,19 @@
+# Build outputs and caches (Gradle, Kotlin, Kotlin/JS lock and staging)
+build/
+.gradle/
+.kotlin/
+kotlin-js-store/
+
+# Personal IDE and tool settings
+.idea/
+.vscode/
+.superdesign/
+
+# Personal environment (contains local container socket path)
+/mise.toml
+
+# Runtime and test output (dev entry default recording and work directory)
+.runline/
+
+# Local Claude Code overrides (agents and settings.json are shared)
+.claude/settings.local.json

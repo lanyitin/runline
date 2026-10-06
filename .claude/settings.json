@@ -1,0 +1,13 @@
+{
+	"agent": "high-level-architect",
+	"permissions": {
+		"allow": [
+			"Edit(/docs/draft/**)",
+			"Edit(/docs/stable/**)",
+			"Edit(/.claude/**)",
+			"Edit(/CLAUDE.md)",
+			"Agent(tdd-coder)"
+		],
+		"deny": []
+	}
+}

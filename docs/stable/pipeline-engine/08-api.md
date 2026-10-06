@@ -1,0 +1,352 @@
+# Engine API
+
+本文回答：Engine 對外提供哪些 HTTP 端點、誰能呼叫、傳入與回傳什麼、錯誤代碼代表什麼。狀態：已核可（2026-10-04，WI-18）。認證與角色的決策見 [ADR-012](adr/ADR-012-api-authentication.md)，各功能的規則見對應的工作項。
+
+本文與實作的一致性由測試保證（`engine/src/test/kotlin/docs/ApiDocumentationTest.kt`）：每個實際註冊的路由都必須在本文有一個 `### \`方法 路徑\`` 標題，反之亦然；標題下的「認證」行必須與路由實際要求的認證與角色相符；程式碼中的錯誤代碼都必須出現在本文。新增或修改路由時，測試會在本文漏改時失敗。測試不驗證欄位層級的說明（回傳的每個欄位、各狀態碼的完整對應），那部分需要作者在變更時一併更新。
+
+## 通則
+
+**認證。** 標示「Bearer」的端點需要請求標頭 `Authorization: Bearer <token>`。Token 與其名稱、角色由部署的環境變數 `API_TOKENS` 提供（`名稱:角色:token`，逗號分隔）。角色有兩種：`developer`（開發人員）與 `admin`（管理員）；管理員包含開發人員的所有權限。
+
+| 情況 | 回應 |
+|---|---|
+| 沒有 token、token 無效、或不是 Bearer 格式 | 401，帶 `WWW-Authenticate: Bearer realm="runline"`，沒有 JSON 本文 |
+| token 有效但角色不足 | 403 `forbidden` |
+
+**可見範圍。** 開發人員只看得到、也只能對自己上傳的版本建立 run；管理員看得到全部。開發人員查詢不屬於自己的版本或 run，得到的回應與「不存在」相同（404）。
+
+**錯誤本文。** 除特別註明外，錯誤回應是 JSON：`{"error": "<代碼>", "message": "<說明>"}`。`error` 是穩定的代碼，程式應依它判斷；`message` 供人閱讀，文字可能調整。
+
+**未預期的伺服器錯誤。** 任何未預期的失敗回應 500，本文為 `{"error": "internal_error", "message": "...", "errorId": "<識別碼>"}`，不含例外的原因、堆疊、SQL 或設定值。完整原因寫在 log 中，以 `errorId` 可查到對應的那一筆（log 訊息為 `Unexpected error <errorId> while ...`，附例外）。回報問題時請提供 `errorId`。Run 記錄的 `failure`（見 `GET /api/v1/runs/{runId}`）是 pipeline 自己的失敗內容，不屬於這一類。Webhook 入口的 500 另有固定本文，見該端點。
+
+**關閉中。** Engine 收到終止訊號後不再接受新請求：新的請求回應 503 `shutting_down`（並關閉連線），進行中的請求在寬限時間（`RUNLINE_SHUTDOWN_GRACE_SECONDS`，預設 30 秒）內完成；超過寬限時間仍未完成的請求被中止。已開啟的 WebSocket 不計入進行中的請求，關閉時一併中斷。呼叫端遇到 503 `shutting_down` 時，稍後重試即可。
+
+**時間。** 一律為 ISO-8601 UTC 字串。
+
+## 上傳與查詢
+
+### `POST /api/v1/artifacts`
+
+認證：Bearer（developer）
+
+上傳一個 jar，本文是 jar 的原始位元組（`Content-Type: application/octet-stream`）。Engine 不執行 pipeline 即探索其中的 pipeline、判定 safe 或 unsafe、讀出 metadata，並將 artifact 與其 definition 於同一交易儲存；任何拒絕都不留下資料。上傳者記錄為 token 對應的名稱。新版本的 unsafe 執行設定一律為不允許。相同內容重複上傳回傳同一版本。
+
+| 狀態 | 意義 |
+|---|---|
+| 201 | 新版本。本文為 artifact |
+| 200 | 相同內容先前已上傳，回傳既有版本，不產生新紀錄 |
+| 413 `too_large` | 上傳的檔案超過 `UPLOAD_MAX_BYTES`（預設 50 MiB） |
+| 422 | 拒絕上傳，`error` 為下列之一 |
+
+422 的 `error`：
+
+| 代碼 | 意義 |
+|---|---|
+| `not_a_jar` | 不是有效的壓縮檔 |
+| `jar_too_many_entries` | jar 內的項目數量超過 `UPLOAD_MAX_ENTRIES`（預設 20000） |
+| `jar_entry_too_large` | 某個項目解壓後超過 `UPLOAD_MAX_ENTRY_BYTES`（預設 64 MiB）；`message` 指出項目名稱 |
+| `jar_expanded_too_large` | 所有項目解壓後的總大小超過 `UPLOAD_MAX_EXPANDED_BYTES`（預設 256 MiB） |
+| `core_classes_bundled` | jar 內含 `dev.lawlan.runline.core` 套件的類別；Run 一律使用 Runner 提供的 core，請以不夾帶 core 的方式重新打包 |
+| `metadata_unreadable` | 某個 pipeline 的 metadata 或類別檔無法解析；`message` 指出類別 |
+| `no_pipeline_found` | 沒有任何類別以 `@PipelineDefinition` 宣告為 pipeline |
+| `duplicate_pipeline_name` | 同一個 jar 內有多個 pipeline 使用相同名稱 |
+| `invalid_pipeline_name` | 有 pipeline 的名稱不符規則（只允許字母、數字、`.`、`_`、`-`，且不可為 `.` 或 `..`）；同一 jar 中任一個不合規即整個拒絕，`message` 指出是哪些 pipeline |
+
+解壓上限在 jar 的內容被分析前檢查：Engine 實際解壓計數（不採信 jar 自己宣告的大小），超過任一上限即停止，不展開超量資料。
+
+本文（200、201）：
+
+| 欄位 | 說明 |
+|---|---|
+| `contentHash` | 內容的 SHA-256（十六進位），版本的識別 |
+| `sizeBytes`、`uploadedBy`、`uploadedAt` | 大小、上傳者名稱、上傳時間 |
+| `pipelines[]` | 找到的 pipeline：`className`、`name`、`metadata`（`parameters[]`、`files[]`、`network`、`processes`、`resources[]`）、`verdict`（`SAFE` 或 `UNSAFE`）、`reasons[]`（`kind`、`category`、`className`、`member`、`path[]`、`detail`）、`allowListVersion`（判定所用的白名單版本，見「白名單」）、`allowUnsafeExecution`、`warnings[]`（例如宣告了尚未定義的共享資源） |
+| `limitations` | 判定未涵蓋的範圍 |
+
+`reasons[].kind` 的值：`UNRESTRICTED_ACCESS`（網路或行程未設限，`category`）、`NOT_ALLOW_LISTED`（白名單外的類別，`className` 與 `path[]`）、`JVM_EXIT`（參照 JVM 結束成員，`member` 與 `path[]`）、`IO_SENSITIVE_MEMBER`（參照 IO 敏感成員：啟動外部行程、載入原生程式碼，或在基礎套件內可直接開啟檔案或網路的成員，`member` 為含描述子的成員名稱，`path[]` 為從 pipeline 到該參照的路徑，不受套件白名單豁免，[ADR-013](adr/ADR-013-io-sensitive-members.md)）、`UNREADABLE_CLASS`（類別檔無法解析，`className`、`path[]`、`detail`）、`LIMIT_EXCEEDED`（分析超出時間或大小預算，`detail`）。新增 `IO_SENSITIVE_MEMBER` 之前已儲存的判定仍照原樣讀取與顯示，不會被自動重判。
+
+### `GET /api/v1/artifacts/{contentHash}`
+
+認證：Bearer（developer）
+
+查詢一個版本；本文同上傳的回傳。開發人員只能查自己上傳的，管理員可查全部。404 `not_found`：不存在，或呼叫者不得查看。
+
+### `GET /api/v1/definitions`
+
+認證：Bearer（developer）
+
+列出 pipeline 定義。開發人員只看到自己上傳的，管理員看到全部。本文 `{"definitions": [...], "limitations": "..."}`，每筆含所屬版本的 `contentHash`、`uploadedBy`、`uploadedAt`，以及與上傳回傳相同的 pipeline 欄位。
+
+### `DELETE /api/v1/artifacts/{contentHash}`
+
+認證：Bearer（admin）
+
+刪除一個版本。204 成功；404 `not_found`；409 `in_use`：仍被 trigger 或 run 引用，不能刪除。
+
+## Run
+
+### `POST /api/v1/runs`
+
+認證：Bearer（developer）
+
+建立一個 run。本文 `{"contentHash": "...", "pipeline": "...", "parameters": {"名稱": "值"}}`，`parameters` 選填。Engine 檢查參數、unsafe 設定與 pipeline 宣告的共享資源，通過才建立；被拒絕時不留下任何 run。開發人員只能對自己上傳的版本建立 run。
+
+| 狀態 | 意義 |
+|---|---|
+| 201 | 已建立（排入佇列），`Location` 為 `/api/v1/runs/{runId}`，本文為 run |
+| 400 `bad_request` | 本文不是預期的 JSON |
+| 404 `definition_not_found` | 沒有這個版本與 pipeline，或呼叫者不得使用 |
+| 409 `unsafe_not_allowed` | pipeline 被判為 unsafe，且管理員尚未允許它以 unsafe 執行 |
+| 409 `resources_unavailable` | pipeline 宣告的共享資源未定義或已停用；本文多一個 `problems[]`，每項 `{resource, problem}`，`problem` 為 `unknown` 或 `disabled` |
+| 422 `invalid_parameters` | 參數與宣告不符；本文多一個 `problems[]`，每項 `{name, problem}`，`problem` 為 `missing`（缺必填）或 `undeclared`（未宣告） |
+
+Run 的欄位：`runId`、`state`、`contentHash`、`pipeline`、`className`、`source`（`{kind: "MANUAL"|"TRIGGER", name}`）、`parameters`（含套用預設值後的結果）、`createdAt`、`startedAt`、`finishedAt`、`failure`（`{type, message, trace}`，失敗時）、`unsafeExecution`（`{setBy, setAt}`，以 unsafe 執行時）。`state` 的值：`QUEUED`、`WAITING_FOR_RESOURCES`、`INITIALIZING`、`RUNNING`、`TIMED_OUT_UNFINISHED`，終止狀態 `SUCCEEDED`、`FAILED`、`CANCELLED`、`INTERRUPTED`（Engine 停止或重啟時仍在進行的 run）、`TIMED_OUT`。
+
+### `GET /api/v1/runs`
+
+認證：Bearer（developer）
+
+列出 run，新的在前。開發人員只看到自己建立的，管理員看到全部。查詢參數：`pipeline`（只列這個 pipeline 的 run）、`limit`（預設 50，上限 200）。本文 `{"runs": [...]}`。
+
+### `GET /api/v1/runs/{runId}`
+
+認證：Bearer（developer）
+
+查詢一個 run。404 `run_not_found`：不存在、不是 UUID，或呼叫者不得查看。已結束的 run 在結束後超過保留期限（預設 30 天，見 README 的組態）即被清理，之後同樣回 404；未結束的 run 不被清理。
+
+### `POST /api/v1/runs/{runId}/cancel`
+
+認證：Bearer（developer）
+
+取消一個 run。本文 `{"runId", "state", "cancellation"}`。
+
+| 狀態 | 意義 |
+|---|---|
+| 200 | 尚未開始，已直接結束為 `CANCELLED`（`cancellation` 為 `cancelled`） |
+| 202 | 已要求停止；停止是協作式的，run 於 pipeline 回應後結束（`cancellation` 為 `requested`） |
+| 404 `run_not_found` | 不存在或不得查看 |
+| 409 `already_finished` | 已結束，不能取消 |
+
+### `GET /api/v1/runs/{runId}/log`
+
+認證：Bearer（developer）
+
+查詢已儲存的 log。查詢參數：`after`（只回傳序號大於它的項目，預設 0）、`limit`（預設 500，上限 2000）。本文 `{"entries": [{seq, at, stream, line}], "last": <序號>}`，`stream` 為 `STDOUT` 或 `STDERR`；`last` 是繼續查詢時可用的 `after`。404 `run_not_found`。log 的保留期限可短於 run 紀錄（預設相同）：log 被清理後 run 仍在，`entries` 為空。
+
+### `GET /api/v1/runs/{runId}/log/stream`
+
+認證：Bearer（developer）
+
+WebSocket。先以一般 HTTP 升級（需要 Bearer 標頭；不可見的 run 在升級前就回 404 `run_not_found`），之後每個 log 項目是一個 JSON 文字框 `{seq, at, stream, line}`，直到 run 結束且所有項目都送出，Engine 以正常代碼（1000，原因 `run ended`）關閉連線。查詢參數 `after` 指定從哪個序號之後開始。串流途中發生未預期的錯誤時，以 1011 關閉，原因為 `internal error <errorId>`，不含內部原因。串流途中該 run 因超過保留期限被清理時，已送出的項目維持完整、連續，連線以正常代碼關閉，不以錯誤收場；之後該 run 回 404 `run_not_found`。
+
+### `PUT /api/v1/definitions/{contentHash}/{pipeline}/unsafe-execution`
+
+認證：Bearer（admin）
+
+設定某個版本中某個 pipeline 是否允許以 unsafe 執行（每個版本各自設定，預設不允許，不繼承）。本文 `{"allow": true}`。200 回傳 `{contentHash, pipeline, allow, setBy, setAt}`（`setBy` 為管理員的 token 名稱）；404 `definition_not_found`；400 `bad_request`。
+
+## 共享資源（管理員）
+
+資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱；規則見 [ADR-007](adr/ADR-007-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
+
+### `POST /api/v1/resources`
+
+認證：Bearer（admin）
+
+定義資源。本文 `{"name": "...", "capacity": 1}`。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（名稱不合規，或容量小於 1）。
+
+### `GET /api/v1/resources`
+
+認證：Bearer（admin）
+
+列出資源及其持有者與等待者。本文 `{"resources": [...]}`；每個資源含 `name`、`capacity`、`enabled`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`）。
+
+### `GET /api/v1/resources/{name}`
+
+認證：Bearer（admin）
+
+查詢一個資源，本文同上。404 `resource_not_found`。
+
+### `PATCH /api/v1/resources/{name}`
+
+認證：Bearer（admin）
+
+修改容量或啟用狀態。本文 `{"capacity": 2, "enabled": false}`，至少一項。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1，或沒有要修改的欄位）。
+
+### `POST /api/v1/resources/{name}/holders/{runId}/release`
+
+認證：Bearer（admin）
+
+強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
+
+## 白名單（管理員）
+
+白名單決定哪些類別參照算「受信任」，因此直接決定 pipeline 是 safe 或 unsafe（[ADR-002](adr/ADR-002-context-and-unsafe.md)、[ADR-013](adr/ADR-013-io-sensitive-members.md)、[ADR-014](adr/ADR-014-class-level-allow-list-entries.md)）。只有管理員能讀寫，開發人員一律得到 403。條目有兩種，由 `kind` 明確區分，不依名稱猜測：
+
+| `kind` | 意義 | `exactOnly` |
+|---|---|---|
+| `package` | 套件與其子套件；`exactOnly` 為 true 表示「僅此套件」，不含子套件 | 有意義 |
+| `class` | 完整類別名稱，只放行該類別與其巢狀類別；類別內提供 IO 的成員仍判為 unsafe（成員層級規則不受豁免） | 不適用，回應中為 `null`；請求中設為 true 被拒絕 |
+
+名稱格式：以 `.` 分隔的 Java 識別字；類別名稱必須含套件。加入白名單條目是管理員的信任決定：被放行的套件或類別其內部不再被檢查。
+
+**版本與重判。** 白名單整份有版本，從 1 開始，每次條目變更（新增、修改、刪除）產生新版本，記錄變更者（token 對應的名稱，從不是 token）與時間。條目變更與它觸發的重判在同一個資料庫交易完成：成功即代表所有既有 pipeline 定義已用新版本重判；任何失敗都使白名單與判定維持原狀。每個 pipeline 的判定在 `allowListVersion` 顯示它是用哪個版本判定的（白名單由資料庫管理之前儲存的判定顯示 `config`，在下一次重判之前維持原樣可讀）。
+
+重判使用 analyzer 對資料庫中儲存的 jar 重新分析，更新每個定義的 safe／unsafe、原因與版本，不更新 metadata。因重判而新變成 unsafe 的定義，其「允許以 unsafe 執行」被設為不允許（該設定的設定者與時間記為這次變更者與時間）；原本就 unsafe 或變成 safe 的定義，其設定保持不變。重判不影響進行中的 run。重新分析時 jar 或其宣告已無法讀取的定義，無法確認安全，判為 unsafe（原因 `UNREADABLE_CLASS`）並計入 `impact.unreadable`。
+
+**預覽。** 所有會改變內容的操作都接受查詢參數 `preview=true`（預設 false）：回應 200，說明這次操作會使哪些定義從 safe 變 unsafe 或反之，不改變任何東西、不持有鎖。預覽是呼叫當下的快照，套用時以套用當下的內容重判，兩者之間若有他人變更，結果可能不同。
+
+**規模與限度。** 每次變更與預覽都逐一讀取、分析所有已儲存的 jar，耗時與總大小成正比，請求在重判完成前不會回應。條目變更與手動重判在整個重判期間持有白名單的互斥鎖並佔用一個資料庫交易：其他白名單變更會等待；上傳的分析不受阻，但上傳要寫入判定的最後一步會等到變更結束，並在版本已改變時以新版本重新判定。查詢與建立 run 不受阻（讀到變更提交前的內容）；對正在重判的定義設定 unsafe 執行、或刪除版本，會等到變更結束。預覽不鎖定任何東西。
+
+回應都含 `limitations`：判定未涵蓋的範圍（反射與動態載入、白名單內類別的內部呼叫等）。
+
+### `GET /api/v1/allowlist`
+
+認證：Bearer（admin）
+
+目前生效的白名單。本文：`version`（目前版本，文字）、`changedBy`、`changedAt`（這個版本的變更者與時間；首次啟動的初始內容為 `system`）、`entries[]`、`limitations`。每個條目：`kind`、`name`、`exactOnly`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`，依加入順序。
+
+首次啟動時的初始內容是專案的預設白名單（analyzer 模組的 `DefaultAllowList`，與開發入口共用同一份），或環境變數 `ALLOWLIST_PACKAGES` 指定的內容；之後以本 API 的內容為準，啟動不會覆寫。預設白名單只在首次啟動時作為初始內容：已有白名單的資料庫不會因為新版預設內容而改變（例如 `default-2` 新增的 `class:kotlin.io.CloseableKt` 與 `class:java.io.Closeable`），既有部署如需這些條目，由管理員以本 API 新增；沒有「套用新預設」的管理操作。`ALLOWLIST_PACKAGES` 的文字格式與開發入口的 `RUNLINE_ALLOW_LIST` 相同：逗號分隔，條目為 `套件名`、`套件名:exact`（僅此套件）或 `class:完整類別名稱`。
+
+### `GET /api/v1/allowlist/versions`
+
+認證：Bearer（admin）
+
+版本歷史，新的在前。查詢參數 `limit`（預設 50，上限 200）。本文 `{"versions": [...]}`，每筆含 `version`、`changedBy`、`changedAt`、`action`（`INITIAL`、`ENTRY_ADDED`、`ENTRY_CHANGED`、`ENTRY_REMOVED`）、`detail`（文字說明）、`rejudgedDefinitions`、`becameUnsafe`、`becameSafe`（這個版本重判了幾個定義、幾個變成 unsafe、幾個變成 safe）。
+
+### `POST /api/v1/allowlist/entries`
+
+認證：Bearer（admin）
+
+新增條目。本文 `{"kind": "package"|"class", "name": "...", "exactOnly": false}`，`exactOnly` 選填，只用於 package。接受 `preview=true`。
+
+| 狀態 | 意義 |
+|---|---|
+| 201 | 已新增並重判。`Location` 為該條目的網址，本文為變更結果（見下） |
+| 200 | `preview=true`：預覽，本文為預覽結果，什麼都沒改變 |
+| 400 `bad_request` | 本文不是預期的 JSON、`kind` 不是 `package` 或 `class`，或 `preview` 不是 true／false |
+| 409 `entry_exists` | 已有同種類同名稱的條目（要改變它請用 PATCH）；本文多一個 `existing`（該條目） |
+| 409 `entry_covered` | 現有的某個條目已涵蓋它（例如要加的類別已被其套件條目涵蓋）；本文多一個 `coveredBy`（該條目） |
+| 422 `invalid_entry` | 名稱不合規或組合不合理；本文多一個 `problem`：`name`、`exact_only_on_class`、`nothing_to_change` |
+
+變更結果：`preview`（布林）、`version`（操作之後生效的版本；預覽時為目前版本）、`entry`（變更後的條目；刪除與預覽時為 `null`）、`impact`、`redundantEntries[]`（新條目使它們變得不必要的其他條目；不阻擋，仍保留）、`limitations`。`impact`：`examinedArtifacts`、`examinedDefinitions`、`becameUnsafe`、`becameSafe`、`unreadable`，以及只含判定有變動的定義 `changes[]`：`contentHash`、`pipeline`、`className`、`from`、`to`（`SAFE` 或 `UNSAFE`）、`allowUnsafeExecution`（變動前的設定）、`unsafeExecutionRevoked`（因這次變動而收回「允許以 unsafe 執行」）。
+
+### `GET /api/v1/allowlist/entries/{kind}/{name}`
+
+認證：Bearer（admin）
+
+查詢一個條目；`kind` 為 `package` 或 `class`。本文為條目。400 `bad_request`：`kind` 不合規；404 `entry_not_found`。
+
+### `PATCH /api/v1/allowlist/entries/{kind}/{name}`
+
+認證：Bearer（admin）
+
+修改條目：本文 `{"name": "...", "exactOnly": true}`，至少一項。改名時與新增相同的重複與涵蓋檢查；`exactOnly` 只用於 package。接受 `preview=true`。200 回傳變更結果；400 `bad_request`；404 `entry_not_found`；409 `entry_exists`、`entry_covered`；422 `invalid_entry`（包含沒有要修改的內容 `nothing_to_change`）。
+
+### `DELETE /api/v1/allowlist/entries/{kind}/{name}`
+
+認證：Bearer（admin）
+
+刪除條目並重判。接受 `preview=true`。200 回傳變更結果（`entry` 為 `null`，因為要說明影響）；400 `bad_request`；404 `entry_not_found`。
+
+### `POST /api/v1/allowlist/recheck`
+
+認證：Bearer（admin）
+
+手動重判所有既有定義，使用目前的白名單與目前的分析規則（分析規則更新後用來更新既有判定）。不改變條目，也不產生新版本；遵守與條目變更相同的規則（收回新變成 unsafe 者的 unsafe 執行設定、同一交易、不影響進行中的 run）。接受 `preview=true`。200 回傳變更結果；400 `bad_request`。
+
+## Trigger（管理員）
+
+Trigger 將 cron 排程或 webhook 綁定到某個版本的某個 pipeline，規則見 [ADR-005](adr/ADR-005-trigger-binding.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。Trigger 以其來源（`source.kind` 為 `TRIGGER`）建立 run，與手動 run 受相同檢查。
+
+### `POST /api/v1/triggers`
+
+認證：Bearer（admin）
+
+建立 trigger。本文 `{"name", "kind": "cron"|"webhook", "contentHash", "pipeline", "parameters"?, "cron"?, "timeZone"?, "enabled"?}`。`cron` 是標準五欄表達式（cron trigger 必填），`timeZone` 是 IANA 時區（預設 UTC），`enabled` 預設 true；webhook trigger 不可設定 `cron` 與 `timeZone`。
+
+201（帶 `Location`）回傳 `{"trigger": {...}, "secret": "..."}`，`secret` 只有 webhook trigger 有，且只在這個回應出現這一次。錯誤：400 `bad_request`；404 `definition_not_found`；409 `trigger_exists`；422 `invalid_parameters`（同建立 run，`problems[]`）；422 `invalid_trigger`，`problem` 指出哪一部分：`name`、`cron_required`、`cron_expression`、`time_zone`、`schedule_not_allowed`、`nothing_to_change`。
+
+Trigger 的欄位：`name`、`kind`、`contentHash`、`pipeline`、`parameters`（管理員給的）、`effectiveParameters`（套用預設值後每個 run 實際得到的）、`enabled`、`cron`、`timeZone`、`webhookPath`、`secretConfigured`、`secretRotatedAt`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`。任何回應都不含 webhook 密鑰或其雜湊。
+
+### `GET /api/v1/triggers`
+
+認證：Bearer（admin）
+
+列出 trigger。本文 `{"triggers": [...]}`。
+
+### `GET /api/v1/triggers/{name}`
+
+認證：Bearer（admin）
+
+查詢一個 trigger。404 `trigger_not_found`。
+
+### `PATCH /api/v1/triggers/{name}`
+
+認證：Bearer（admin）
+
+修改綁定、參數、排程、啟用狀態。本文可含 `contentHash`、`pipeline`、`parameters`、`enabled`、`cron`、`timeZone`，至少一項。不通過驗證的修改不改變任何東西。200 回傳 trigger；錯誤同建立（400、404 `trigger_not_found` 或 `definition_not_found`、422）。
+
+### `DELETE /api/v1/triggers/{name}`
+
+認證：Bearer（admin）
+
+解除綁定；它的觸發紀錄一併移除。204；404 `trigger_not_found`。
+
+### `POST /api/v1/triggers/{name}/rotate-secret`
+
+認證：Bearer（admin）
+
+換發 webhook 密鑰，舊密鑰立即失效。200 回傳 `{"trigger", "secret"}`（密鑰只顯示這一次）；404 `trigger_not_found`；409 `not_a_webhook`。
+
+### `GET /api/v1/triggers/{name}/firings`
+
+認證：Bearer（admin）
+
+最近的觸發紀錄，新的在前。查詢參數 `limit`（預設 50，上限 200）。本文 `{"firings": [...]}`，每筆含 `firedAt`、`scheduledFor`（cron）、`deliveryId`（webhook）、`outcome`（`run_created`、`refused`、`failed`、`interrupted`、`pending`）、`reason` 與 `detail`（被拒絕時）、`runId`（其 run 被清理後為 `null`）。觸發紀錄依觸發時間清理：webhook 的紀錄預設保留 7 天（即去重視窗），cron 的預設 30 天；處於 `pending` 的紀錄不被清理。404 `trigger_not_found`。
+
+## Webhook 入口
+
+### `POST /api/v1/webhooks/{name}`
+
+認證：專用標頭 `X-Runline-Webhook-Secret`（不使用 Bearer token）
+
+外部系統以 trigger 自己的密鑰觸發 webhook trigger，不使用 API token。
+
+| 標頭 | 意義 |
+|---|---|
+| `X-Runline-Webhook-Secret` | 建立 trigger 或換發密鑰時顯示的密鑰；Engine 只存其 SHA-256，以固定時間比對 |
+| `X-Runline-Delivery-Id` | 呼叫端對這次投遞的識別，1 至 200 個可見 ASCII 字元，必填；同一 trigger 內在去重視窗內唯一，重送（即使同時）不會產生第二個 run。去重視窗等於 webhook 觸發紀錄的保留期限（預設 7 天，下限 24 小時）；視窗之後同一識別可再次被接受，產生新的 run |
+
+請求本文不會被讀取，也不影響 run 的參數。
+
+| 狀態 | 意義 |
+|---|---|
+| 202 `{"status": "accepted"}` | 通過驗證。不論 run 之後如何（被拒絕建立由管理員在觸發紀錄查看），以及投遞已收過（與第一次相同的回應），都是這個回應 |
+| 401 `unauthorized` | 密鑰缺少或錯誤、trigger 已停用、不是 webhook、或不存在，一律同一個固定回應 |
+| 400 `invalid_delivery_id` | 已通過驗證，但投遞識別缺少或格式不符 |
+| 500 `internal_error` | 發生未預期的失敗；本文固定為請以相同投遞識別重送的說明，不含 `errorId`，原因寫在 log。重送同一投遞是安全的 |
+
+## 不屬於 API 契約的端點
+
+這些端點不要求 Bearer token，維持現狀（[ADR-012](adr/ADR-012-api-authentication.md)），也不保證穩定。
+
+### `GET /openapi`
+
+認證：無
+
+Swagger UI。
+
+### `GET /openapi/documentation.yaml`
+
+認證：無
+
+Swagger UI 讀取的 OpenAPI 文件。目前是範本留下的空文件，並未描述上述端點；契約以本文為準。
+
+### `GET /openapi/oauth2-redirect.html`
+
+認證：無
+
+Swagger UI 附帶的頁面。
+
+Engine 沒有 HTTP 關閉端點：關閉只由終止訊號觸發（[04](04-deployment.md)、[ADR-012](adr/ADR-012-api-authentication.md)）。範本遺留的回聲 WebSocket、範例 JSON 與關閉端點已移除，對這些路徑的請求得到 404。

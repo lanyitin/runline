@@ -1,0 +1,28 @@
+# Backing services for local development (12-factor: dev/prod parity).
+# Services are located purely through environment variables; see devcontainer.json.
+services:
+  workspace:
+    image: mcr.microsoft.com/devcontainers/java:1-25-bookworm
+    volumes:
+      - ..:/workspaces/runline:cached
+    command: sleep infinity
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: runline
+      POSTGRES_USER: runline
+      POSTGRES_PASSWORD: runline
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runline -d runline"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

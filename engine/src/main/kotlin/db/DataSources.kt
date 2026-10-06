@@ -15,3 +15,18 @@ fun dataSourceOf(database: DatabaseConfig): DataSource =
       user = database.user
       password = database.password
     }
+
+/**
+ * A data source for the readiness probe: the same database, and a limit of [timeoutSeconds] on
+ * connecting and on every answer, so that a database that is gone, or one that takes a connection
+ * and does not answer, makes the probe fail in time instead of hanging it.
+ */
+fun probeDataSourceOf(database: DatabaseConfig, timeoutSeconds: Int): DataSource =
+    PGSimpleDataSource().apply {
+      setURL(database.url)
+      user = database.user
+      password = database.password
+      loginTimeout = timeoutSeconds
+      connectTimeout = timeoutSeconds
+      socketTimeout = timeoutSeconds
+    }

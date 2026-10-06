@@ -7,7 +7,18 @@ import dev.lawlan.runline.engine.auth.ConfiguredTokenAuthenticator
 import dev.lawlan.runline.engine.auth.TokenAuthenticator
 import dev.lawlan.runline.engine.config.EngineConfig
 import dev.lawlan.runline.engine.config.RunRuntime
+import dev.lawlan.runline.engine.console.CONSOLE_RESOURCE_ROOT
+import dev.lawlan.runline.engine.console.ClasspathConsoleAssets
+import dev.lawlan.runline.engine.console.ConsoleAssets
 import dev.lawlan.runline.engine.db.dataSourceOf
+import dev.lawlan.runline.engine.db.probeDataSourceOf
+import dev.lawlan.runline.engine.health.DatabaseCheck
+import dev.lawlan.runline.engine.health.EngineLifecycle
+import dev.lawlan.runline.engine.health.HealthTelemetry
+import dev.lawlan.runline.engine.health.Readiness
+import dev.lawlan.runline.engine.health.RuntimeCheck
+import dev.lawlan.runline.engine.health.ShutdownCheck
+import dev.lawlan.runline.engine.health.StartupCheck
 import dev.lawlan.runline.engine.info.BuildInfo
 import dev.lawlan.runline.engine.info.SystemStatus
 import dev.lawlan.runline.engine.resource.*
@@ -24,6 +35,12 @@ import java.time.Clock
 import java.time.Duration
 import javax.sql.DataSource
 
+/** The database check gives up before the platform's probe does (ADR-018: 3 seconds). */
+private val PROBE_DATABASE_TIMEOUT = Duration.ofSeconds(2)
+
+/** How long the answer of the database check is remembered (ADR-018: seconds). */
+private val PROBE_DATABASE_CACHE = Duration.ofSeconds(2)
+
 /**
  * Wires the Engine. Everything an implementation needs from the outside (database, tokens, allow
  * list) comes from [EngineConfig]; swapping a backing service or provider means changing only the
@@ -37,6 +54,7 @@ fun Application.configureDependencyInjection() {
       getOpenTelemetry(serviceName = resolve<EngineConfig>().telemetry.serviceName)
     }
     provide<BuildInfo> { BuildInfo.load() }
+    provide<ConsoleAssets> { ClasspathConsoleAssets(CONSOLE_RESOURCE_ROOT) }
     provide<TokenAuthenticator> { ConfiguredTokenAuthenticator(resolve<EngineConfig>().tokens) }
     provide<AllowListStore> { PostgresAllowListStore(resolve<DataSource>()) }
     provide<AllowListProvider> { DatabaseAllowListProvider(resolve<AllowListStore>()) }
@@ -54,6 +72,31 @@ fun Application.configureDependencyInjection() {
       SystemStatus(resolve<BuildInfo>(), resolve<Clock>(), resolve<AllowListStore>())
     }
     provide<DataSource> { dataSourceOf(resolve<EngineConfig>().database) }
+    // Readiness (WI-29). The probe has a connection of its own, apart from the one every store
+    // uses, so that it neither takes what runs need nor waits for it.
+    provide<EngineLifecycle> { EngineLifecycle() }
+    provide<Readiness> {
+      Readiness(
+          listOf(
+              StartupCheck(resolve<EngineLifecycle>()),
+              DatabaseCheck(
+                  probeDataSourceOf(
+                      resolve<EngineConfig>().database,
+                      PROBE_DATABASE_TIMEOUT.seconds.toInt(),
+                  ),
+                  resolve<Clock>(),
+                  PROBE_DATABASE_CACHE,
+              ),
+              RuntimeCheck(
+                  resolve<EngineConfig>().runs.runtimeDir,
+                  resolve<RunRuntime>().classpath.map { Path.of(it.toURI()) },
+              ),
+              ShutdownCheck(resolve<EngineLifecycle>()),
+          ),
+          resolve<EngineLifecycle>(),
+          HealthTelemetry(resolve<OpenTelemetry>()),
+      )
+    }
     provide<ArtifactStore> { PostgresArtifactStore(resolve<DataSource>()) }
     provide<UploadStaging> { UploadStaging(Path.of(System.getProperty("java.io.tmpdir"))) }
     provide<UploadTelemetry> { UploadTelemetry(resolve<OpenTelemetry>()) }

@@ -47,6 +47,16 @@ apply(from = rootProject.file("gradle/build-info.gradle.kts"))
 
 tasks.processResources { from(tasks.named("generateBuildInfo")) }
 
+// The Console, built by Vite into static files (WI-31, ADR-015): resources of the jar under
+// `console/`, where the Engine serves them from. `-Prunline.skipConsole=true` leaves it out, on
+// this machine only; packagedTest and a release build refuse that (see the script and the README).
+apply(from = rootProject.file("gradle/console-build.gradle.kts"))
+
+@Suppress("UNCHECKED_CAST")
+val consoleAssets = extra["consoleAssets"] as org.gradle.api.file.FileCollection
+
+tasks.processResources { from(consoleAssets) { into("console") } }
+
 tasks.test {
   useJUnitPlatform()
   // Runs against the packaged Engine have their own task (packagedTest).
@@ -116,11 +126,24 @@ val packagedTest by
           "runline.buildInfoScript",
           rootProject.file("gradle/build-info.gradle.kts").absolutePath,
       )
+      // The Console build is checked by building real projects with the script the Engine applies.
+      systemProperty(
+          "runline.consoleScript",
+          rootProject.file("gradle/console-build.gradle.kts").absolutePath,
+      )
+      systemProperty("runline.consoleDir", rootProject.file("console").absolutePath)
       systemProperty("runline.repoRoot", rootProject.projectDir.absolutePath)
       systemProperty("runline.gradlew", rootProject.file("gradlew").absolutePath)
       inputs
           .file(rootProject.file("gradle/build-info.gradle.kts"))
           .withPropertyName("buildInfoScript")
+      inputs
+          .file(rootProject.file("gradle/console-build.gradle.kts"))
+          .withPropertyName("consoleScript")
+      inputs
+          .files(fileTree(rootProject.file("console")) { exclude("node_modules/**", "dist/**") })
+          .withPropertyName("consoleProject")
+          .withPathSensitivity(PathSensitivity.RELATIVE)
       val dist = layout.buildDirectory.dir("engine-dist")
       val launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
       doFirst {

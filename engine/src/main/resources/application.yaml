@@ -23,14 +23,18 @@ ktor:
       - dev.lawlan.runline.engine.ServerOpenTelemetryKt.configureOpenTelemetry
       - dev.lawlan.runline.engine.RunRecoveryKt.configureRunRecovery
       - dev.lawlan.runline.engine.InfoRoutesKt.configureInfoRoutes
+      - dev.lawlan.runline.engine.HealthRoutesKt.configureHealthRoutes
       - dev.lawlan.runline.engine.ArtifactRoutesKt.configureArtifactRoutes
       - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
       - dev.lawlan.runline.engine.ResourceRoutesKt.configureResourceRoutes
       - dev.lawlan.runline.engine.AllowListRoutesKt.configureAllowListRoutes
       - dev.lawlan.runline.engine.TriggerRoutesKt.configureTriggerRoutes
       - dev.lawlan.runline.engine.WebhookRoutesKt.configureWebhookRoutes
+      - dev.lawlan.runline.engine.ConsoleRoutesKt.configureConsoleRoutes
       - dev.lawlan.runline.engine.TriggerStartupKt.configureTriggers
       - dev.lawlan.runline.engine.RetentionStartupKt.configureRetention
+      # Keep last: the startup probe turns ok when it has run.
+      - dev.lawlan.runline.engine.LifecycleKt.completeStartup
 
 # POSTGRES_URL (JDBC url), POSTGRES_USER, POSTGRES_PASSWORD: the database backing service.
 postgres:

@@ -66,11 +66,11 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 
 認證：無
 
-就緒探測，供部署平台決定是否導流。全部檢查通過回 200 `{"status": "ready"}`；任何一項未通過回 503，本文 `{"status": "not_ready", "checks": {...}}`。`checks` 的鍵固定為 `startup`、`database`、`runtime`、`shutdown`，值為 `ok` 或 `failed`（`startup` 另可為 `pending`），不含原因細節。
+就緒探測，供部署平台決定是否導流。全部檢查通過回 200 `{"status": "ready"}`；任何一項未通過回 503，本文 `{"status": "not_ready", "checks": {...}}`。`checks` 的鍵固定為 `startup`、`database`、`runtime`、`shutdown`，值為 `ok` 或 `failed`（`startup` 的 `pending` 為保留值，現行啟動順序下不會出現），不含原因細節。Engine 在啟動完成後才開始接受連線，啟動期間本端點沒有回應（連線被拒或逾時），呼叫端應以啟動寬限容忍，不應期待啟動期間回 503。
 
 | 檢查 | 通過條件 |
 |---|---|
-| `startup` | 啟動階段已完成（遷移確認、執行期目錄檢查、進行中 run 的中斷標記、待處理觸發的啟動處理、排程器啟動）|
+| `startup` | 啟動階段已完成（遷移確認、執行期目錄檢查、進行中 run 的中斷標記、待處理觸發的啟動處理、排程器啟動）；能收到回應時恆為 `ok`，保留給日後把啟動工作移到連接埠綁定之後的情況 |
 | `database` | PostgreSQL 在短逾時內可連線並完成輕量查詢（結果可短暫快取）|
 | `runtime` | run 執行期目錄仍存在且必要的部分齊全 |
 | `shutdown` | Engine 未處於關閉流程中 |
@@ -413,6 +413,14 @@ Engine 在 `/` 提供 Console（Svelte 靜態 SPA，隨 `engine.jar` 發佈，[A
 - 回應帶限制為同源的內容安全政策、禁止被嵌入框架與 `nosniff` 標頭。Engine 不啟用 CORS。
 - 前端建置被略過的本機建置中，`/` 回 404，API 不受影響。
 
-這一組路由在 `ApiDocumentationTest` 的處置見 [WI-31](work-items/WI-31-frontend-build-and-static-serving.md)。
+**掛載點。** 整組 Console 路由只有一個實際註冊的路由，下面的 `GET /{...}`（接住所有其他路由都不處理的 `GET`），在 `ApiDocumentationTest` 視為一組：它是除 `/api` 與 `/openapi` 之外唯一允許的路由，`/api` 下的路由仍須逐一記錄（[WI-31](work-items/WI-31-frontend-build-and-static-serving.md)）。
+
+回應標頭（Console 的檔案與入口頁）：`Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`；`/assets/` 下的檔案 `Cache-Control: public, max-age=31536000, immutable`，其餘 `no-cache`。
+
+### `GET /{...}`
+
+認證：無
+
+Console 的掛載點，規則見上。
 
 Engine 沒有 HTTP 關閉端點：關閉只由終止訊號觸發（[04](04-deployment.md)、[ADR-012](adr/ADR-012-api-authentication.md)）。範本遺留的回聲 WebSocket、範例 JSON 與關閉端點已移除，對這些路徑的請求得到 404。

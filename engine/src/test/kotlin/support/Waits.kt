@@ -56,3 +56,25 @@ fun awaitCondition(
     Thread.sleep(10)
   }
 }
+
+/**
+ * Like [awaitCondition], for a condition that has to suspend (a request to an application under
+ * test), polling without blocking the thread.
+ */
+suspend fun awaitConditionSuspending(
+    what: String,
+    timeout: Duration = TestTimeouts.condition,
+    diagnostics: suspend () -> String = { "" },
+    condition: suspend () -> Boolean,
+) {
+  val deadline = System.nanoTime() + timeout.toNanos()
+  while (!condition()) {
+    if (System.nanoTime() >= deadline) {
+      val state = diagnostics()
+      throw AssertionError(
+          "not true within ${timeout.text()}: $what" + if (state.isEmpty()) "" else "\n$state"
+      )
+    }
+    kotlinx.coroutines.delay(50)
+  }
+}

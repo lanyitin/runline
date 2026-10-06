@@ -82,6 +82,26 @@ class ApiDocumentationTest {
   }
 
   @Test
+  fun `the Console is one documented mount point and nothing else is registered outside api and openapi`() =
+      testApplication {
+        configureEngine()
+        startApplication()
+
+        val outside =
+            registered().filterNot {
+              it.path.startsWith("/api/") ||
+                  it.path == "/openapi" ||
+                  it.path.startsWith("/openapi/")
+            }
+
+        // The Console takes every GET the rest does not; anything else outside /api would be
+        // documented by the mount's section, and escape the rule that /api routes are listed one
+        // by one (ADR-015, WI-31).
+        assertEquals(listOf(Endpoint("GET", "/{...}", "無")), outside)
+        assertTrue(documented.any { it.method == "GET" && it.path == "/{...}" })
+      }
+
+  @Test
   fun `each documented endpoint states the authentication its route requires`() = testApplication {
     configureEngine()
     startApplication()

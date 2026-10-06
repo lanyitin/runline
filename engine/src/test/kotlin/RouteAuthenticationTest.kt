@@ -23,6 +23,9 @@ class RouteAuthenticationTest {
       path == "/openapi" ||
           path.startsWith("/openapi/") || // API documentation and its schema
           path == "/api/v1/info" || // the version and hash, for the login page (ADR-016)
+          path == "/api/v1/health/live" || // the probes of the deployment platform (ADR-018)
+          path == "/api/v1/health/ready" ||
+          path == "/{...}" || // the Console's files and entry page, one mount point (ADR-015)
           path.startsWith("/api/v1/webhooks/") // per-trigger secret in its own header
 
   private fun ApplicationTestBuilder.registered(): List<Registered> {
@@ -89,9 +92,13 @@ class RouteAuthenticationTest {
     startApplication()
     val rest = createClient { expectSuccess = false }
     val token = "Bearer ${dev.lawlan.runline.engine.support.TestTokens.ROOT}"
+    val paths = registered().map { it.path }.toSet()
 
     for (path in listOf("/ws", "/json/kotlinx-serialization", "/ktor/application/shutdown")) {
-      for (method in listOf(HttpMethod.Get, HttpMethod.Post)) {
+      // A GET of a path that is no route is answered by the Console (WI-31), so the routes
+      // themselves are looked at; whatever else is tried gets 404.
+      assertFalse(path in paths, path)
+      for (method in listOf(HttpMethod.Post, HttpMethod.Put, HttpMethod.Delete)) {
         val withToken =
             rest.request(path) {
               this.method = method

@@ -723,6 +723,60 @@ class PackagedEngineTest {
     assertTrue(elapsed < Duration.ofSeconds(15), "stopping took $elapsed with a log stream open")
   }
 
+  // ---- liveness and readiness probes (WI-29) ----
+
+  /** The probes need no token; the answer's status and body. */
+  private fun probe(name: String): Pair<Int, JsonObject> =
+      get("/api/v1/health/$name", token = null).let { it.statusCode() to json(it) }
+
+  @Test
+  fun `on SIGTERM ready turns 503 shutting_down at once, live stays 200 and the request in flight completes`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    val engine = startEngine(database, runtime, mapOf("RUNLINE_SHUTDOWN_GRACE_SECONDS" to "10"))
+    assertEquals(
+        200 to "ready",
+        probe("ready").let { it.first to it.second["status"]!!.jsonPrimitive.content },
+    )
+    val received = java.util.concurrent.CountDownLatch(1)
+    val upload = uploadSlowly(jarBytes("in-flight"), totalMillis = 4_000) { received.countDown() }
+    received.awaitWithin("the upload to begin arriving at the Engine")
+    Thread.sleep(1_000)
+
+    val signalled = System.nanoTime()
+    engine.terminate()
+
+    // The Engine learns of the signal a moment after it is sent: ask until it says it is stopping.
+    awaitCondition(
+        "ready to turn 503 shutting_down after SIGTERM",
+        diagnostics = { engine.outputTail() },
+    ) {
+      runCatching { probe("ready") }
+          .getOrNull()
+          ?.let { (status, body) ->
+            status == 503 && body["status"]?.jsonPrimitive?.content == "shutting_down"
+          } == true
+    }
+    // The grace time has not run out and the request in flight is still being received.
+    assertFalse(upload.isDone, "the upload should still be in flight while ready says so")
+    val (liveStatus, live) = probe("live")
+    assertEquals(200, liveStatus)
+    assertEquals("up", live["status"]!!.jsonPrimitive.content)
+    val (_, ready) = probe("ready")
+    assertEquals("failed", ready["checks"]!!.jsonObject["shutdown"]!!.jsonPrimitive.content)
+
+    // Everything else is refused, the request in flight is answered in full, the process ends.
+    assertEquals("refused", awaitRefusal())
+    val response = upload.getWithin("the answer to the upload that was in flight")
+    assertEquals(201, response.statusCode(), response.body())
+    engine.awaitExit(Duration.ofSeconds(10))
+    assertTrue(
+        Duration.ofNanos(System.nanoTime() - signalled) <= Duration.ofSeconds(10),
+        "stopping took longer than the grace time:\n${output("engine.log")}",
+    )
+  }
+
   // ---- configuration through the environment (WI-18) ----
 
   @Test

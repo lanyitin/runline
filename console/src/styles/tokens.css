@@ -1,0 +1,78 @@
+/* Design tokens of the Console ("clean lab", .superdesign/design-system.md). Everything visual
+   refers to these variables; nothing in a component names a colour or a size of its own. */
+:root {
+  /* Surfaces and lines */
+  --bg: #f7f9fc;
+  --surface: #ffffff;
+  --surface-subtle: #f1f4f9;
+  --border: #e3e8f0;
+  --border-strong: #cbd3df;
+
+  /* Text */
+  --text: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #5b6678; /* the design's #8a94a6 is under 4.5:1 on white */
+
+  /* Accent: electric cyan-blue, and the indigo for secondary highlights */
+  --accent: #0ea5e9;
+  --accent-hover: #0284c7;
+  --accent-tint: #e0f4fd;
+  --accent-line: #b6e3f8;
+  --accent-text: #0369a1;
+  --accent-solid: #0369a1; /* buttons: white text on #0ea5e9 is 2.8:1 */
+  --on-accent: #ffffff;
+  --indigo: #6366f1;
+  --indigo-tint: #eceefe;
+  --indigo-text: #4338ca;
+
+  /* Status: the colour is never the only sign; a badge also has its words */
+  --success: #10b981;
+  --success-tint: #e6f8f1;
+  --success-text: #047857;
+  --success-glow: rgba(16, 185, 129, 0.5);
+  --danger: #ef4444;
+  --danger-tint: #fdecec;
+  --danger-text: #b91c1c;
+  --warning: #f59e0b;
+  --warning-tint: #fef3dc;
+  --warning-text: #92400e;
+  --running: #0ea5e9;
+  --running-tint: #e0f4fd;
+  --running-text: #0369a1;
+  --neutral: #94a3b8;
+  --neutral-tint: #f1f4f9;
+  --neutral-text: #475569;
+
+  /* Type */
+  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', 'PingFang TC',
+    'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-xl: 1.375rem;
+
+  /* Space: an 8px grid, with a half step */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Shape and depth */
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.05);
+  --shadow-popover: 0 8px 28px rgba(15, 23, 42, 0.14);
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --topbar-height: 56px;
+
+  /* Motion */
+  --motion: 160ms ease-out;
+}

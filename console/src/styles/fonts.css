@@ -1,0 +1,22 @@
+/* The fonts of the Console come with it: no request to a font service (ADR-015: the Engine's
+   policy allows fonts from its own origin only). Latin subsets only, as variable fonts from the
+   fontsource packages pinned in package-lock.json; Chinese text uses the system's CJK fonts
+   (see --font-sans). The files are not inlined into this CSS (vite.config.ts, assetsInlineLimit),
+   because the policy does not allow data: fonts either. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')
+    format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('../../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2')
+    format('woff2-variations');
+}

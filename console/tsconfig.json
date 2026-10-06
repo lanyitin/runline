@@ -2,11 +2,26 @@
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"],
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "tools/**/*.ts",
+    "test-support/**/*.ts",
+    "contract/**/*.ts",
+    "vite.config.ts",
+    "vitest.contract.config.ts",
+    "vitest.apidoc.config.ts",
+    "vitest.e2e.config.ts",
+    "checks/**/*.ts",
+    "preview/**/*.ts",
+    "e2e/**/*.ts"
+  ]
 }

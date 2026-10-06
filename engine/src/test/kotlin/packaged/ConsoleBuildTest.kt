@@ -276,7 +276,8 @@ class ConsoleBuildTest {
     val built =
         Files.walk(dir.resolve("build/console")).use { files ->
           files
-              .filter { Files.isRegularFile(it) }
+              // The fonts (WI-33) are binary files: what is looked for is in the code and styles.
+              .filter { Files.isRegularFile(it) && !it.toString().endsWith(".woff2") }
               .map { Files.readString(it) }
               .toList()
               .joinToString("\n")

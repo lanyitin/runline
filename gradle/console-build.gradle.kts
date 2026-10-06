@@ -8,7 +8,11 @@
 //   and says where to read how to get it (README, "Node toolchain");
 // - `consoleInstall` (`npm ci`: from the lock file, nothing resolved or downloaded at run time),
 //   `consoleTypecheck`, `consoleTest` and `consoleBuild`, each redone only when its inputs change;
-// - `consoleCheck`, which `check` depends on: the Console's type check and tests;
+// - `consoleApiDocCheck` (WI-33): every error code and enumeration value in docs/.../08-api.md has
+//   a translation in both languages (the document is the single source of truth, ADR-015). It runs
+//   when the document is there, that is in this repository; a project that holds only the Console
+//   (the build tests' probe projects) has no document to read;
+// - `consoleCheck`, which `check` depends on: the Console's type check, tests and that check;
 // - `requireConsole`: fails when the Console is skipped. `packagedTest` always depends on it, and
 //   `shadowJar` when the build is a release (`-Prunline.release=true`, see build-info).
 //
@@ -129,11 +133,34 @@ fun npmCheck(name: String, script: String, what: String) =
 val consoleTypecheck = npmCheck("consoleTypecheck", "typecheck", "Type-checks the Console")
 val consoleTest = npmCheck("consoleTest", "test", "Runs the Console's tests")
 
+val apiDoc: File = rootProject.file("docs/stable/pipeline-engine/08-api.md")
+
+val consoleApiDocCheck =
+    tasks.register<Exec>("consoleApiDocCheck") {
+      group = "console"
+      description = "Checks that every error code and enumeration value of 08-api.md is translated"
+      dependsOn(consoleInstall)
+      enabled = !skipConsole && apiDoc.isFile
+      workingDir = consoleDir
+      commandLine("npm", "run", "check:api-doc")
+      environment("RUNLINE_API_DOC", apiDoc.absolutePath)
+      inputs
+          .files(sources())
+          .withPropertyName("sources")
+          .withPathSensitivity(PathSensitivity.RELATIVE)
+      inputs.file(installStamp).withPropertyName("installed")
+      // Declared as an input, so that editing the document alone reruns the check.
+      inputs.files(apiDoc).withPropertyName("apiDoc").optional()
+      val stamp = consoleStamps.map { it.file("consoleApiDocCheck.stamp") }
+      outputs.file(stamp)
+      doLast { stamp.get().asFile.apply { parentFile.mkdirs() }.writeText("passed\n") }
+    }
+
 val consoleCheck =
     tasks.register("consoleCheck") {
       group = "verification"
-      description = "The Console's type check and tests"
-      dependsOn(consoleTypecheck, consoleTest)
+      description = "The Console's type check, tests and translation check"
+      dependsOn(consoleTypecheck, consoleTest, consoleApiDocCheck)
     }
 
 val consoleBuild =

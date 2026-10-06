@@ -1,4 +1,5 @@
-import { mount } from 'svelte';
-import App from './App.svelte';
+import { SettableIdentity } from './app/identity.svelte';
+import { startConsole } from './bootstrap';
 
-mount(App, { target: document.getElementById('app')! });
+// Nobody is signed in until WI-34 brings the way to sign in.
+startConsole(document.getElementById('app')!, new SettableIdentity());

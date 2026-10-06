@@ -79,3 +79,16 @@ export function formatRelative(iso: string, now: Date, locale: Locale): string {
   }
   return iso;
 }
+
+/** The time of day with milliseconds on the 24 hour clock (the lines of a log), in the browser's time zone unless [timeZone] says one. */
+export function formatTimeOfDay(iso: string, locale: Locale, timeZone?: string): string {
+  if (!isTime(iso)) return iso;
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3,
+    hourCycle: 'h23',
+    timeZone,
+  }).format(new Date(iso));
+}

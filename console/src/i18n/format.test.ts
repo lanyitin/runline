@@ -4,6 +4,7 @@ import {
   formatDateTime,
   formatDuration,
   formatNumber,
+  formatTimeOfDay,
   formatRelative,
   utcOriginal,
 } from './format';
@@ -84,5 +85,18 @@ describe('formatRelative', () => {
 
   test('the moment itself is "now"', () => {
     expect(formatRelative('2026-10-05T12:00:00Z', now, 'en')).toBe('now');
+  });
+});
+
+describe('formatTimeOfDay', () => {
+  const iso = '2026-10-05T14:30:05.123Z';
+
+  test('shows the time of day with milliseconds, on the 24 hour clock, for the lines of a log', () => {
+    expect(formatTimeOfDay(iso, 'en', 'UTC')).toBe('14:30:05.123');
+    expect(formatTimeOfDay(iso, 'zh-TW', 'Asia/Taipei')).toBe('22:30:05.123');
+  });
+
+  test('a value that is not a time is shown as it came', () => {
+    expect(formatTimeOfDay('later', 'en', 'UTC')).toBe('later');
   });
 });

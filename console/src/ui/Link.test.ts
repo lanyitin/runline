@@ -48,3 +48,21 @@ test('marks the link of the current page for assistive technology', async () => 
   const view = app.mount(Link, { href: '/runs', children: label });
   expect(view.querySelector('a')!.getAttribute('aria-current')).toBe('page');
 });
+
+test('a link of a section is marked as the place you are in when you are on a page below it, and not as the page', async () => {
+  app = await createTestApp({ path: '/runs/0b8a1c1e' });
+  const view = app.mount(Link, { href: '/runs', section: true, children: label });
+  expect(view.querySelector('a')!.getAttribute('aria-current')).toBe('true');
+});
+
+test('a link that is no section of anything is not marked on a page below it (the crumb of a parent)', async () => {
+  app = await createTestApp({ path: '/runs/0b8a1c1e' });
+  const view = app.mount(Link, { href: '/runs', children: label });
+  expect(view.querySelector('a')!.getAttribute('aria-current')).toBeNull();
+});
+
+test('the section of the overview is not every page', async () => {
+  app = await createTestApp({ path: '/runs' });
+  const view = app.mount(Link, { href: '/', section: true, children: label });
+  expect(view.querySelector('a')!.getAttribute('aria-current')).toBeNull();
+});

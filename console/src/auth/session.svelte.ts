@@ -27,6 +27,13 @@ export interface SessionOptions {
   onOutcome?: (ok: boolean) => void;
 }
 
+export interface UploadOptions {
+  contentType?: string;
+  signal?: AbortSignal;
+  /** Called while the file goes, with the bytes sent and the bytes in all. */
+  onProgress?: (sent: number, total: number) => void;
+}
+
 /** What the screens may do with the session: who is in, sign out, and ask the Engine something. */
 export interface Session extends IdentitySource {
   /** The screen that asks for the credential, of the method in use. */
@@ -41,7 +48,38 @@ export interface Session extends IdentitySource {
    * Without a session nothing is sent and the call fails as a 401.
    */
   request(path: string, init?: RequestInit): Promise<Response>;
+  /**
+   * A POST of a file to [path] with the credential of the session, which tells how much has gone and
+   * can be cancelled (`fetch` can do neither for a file). The answer, the 401 and the connection are
+   * as for `request`. A cancelled upload fails with an `AbortError`, as `fetch` does.
+   */
+  upload(path: string, body: Blob, options?: UploadOptions): Promise<Response>;
   dispose(): void;
+}
+
+/** Sends [body] with an XMLHttpRequest, the only way a browser says how much of it has gone. */
+function post(url: string, body: Blob, headers: Headers, options: UploadOptions): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    headers.forEach((value, name) => xhr.setRequestHeader(name, value));
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) options.onProgress?.(event.loaded, event.total);
+    };
+    xhr.upload.onload = () => options.onProgress?.(body.size, body.size);
+    xhr.onload = () => {
+      const answer = new Headers();
+      for (const line of xhr.getAllResponseHeaders().split('\r\n')) {
+        const colon = line.indexOf(':');
+        if (colon > 0) answer.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+      }
+      resolve(new Response(xhr.responseText, { status: xhr.status, headers: answer }));
+    };
+    xhr.onerror = () => reject(new TypeError('the Engine did not answer'));
+    xhr.onabort = () => reject(new DOMException('The upload was cancelled', 'AbortError'));
+    options.signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+    xhr.send(body);
+  });
 }
 
 const failureOf = (error: unknown): ApiFailure =>
@@ -191,6 +229,26 @@ export function createSession(options: SessionOptions): Session {
       }
       // Only the credential this request carried may end the session: a 401 for one that has been
       // replaced since says nothing about the new one.
+      if (response.status === 401 && store.read() === credential) expire();
+      return response;
+    },
+
+    async upload(path, body, uploadOptions = {}) {
+      const credential = store.read();
+      if (credential === null) throw new ApiFailure(401, null, 'nobody is signed in');
+      uploadOptions.signal?.throwIfAborted();
+      const headers = new Headers();
+      method.authorize(credential, headers);
+      if (uploadOptions.contentType) headers.set('Content-Type', uploadOptions.contentType);
+      let response: Response;
+      try {
+        response = await post(`${baseUrl}${path}`, body, headers, uploadOptions);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        onOutcome?.(false);
+        throw failureOf(error);
+      }
+      onOutcome?.(response.status < 500);
       if (response.status === 401 && store.read() === credential) expire();
       return response;
     },

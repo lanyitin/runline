@@ -5,6 +5,7 @@
 // real: the Fake Engine knows the token of the identity a test asks for.
 
 import { mount, unmount, type Component } from 'svelte';
+import { createEngineApi } from '../src/api/engine-api';
 import { createConnectionMonitor } from '../src/api/connection.svelte';
 import { APP_CONTEXT, type AppContext } from '../src/app/context';
 import type { Identity } from '../src/app/identity.svelte';
@@ -85,6 +86,7 @@ export async function createTestApp(
     router: createRouter(window),
     engineInfo: createEngineInfo({ session, connection, baseUrl: engine.url }),
     connection,
+    api: createEngineApi(session),
   };
 
   await session.start();

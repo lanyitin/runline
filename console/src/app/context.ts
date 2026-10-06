@@ -1,4 +1,5 @@
 import { getContext, setContext } from 'svelte';
+import type { EngineApi } from '../api/engine-api';
 import type { ConnectionMonitor } from '../api/connection.svelte';
 import type { Session } from '../auth/session.svelte';
 import type { EngineInfoStore } from '../engine/info-store.svelte';
@@ -19,6 +20,8 @@ export interface AppContext {
   engineInfo: EngineInfoStore;
   /** Whether the Engine could be reached by the last call to it. */
   connection: ConnectionMonitor;
+  /** The Engine's API of the pipelines, over the session. */
+  api: EngineApi;
 }
 
 export const APP_CONTEXT = Symbol('runline.app');

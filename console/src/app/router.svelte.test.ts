@@ -47,6 +47,29 @@ describe('the history router', () => {
     expect(location.search + location.hash).toBe('?state=FAILED#top');
   });
 
+  test('says the query of the address, which follows navigate and the browser buttons', () => {
+    router = createRouter(window);
+    expect(router.search).toBe('');
+
+    router.navigate('/runs?state=FAILED#top');
+    expect(router.search).toBe('?state=FAILED');
+
+    history.replaceState(null, '', '/pipelines?verdict=SAFE');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(router.search).toBe('?verdict=SAFE');
+  });
+
+  test('replace changes the address without adding an entry of history', () => {
+    router = createRouter(window);
+    const before = history.length;
+
+    router.replace('/runs?state=RUNNING');
+
+    expect(location.pathname + location.search).toBe('/runs?state=RUNNING');
+    expect(router.search).toBe('?state=RUNNING');
+    expect(history.length).toBe(before);
+  });
+
   test('after dispose the browser buttons no longer move it', () => {
     router = createRouter(window);
     router.dispose();

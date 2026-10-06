@@ -484,6 +484,110 @@ describe('requests to the Engine', () => {
   });
 });
 
+describe('uploads to the Engine', () => {
+  const jar = new Uint8Array(300_000).fill(7);
+
+  test('carry the credential like any request, send the bytes as they are, and give the answer of the Engine', async () => {
+    const { session } = tab();
+    await session.start();
+    await session.signIn(ada.token);
+    engine.log.length = 0;
+
+    const response = await session.upload('/api/v1/artifacts', new Blob([jar]), {
+      contentType: 'application/octet-stream',
+    });
+
+    expect(response.status).toBe(422); // the Engine reads no jar in these bytes
+    expect(await response.json()).toMatchObject({ error: 'not_a_jar' });
+    expect(engine.log).toEqual([
+      { path: '/api/v1/artifacts', authorization: `Bearer ${ada.token}`, sessionCode: null },
+    ]);
+  });
+
+  test('tell how much has been sent, up to all of it', async () => {
+    const { session } = tab();
+    await session.start();
+    await session.signIn(ada.token);
+    const told: Array<[number, number]> = [];
+
+    await session.upload('/api/v1/artifacts', new Blob([jar]), {
+      onProgress: (sent, total) => told.push([sent, total]),
+    });
+
+    expect(told.length).toBeGreaterThan(0);
+    expect(told.every(([, total]) => total === jar.length)).toBe(true);
+    expect(told.at(-1)).toEqual([jar.length, jar.length]);
+    expect(told.map(([sent]) => sent)).toEqual([...told.map(([sent]) => sent)].sort((a, b) => a - b));
+  });
+
+  test('can be cancelled: the call ends as aborted, and the session is as it was', async () => {
+    const { session } = tab();
+    await session.start();
+    await session.signIn(ada.token);
+    engine.mode = 'hang';
+    const abort = new AbortController();
+
+    const sending = session.upload('/api/v1/artifacts', new Blob([jar]), { signal: abort.signal });
+    await vi.waitFor(() => expect(engine.requests).toBeGreaterThan(0));
+    abort.abort();
+
+    await expect(sending).rejects.toMatchObject({ name: 'AbortError' });
+    authenticatedAs(session, 'ada', 'developer');
+  });
+
+  test('that were cancelled before they began send nothing', async () => {
+    const { session } = tab();
+    await session.start();
+    await session.signIn(ada.token);
+    engine.log.length = 0;
+    const abort = new AbortController();
+    abort.abort();
+
+    await expect(
+      session.upload('/api/v1/artifacts', new Blob([jar]), { signal: abort.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(engine.log).toEqual([]);
+  });
+
+  test('are not sent at all when nobody is signed in: they fail as a 401', async () => {
+    const { session } = tab();
+    await session.start();
+    engine.log.length = 0;
+
+    await expect(session.upload('/api/v1/artifacts', new Blob([jar]))).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(engine.log).toEqual([]);
+  });
+
+  test('a 401 signs out like any other request, and the answer still reaches the caller', async () => {
+    const { session, stored } = tab();
+    await session.start();
+    await session.signIn(ada.token);
+    engine.callers = [root];
+
+    const response = await session.upload('/api/v1/artifacts', new Blob([jar]));
+
+    expect(response.status).toBe(401);
+    expect(session.state).toEqual({ status: 'anonymous', reason: 'expired' });
+    expect(stored()).toBeNull();
+  });
+
+  test('when the Engine cannot be reached fail as no answer, and tell the connection', async () => {
+    const outcomes: boolean[] = [];
+    const { session } = tab({ onOutcome: (ok) => outcomes.push(ok) });
+    await session.start();
+    await session.signIn(ada.token);
+    outcomes.length = 0;
+    await engine.stop();
+
+    await expect(session.upload('/api/v1/artifacts', new Blob([jar]))).rejects.toMatchObject({
+      status: 0,
+    });
+    expect(outcomes).toEqual([false]);
+  });
+});
+
 test('a session that is disposed leaves the channel: it no longer answers or follows', async () => {
   const holder = tab();
   await holder.session.start();

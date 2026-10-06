@@ -30,7 +30,7 @@
         <ul>
           {#each group.routes as route (route.id)}
             <li>
-              <Link href={route.path} class="item">
+              <Link href={route.path} class="item" section>
                 <span class="label">{i18n.t(`nav.${route.id}`)}</span>
                 {#if route.adminOnly}
                   <span class="admin-tag">{i18n.t('nav.adminTag')}</span>
@@ -110,7 +110,8 @@
     text-decoration: none;
   }
   /* The page you are on: tinted, and a 1px accent line under it (the words stay the same). */
-  :global(.sidebar a.item[aria-current='page']) {
+  :global(.sidebar a.item[aria-current='page']),
+  :global(.sidebar a.item[aria-current='true']) {
     background: var(--accent-tint);
     color: var(--accent-text);
     box-shadow: inset 0 -1px 0 var(--accent);

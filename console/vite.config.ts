@@ -28,6 +28,11 @@ export default defineConfig({
   resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.ts', 'tools/**/*.test.ts', 'contract/fake-engine.contract.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'tools/**/*.test.ts',
+      'test-support/**/*.test.ts',
+      'contract/fake-engine.contract.test.ts',
+    ],
   },
 });

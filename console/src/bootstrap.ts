@@ -3,6 +3,7 @@ import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/base.css';
 import App from './App.svelte';
+import { createEngineApi } from './api/engine-api.ts';
 import { createConnectionMonitor } from './api/connection.svelte.ts';
 import { APP_CONTEXT, type AppContext } from './app/context.ts';
 import { createRouter } from './app/router.svelte.ts';
@@ -39,6 +40,7 @@ export function startConsole(target: HTMLElement) {
     router: createRouter(window),
     engineInfo: createEngineInfo({ session, connection }),
     connection,
+    api: createEngineApi(session),
   };
 
   const app = mount(App, { target, context: new Map([[APP_CONTEXT, context]]) });

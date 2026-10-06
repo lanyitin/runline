@@ -1,11 +1,18 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { useApp } from './app/context';
-  import { matchRoute, type AppRoute } from './app/routes';
-  import Forbidden from './pages/Forbidden.svelte';
+  import { isNavRoute, matchRoute, ROUTES, type MatchedRoute } from './app/routes';
+  import CreateRunPage from './pages/CreateRunPage.svelte';
   import EnginePage from './pages/EnginePage.svelte';
+  import Forbidden from './pages/Forbidden.svelte';
   import NotFound from './pages/NotFound.svelte';
+  import OverviewPage from './pages/OverviewPage.svelte';
   import PagePlaceholder from './pages/PagePlaceholder.svelte';
+  import PipelineDetailPage from './pages/PipelineDetailPage.svelte';
+  import PipelinesPage from './pages/PipelinesPage.svelte';
+  import RunDetailPage from './pages/RunDetailPage.svelte';
+  import RunsPage from './pages/RunsPage.svelte';
+  import UploadPage from './pages/UploadPage.svelte';
   import SignIn from './pages/SignIn.svelte';
   import AppShell from './shell/AppShell.svelte';
   import type { Crumb } from './shell/Breadcrumb.svelte';
@@ -13,7 +20,7 @@
 
   const { i18n, session, router } = useApp();
 
-  const route = $derived<AppRoute | null>(matchRoute(router.path));
+  const route = $derived<MatchedRoute | null>(matchRoute(router.path));
   const signedIn = $derived(session.state.status === 'authenticated' ? session.state.identity : null);
   const allowed = $derived(route !== null && (!route.adminOnly || signedIn?.role === 'admin'));
 
@@ -23,9 +30,16 @@
     return i18n.t(`page.${route.id}.title`);
   });
 
+  const parent = $derived(
+    route?.parent ? (ROUTES.filter(isNavRoute).find((r) => r.id === route.parent) ?? null) : null,
+  );
   const crumbs = $derived<Crumb[]>(
     route !== null && allowed
-      ? [{ label: i18n.t(`nav.group.${route.group}`) }, { label: title }]
+      ? [
+          { label: i18n.t(`nav.group.${route.group}`) },
+          ...(parent ? [{ label: i18n.t(`nav.${parent.id}`), href: parent.path }] : []),
+          { label: title },
+        ]
       : [{ label: i18n.t('topbar.home'), href: '/' }, { label: title }],
   );
 
@@ -51,10 +65,29 @@
       <NotFound />
     {:else if !allowed}
       <Forbidden role={signedIn.role} />
-    {:else if route.id === 'engine'}
-      <EnginePage />
     {:else}
-      <PagePlaceholder id={route.id} />
+      <!-- The page of another thing is a new page: a run is not the run before it. -->
+      {#key router.path}
+        {#if route.id === 'overview'}
+          <OverviewPage />
+        {:else if route.id === 'pipelines'}
+          <PipelinesPage />
+        {:else if route.id === 'pipeline'}
+          <PipelineDetailPage contentHash={route.params.contentHash} />
+        {:else if route.id === 'upload'}
+          <UploadPage />
+        {:else if route.id === 'runs'}
+          <RunsPage />
+        {:else if route.id === 'runNew'}
+          <CreateRunPage />
+        {:else if route.id === 'run'}
+          <RunDetailPage runId={route.params.runId} />
+        {:else if route.id === 'engine'}
+          <EnginePage />
+        {:else}
+          <PagePlaceholder id={route.id} />
+        {/if}
+      {/key}
     {/if}
   </AppShell>
 {:else}

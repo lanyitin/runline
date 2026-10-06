@@ -20,6 +20,63 @@ const engineShown = (view: HTMLElement) =>
     expect(view.textContent).toContain('a3f9c1e');
   });
 
+describe('the pages of a developer', () => {
+  test.each([
+    ['/', 'Overview'],
+    ['/pipelines', 'Pipelines'],
+    ['/runs', 'Runs'],
+    ['/runs/new', 'Create run'],
+    ['/upload', 'Upload'],
+  ])('%s is the page %s, not a placeholder', async (path, title) => {
+    const view = await withApp({ identity: developer, path });
+    expect(view.querySelector('main h1')!.textContent).toBe(title);
+    expect(view.querySelector('main')!.textContent).not.toContain('This page is not built yet.');
+  });
+
+  test('a page of one run: its own page, under Runs in the breadcrumb and the navigation', async () => {
+    app = await createTestApp({ identity: developer, path: '/' });
+    const run = app.engine.backend.seedRun('Ada', { pipeline: 'order-sync' });
+    app.context.router.navigate(`/runs/${run.runId}`);
+    const view = app.mount(App);
+
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toContain(run.runId.slice(0, 8)));
+    const crumbs = [...view.querySelectorAll('header ol li')].map((li) => li.textContent!.replace('›', '').trim());
+    expect(crumbs).toEqual(['Workspace', 'Runs', 'Run']);
+    expect(view.querySelector('header ol a')!.getAttribute('href')).toBe('/runs');
+    expect(view.querySelector('nav a[href="/runs"]')!.getAttribute('aria-current')).toBe('true');
+    expect(document.title).toBe('Run · Runline Console');
+  });
+
+  test('a page of one pipeline, under Pipelines', async () => {
+    app = await createTestApp({ identity: developer, path: '/' });
+    const hash = app.engine.backend.seedArtifact('Ada', [{ name: 'order-sync', className: 'x.O' }]);
+    app.context.router.navigate(`/pipelines/${hash}?pipeline=order-sync`);
+    const view = app.mount(App);
+
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toBe('order-sync'));
+    expect(view.querySelector('nav a[href="/pipelines"]')!.getAttribute('aria-current')).toBe('true');
+  });
+
+  test('going from one run to another shows the other, whole', async () => {
+    app = await createTestApp({ identity: developer, path: '/' });
+    const one = app.engine.backend.seedRun('Ada', { pipeline: 'first-one' });
+    const two = app.engine.backend.seedRun('Ada', { pipeline: 'second-one' });
+    app.context.router.navigate(`/runs/${one.runId}`);
+    const view = app.mount(App);
+    await vi.waitFor(() => expect(view.querySelector('main')!.textContent).toContain('first-one'));
+
+    app.context.router.navigate(`/runs/${two.runId}`);
+
+    await vi.waitFor(() => expect(view.querySelector('main')!.textContent).toContain('second-one'));
+    expect(view.querySelector('main')!.textContent).not.toContain('first-one');
+  });
+
+  test('the pages of the admin are still not built, and say so', async () => {
+    const view = await withApp({ identity: admin, path: '/triggers' });
+    expect(view.querySelector('main')!.textContent).toContain('This page is not built yet.');
+  });
+});
+
 describe('before sign-in', () => {
   test.each(['/', '/runs', '/no/such/page'])(
     'the Engine version and commit hash are on %s',

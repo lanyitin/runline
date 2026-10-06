@@ -30,3 +30,49 @@ tasks.register("pipelineJars") {
   description = "Builds every sample pipeline jar into build/pipelines/"
   dependsOn(scenarioJars)
 }
+
+// For the security check of the Console (WI-37), not for a demo: pipelines whose every string is
+// markup or a script (`adversarial.jar`), one whose name the Engine refuses
+// (`adversarial-name.jar`) and one whose jar has an unreadable class that carries markup
+// (`adversarial-unreadable.jar`). Not named demo-*, so dev.sh does not list them.
+val adversarialJar =
+    tasks.register<Jar>("adversarialJar") {
+      group = "build"
+      description = "Packages the pipeline with hostile strings (without core)"
+      archiveBaseName = "adversarial"
+      archiveVersion = ""
+      destinationDirectory = layout.buildDirectory.dir("pipelines")
+      from(sourceSets.main.get().output) { include("samples/adversarial/Hostile*") }
+    }
+
+val adversarialNameJar =
+    tasks.register<Jar>("adversarialNameJar") {
+      group = "build"
+      description = "Packages the pipeline whose name the Engine refuses and says back"
+      archiveBaseName = "adversarial-name"
+      archiveVersion = ""
+      destinationDirectory = layout.buildDirectory.dir("pipelines")
+      from(sourceSets.main.get().output) { include("samples/adversarial/RejectedNamePipeline*") }
+    }
+
+val adversarialUnreadableJar =
+    tasks.register<Jar>("adversarialUnreadableJar") {
+      group = "build"
+      description = "Packages the pipeline whose jar has an unreadable class named like markup"
+      archiveBaseName = "adversarial-unreadable"
+      archiveVersion = ""
+      destinationDirectory = layout.buildDirectory.dir("pipelines")
+      from(sourceSets.main.get().output) {
+        include("samples/adversarial/UnreadablePipeline*")
+        // Not the helper class: bogus.bin takes its place below.
+        exclude("samples/adversarial/UnreadableHelper*")
+      }
+      from("src/hostile-entry/bogus.bin") {
+        into("samples/adversarial")
+        rename { "UnreadableHelper id=\"pwn-class\" onerror=pwned(1).class" }
+      }
+    }
+
+tasks.named("pipelineJars") {
+  dependsOn(adversarialJar, adversarialNameJar, adversarialUnreadableJar)
+}

@@ -12,7 +12,8 @@
     "check:api-doc": "vitest run --config vitest.apidoc.config.ts",
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "audit": "npm audit --audit-level=high",
-    "e2e": "vitest run --config vitest.e2e.config.ts"
+    "e2e": "vitest run --config vitest.e2e.config.ts",
+    "e2e:security": "vitest run --config vitest.e2e.config.ts e2e/security.e2e.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.1",

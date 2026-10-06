@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import config from '../vite.config';
 import { findMarkupInsertion, forbidMarkupInsertion } from './untrusted-content';
 
 describe('findMarkupInsertion', () => {
@@ -70,4 +71,26 @@ describe('the sources of the Console', () => {
     const found = own.flatMap((file) => findMarkupInsertion(readFileSync(file, 'utf8'), file));
     expect(found).toEqual([]);
   });
+});
+
+describe('the rule in the build (WI-37)', () => {
+  const plugin = forbidMarkupInsertion();
+  const transform = (code: string, id: string) =>
+    (plugin.transform as (code: string, id: string) => unknown).call({}, code, id);
+
+  test('is a plugin of the build that runs before the others, with no switch to turn it off', () => {
+    const plugins = (config.plugins ?? []).flat() as { name?: string; enforce?: string }[];
+    const rule = plugins.find((p) => p?.name === 'runline-forbid-markup-insertion');
+    expect(rule, 'the build has the rule').toBeDefined();
+    expect(rule!.enforce).toBe('pre');
+    const source = readFileSync('tools/untrusted-content.ts', 'utf8');
+    expect(source, 'a setting that turns the rule off').not.toMatch(/process\.env|import\.meta\.env/);
+  });
+
+  test.each(['/p/console/src/a.ts', '/p/console/src/deep/er/a.js', '/p/console/src/a.svelte'])(
+    'has no list of exceptions: every kind of source of the Console fails the build (%s)',
+    (id) => {
+      expect(() => transform('el.innerHTML = x', id)).toThrow(/innerHTML/);
+    },
+  );
 });

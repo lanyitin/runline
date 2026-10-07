@@ -54,7 +54,8 @@
 | `RUNLINE_SHARED_ROOT` | pipeline 共享目錄的根位置（多次執行間保留） | 專案內 `.runline/shared` |
 | `RUNLINE_RUN_ROOT` | run 私有目錄的根位置（每次執行全新） | 專案內 `.runline/runs` |
 | `RUNLINE_RESOURCE_ROOT` | `file` 型別共享資源的檔案所在的根位置（[ADR-019](pipeline-engine/adr/ADR-019-typed-shared-resources.md)） | 專案內 `.runline/resources` |
-| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，`file` 的路徑相對於根位置，`counter` 沒有路徑，例如 `audit=file:logs/out.txt,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動 | 無 |
+| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，`file` 的路徑相對於根位置，`openai-compatible` 的路徑是專案內的設定檔（見「型別化共享資源（`openai-compatible`）」），`counter` 沒有路徑，例如 `audit=file:logs/out.txt,lemon=openai-compatible:openai/lemon.json,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動 | 無 |
+| `RUNLINE_SECRET_<別名>` | `openai-compatible` 資源的金鑰（本機沒有 Engine 的金鑰庫，金鑰由環境提供）：別名轉大寫、非英數字元換成 `_`，例如別名 `lemon-key` 對應 `RUNLINE_SECRET_LEMON_KEY`；值限可列印 ASCII，與 Engine 的機密字元集一致，否則視為取不到。金鑰不寫進設定檔、不被任何輸出顯示 | 無 |
 | `RUNLINE_ALLOW_LIST` | 用逗號分隔的白名單條目，會完全取代預設白名單：套件（`kotlin`）、套件後加 `:exact` 表示「僅此套件」（`kotlin:exact`）、`class:` 開頭表示完整類別（`class:java.io.PrintStream`，只放行該類別與其巢狀類別）；格式與 Engine 的 `ALLOWLIST_PACKAGES` 相同（由 analyzer 的 `AllowListText` 共用）；名稱不合法時啟動即失敗，已不再接受的尾端 `!` 形式也會失敗並提示改用 `:exact`；設為空字串表示空清單 | 專案的預設白名單（analyzer 模組的 `DefaultAllowList`，Engine 首次啟動也用它） |
 | `RUNLINE_ALLOW_LIST_VERSION` | 設定了 `RUNLINE_ALLOW_LIST` 時，判定中顯示的白名單版本；預設清單有自己的版本，此變數對它無效 | `local`（清單為空時為 `local-empty`） |
 | `RUNLINE_SHOW_ALLOW_LIST` | 設為 `true` 時列出所用清單的全部條目（格式同 `RUNLINE_ALLOW_LIST`） | 不列出 |
@@ -70,6 +71,27 @@
 pipeline 在 `@PipelineDefinition` 以 `typedResources = [TypedResource(name = "audit", type = ResourceTypes.FILE)]` 宣告需要某個 `file` 資源後，在 `run` 中以 `context.accessors.file("audit")` 取得存取端：`readText`/`readBytes`、`writeText`/`writeBytes`（覆寫）、`appendText`/`appendBytes`。存取端不暴露路徑，只能碰那一個檔案；單次讀取有大小上限（預設 10 MiB，超過得到 `TOO_LARGE`）。取用沒有宣告型別的資源、只宣告名稱的資源或型別不符者，得到 `ResourceAccessException`（`failure` 為 `NOT_DECLARED`、`NO_TYPE_DECLARED`、`TYPE_MISMATCH`），沒有「執行中取得資源」的操作。run 結束後存取端失效，之後的操作失敗（`ENDED`）。錯誤只含類別（`NOT_FOUND`、`PATH_REJECTED`、`TOO_LARGE`、`FAILED` 與 errorId），不含路徑。
 
 開發入口以 `RUNLINE_RESOURCES` 與 `RUNLINE_RESOURCE_ROOT` 在本機提供同一份契約：初始化立即成功（沒有競爭），行為與 Engine 以同一組驗收測試驗證。容量 N 的資源在 Engine 中只限制同時持有的 run 數，**不提供檔案內容層級的協調**。使用存取端不改變 safe 或 unsafe 的判定。
+
+## 型別化共享資源（`openai-compatible`）
+
+pipeline 以 `typedResources = [TypedResource(name = "lemon", type = ResourceTypes.OPENAI_COMPATIBLE)]` 宣告後，在 `run` 中以 `context.accessors.openAiCompatible("lemon")` 取得存取端，用 `call(OpenAiRequest(...))` 呼叫 Engine 管理員為這個資源啟用的端點目錄條目，取得完整回應（`OpenAiResponse`：`status`、`headers`、`body`）。對應 [WI-46](pipeline-engine/work-items/WI-46-openai-compatible-resource.md)，規則與 Engine 相同（行為以同一組驗收測試驗證）。
+
+```kotlin
+val lemon = context.accessors.openAiCompatible("lemon")
+val answer = lemon.call(
+    OpenAiRequest("chat.completions", """{"messages":[{"role":"user","content":"hi"}]}"""),
+)
+println(answer.body)
+```
+
+- `OpenAiRequest(endpoint, body, pathParameters, query, timeouts)`：`endpoint` 是目錄條目的名稱（`chat.completions`、`completions`、`embeddings`、`models.list`、`models.retrieve` 預設啟用，其他由管理員逐條啟用；完整目錄見 [08-api](pipeline-engine/08-api.md) 的「`openai-compatible` 型別」）；`body` 是該條目的 JSON 本文，資源的預設（模型、取樣與長度參數）在先，你提供的同名值蓋過它；`pathParameters`、`query` 只填條目列出者。你不能指定主機、路徑、方法或標頭；金鑰、organization、project 與額外標頭由資源注入，你提供的標頭不存在這條路。
+- 管理員可以鎖定參數、限制可用的模型、給數值參數上限；違反時得到 `ResourceAccessException`，`failure` 為 `PARAMETER_LOCKED`、`MODEL_NOT_ALLOWED`、`VALUE_ABOVE_LIMIT`，且不送出請求。`stream` 由資源管理，目前要求串流會得到 `STREAM_NOT_SUPPORTED`（串流隨後加入）。
+- 錯誤只含類別與（服務有回應時的）HTTP 狀態碼 `e.status`，沒有服務回的訊息或本文：`DENIED`（401、403）、`RATE_LIMITED`（429）、`SERVER_ERROR`（5xx）、`REQUEST_REJECTED`（其他 4xx）、`CONNECTION_FAILED`、`REDIRECT_BLOCKED`、`RESPONSE_TOO_LARGE`、`CANCELLED`、`SECRET_UNAVAILABLE`，以及五種逾時各自的類別（`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT`、`QUOTA_WAIT_TIMEOUT`）。**不會自動重試**，要不要重試由你決定。
+- `OpenAiTimeouts(connect, firstByte, idle, total, quotaWait)` 可以縮短任何一種逾時，不能放寬。預設的首位元組逾時很長（15 分鐘）：非串流呼叫在生成結束前收不到任何位元組，它實質上就是整體生成上限。
+- 同一個 run 同時進行的請求數受資源的 `requestsPerRun`（預設 1）限制；用盡時 `call` 等待額度（受 `quotaWait` 與 run 的取消約束）。用多條 thread 呼叫時，超過額度的呼叫會排隊，不會同時送出。串流（隨後加入）進行中時，同一條 thread 在拉取串流時再發請求會等不到額度，須先結束或關閉串流。
+- 回應標頭已剝除憑證（名稱含 `auth`、`key`、`token`、`secret`、`cookie`），值中的金鑰以 `***` 取代；回應本文不被處理。
+
+本機設定（開發入口不連 Engine，也沒有金鑰庫）：`RUNLINE_RESOURCES` 的 `lemon=openai-compatible:openai/lemon.json` 指向專案內的 JSON 檔，內容是管理員給 Engine 的同一份 `settings`（欄位見 08-api），另可加 `"secretAlias": "lemon-key"`；金鑰從環境變數 `RUNLINE_SECRET_LEMON_KEY` 讀取。設定檔不合規、讀不到或別名不合規時啟動即失敗，只說類別，不顯示值；別名設定了但環境沒有金鑰時，呼叫得到 `SECRET_UNAVAILABLE`，不會送出請求。開發入口可以連真實服務。使用存取端不改變 safe 或 unsafe 的判定，也不需要在 `network` 宣告服務的主機。錄製時只記錄資源名稱、型別與動作類別，不記錄端點、本文或位址。
 
 ## 錄製 IO 與 metadata 提案
 

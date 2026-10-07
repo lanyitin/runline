@@ -24,4 +24,18 @@ dependencies {
   testImplementation(testFixtures(project(":runner")))
 }
 
-tasks.test { useJUnitPlatform() }
+// Measurements against a real OpenAI compatible service are run by hand (WI-46) and are not part of
+// `check`: they are tagged and left out of `test`, and have a task of their own.
+tasks.test { useJUnitPlatform { excludeTags("real-service") } }
+
+tasks.register<Test>("verifyOpenAiService") {
+  group = "verification"
+  description =
+      "Manual: measures a real OpenAI compatible service (RUNLINE_OPENAI_VERIFY_URL, " +
+          "RUNLINE_OPENAI_VERIFY_MODEL, ...); the report is build/reports/openai-verification.txt"
+  testClassesDirs = sourceSets.test.get().output.classesDirs
+  classpath = sourceSets.test.get().runtimeClasspath
+  useJUnitPlatform { includeTags("real-service") }
+  testLogging { showStandardStreams = true }
+  outputs.upToDateWhen { false }
+}

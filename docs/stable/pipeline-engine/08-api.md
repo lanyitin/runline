@@ -119,7 +119,7 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 
 `metadata.resources[]` 是 pipeline 宣告的全部共享資源名稱；`metadata.resourceTypes` 是名稱到「期望型別」的對照，只含另外宣告了型別的名稱（型別取自 `counter`、`file`、`jdbc-pool`、`openai-compatible`，即使該型別尚未實作也可宣告），只宣告名稱者不在其中，沒有任何型別宣告時為 `{}`。型別宣告不影響 safe 或 unsafe 判定。
 
-`warnings[].kind` 的值（只是警告，不影響判定與上傳結果；資源之後被定義或改變時，查詢時重新計算）：`resource_unknown`（宣告的資源尚未定義）、`resource_disabled`（已停用）、`resource_type_mismatch`（資源的型別與宣告的型別不同）、`resource_type_unknown`（宣告的型別不在 `counter`、`file`、`jdbc-pool`、`openai-compatible` 之內；建立 run 時視為型別不符）。每項含 `kind`、`resource`、`message`。
+`warnings[].kind` 的值（只是警告，不影響判定與上傳結果；資源之後被定義或改變時，查詢時重新計算）：`resource_unknown`（宣告的資源尚未定義）、`resource_disabled`（已停用）、`resource_type_mismatch`（資源的型別與宣告的型別不同）、`resource_type_unknown`（宣告的型別不在 `counter`、`file`、`jdbc-pool`、`openai-compatible` 之內；建立 run 時視為型別不符）、`network_host_has_resource`（`network` 宣告的主機與某個 `openai-compatible` 資源的根位址主機相同，不分大小寫；提示應改經由資源存取，`resource` 為該資源；使用資源不需要在 `network` 宣告其主機，也不使 `network` 變成不限制）。每項含 `kind`、`resource`、`message`。
 
 `reasons[].kind` 的值：`UNRESTRICTED_ACCESS`（網路或行程未設限，`category`）、`NOT_ALLOW_LISTED`（白名單外的類別，`className` 與 `path[]`）、`JVM_EXIT`（參照 JVM 結束成員，`member` 與 `path[]`）、`IO_SENSITIVE_MEMBER`（參照 IO 敏感成員：啟動外部行程、載入原生程式碼，或在基礎套件內可直接開啟檔案或網路的成員，`member` 為含描述子的成員名稱，`path[]` 為從 pipeline 到該參照的路徑，不受套件白名單豁免，[ADR-013](adr/ADR-013-io-sensitive-members.md)）、`UNREADABLE_CLASS`（類別檔無法解析，`className`、`path[]`、`detail`）、`LIMIT_EXCEEDED`（分析超出時間或大小預算，`detail`）。新增 `IO_SENSITIVE_MEMBER` 之前已儲存的判定仍照原樣讀取與顯示，不會被自動重判。
 
@@ -207,9 +207,9 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱，另可宣告期望的型別；規則見 [ADR-007](adr/ADR-007-shared-resources.md) 與 [ADR-019](adr/ADR-019-typed-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
-資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別是 `counter`（只有名稱與容量，也就是資源原本的語意）與 `file`（Engine 主機上資源根目錄之下的一個檔案）；其餘兩種在各自的工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。機密的清單與重載端點見下一節「機密（管理員）」；資源對別名的解析與狀態（`not_set`、`found`、`missing`、`invalid_secret`）由接受別名的型別在其工作項寫入本文。
+資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別是 `counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）與 `openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）；`jdbc-pool` 在其工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
 
-資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，沒有時為 `null`；機密值不會出現在任何回應）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
+資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用；永遠不含機密值，金鑰庫重載後隨之變化）、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數，`openai-compatible` 才有，其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；其他型別為 `null`）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
 `invalid_resource`（422）的本文多一個 `problem`，說明原因類別：
 
@@ -219,19 +219,53 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `capacity` | 容量小於 1 |
 | `nothing_to_change` | 修改沒有要改的欄位 |
 | `unknown_type` | 型別不在封閉集合內 |
-| `unsupported_type` | 型別在集合內，但尚未實作，還不能建立 |
-| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串） |
+| `unsupported_type` | 型別在集合內，但尚未實作，還不能建立（目前只有 `jdbc-pool`） |
+| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串；`openai-compatible` 必填 `baseUrl`，且不接受清單以外的欄位，包括任何形式的金鑰、路徑與標頭） |
+| `invalid_base_url` | `openai-compatible` 的 `baseUrl` 不是自成一格的 `http` 或 `https` 位址：含使用者資訊、查詢、片段、`.` 或 `..` 片段，或不可列印字元 |
+| `invalid_header` | `openai-compatible` 的額外標頭（`headers`）、`organization` 或 `project` 不合規：名稱含 `auth`、`key`、`token`、`secret`、`cookie`（不分大小寫），是 Engine 自己設定或決定請求框架的標頭（`Host`、`Content-Type`、`Content-Length`、`Accept`、`Connection`、`Transfer-Encoding`、`OpenAI-Organization`、`OpenAI-Project` 等），名稱不是標頭名稱，或值含換行與其他控制字元 |
+| `invalid_endpoint` | `endpoints` 含不在端點目錄內的名稱、這個版本尚未提供的條目（多部分上傳與二進位回應，見下方「端點目錄」），或為空 |
+| `invalid_request_defaults` | `defaults`、`allowedModels`、`lockedParameters` 或 `maxValues` 不合規：只有模型與取樣、長度相關的參數可以設定，值須是該參數的型別，預設不得違反同一資源的模型清單與上限 |
+| `invalid_timeout` | `timeouts` 含不認得的項目，或值不是正整數毫秒（`totalMs` 可為 `null` 表示不設） |
+| `invalid_limit` | `requestsPerRun`、`maxRequestBytes` 或 `maxResponseBytes` 超出允許範圍 |
 | `path_outside_root` | `file` 的路徑不在資源根目錄內：絕對路徑、`..` 跳出根目錄，或路徑上的符號連結解析後跳出根目錄 |
 | `path_unusable` | `file` 的路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫 |
-| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file` 沒有），或別名不合規 |
+| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file` 沒有），或別名不合規（格式同資源名稱：1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭） |
 | `immutable_name` | 修改嘗試帶了 `name`；名稱不可修改 |
 | `immutable_type` | 修改嘗試帶了 `type`；型別不可修改，值相同也一樣被拒絕 |
+
+### `openai-compatible` 型別
+
+一個 OpenAI 相容服務（例如本機的 lemonade）。位址、金鑰、標頭、可用的端點、逾時與大小上限是管理員固定的，pipeline 不能覆寫，也不能自選主機、路徑、方法或標頭；pipeline 只能以端點目錄的條目名稱呼叫，並在管理員允許的範圍內覆寫模型與取樣參數（[ADR-019](adr/ADR-019-typed-shared-resources.md) 第 4 點、[WI-46](work-items/WI-46-openai-compatible-resource.md)）。金鑰是機密，只以 `secretAlias` 指向金鑰庫的別名（`counter` 與 `file` 帶別名仍被拒絕）；金鑰庫重載後取得資源的 run 用新金鑰，已持有者繼續用取得當下的金鑰與設定。
+
+`settings` 的欄位（只有這些；其他欄位為 `invalid_settings`）：
+
+| 欄位 | 意義 | 預設 |
+|---|---|---|
+| `baseUrl` | 必填。根位址，含根路徑（例如 `http://localhost:8000/api/v1`）；只允許 `http` 與 `https`；尾端的 `/` 被去掉；用 `https` 時使用 JVM 預設信任，沒有關閉主機名稱或憑證驗證的途徑 | 無 |
+| `organization`、`project` | 選填，作為 `OpenAI-Organization`、`OpenAI-Project` 標頭送出（非機密） | 不送 |
+| `headers` | 選填，額外標頭（名稱到值，非機密，最多 32 個）；名稱不得含 `auth`、`key`、`token`、`secret`、`cookie`，不得是 Engine 管理的標頭（`invalid_header`）；機密不放這裡 | 無 |
+| `endpoints` | 啟用的端點條目名稱（見下方目錄）；只能是目錄內且這個版本已提供的條目，至少一個；以條目為單位，不依群組 | `chat.completions`、`completions`、`embeddings`、`models.list`、`models.retrieve` |
+| `timeouts` | 五種逾時，毫秒：`connectMs`（建立連線）、`firstByteMs`（送出請求到回應的第一個位元組；非串流呼叫在生成結束前沒有任何資料，所以它實質上就是整體生成上限）、`idleMs`（讀取回應時兩次讀取之間；串流適用）、`totalMs`（選填，單次呼叫的整體上限，`null` 或省略為不設）、`quotaWaitMs`（等待每 run 同時請求額度的上限，不計入生成時間） | 10000、900000（15 分鐘）、300000（5 分鐘）、不設、60000 |
+| `requestsPerRun` | 每個 run 同時進行的請求數上限；整體並行上限是容量乘以它 | 1 |
+| `maxRequestBytes`、`maxResponseBytes` | 請求本文與記憶體內回應本文的大小上限；回應的總上限（256 MiB，用於寫入檔案的二進位回應）隨二進位端點加入 | 32 MiB、8 MiB |
+| `defaults` | 請求參數的預設，pipeline 呼叫時提供的同名值蓋過它；只能是 `model`、`temperature`、`top_p`、`top_k`、`min_p`、`max_tokens`、`max_completion_tokens`、`max_output_tokens`、`stop`、`seed`、`response_format`、`presence_penalty`、`frequency_penalty`、`repeat_penalty`、`n`、`reasoning_effort`；`model` 套用到有模型的條目，其餘只套用到對話、補全與 responses 的建立 | 無 |
+| `allowedModels` | 允許的模型清單，空為不限；清單不空時，沒有模型（含預設）的請求也被拒絕 | 不限 |
+| `lockedParameters` | 鎖定的參數（同上清單）：pipeline 提供它（無論值為何）就被拒絕 | 無 |
+| `maxValues` | 數值參數的上限（例如 `{"max_tokens": 4096}`）：pipeline 提供的值超過就被拒絕 | 無 |
+
+寫入的是正規化形式：省略的項目以有效的預設值寫出，`endpoints` 依目錄順序明列。因此新版 Engine 新增的條目與改變的預設值不影響既有資源；新增的條目對既有資源預設不啟用。
+
+**端點目錄**（條目名稱、方法與路徑、預設是否啟用；路徑在根位址之下）：`chat.completions`（`POST /chat/completions`，預設啟用）、`completions`（`POST /completions`，預設啟用）、`embeddings`（`POST /embeddings`，預設啟用）、`models.list`（`GET /models`，預設啟用）、`models.retrieve`（`GET /models/{model}`，預設啟用）、`responses.create`（`POST /responses`）、`responses.retrieve`（`GET /responses/{id}`）、`responses.delete`（`DELETE /responses/{id}`）、`responses.cancel`（`POST /responses/{id}/cancel`）、`responses.input_items`（`GET /responses/{id}/input_items`）、`moderations`（`POST /moderations`）、`rerank`（`POST /rerank`）、`reranking`（`POST /reranking`；兩者各為一個條目，哪個有效以對目標服務的實測決定）、`images.generations`（`POST /images/generations`）、`files.list`（`GET /files`）、`files.retrieve`（`GET /files/{id}`）、`files.delete`（`DELETE /files/{id}`）、`batches.create`（`POST /batches`）、`batches.list`（`GET /batches`）、`batches.retrieve`（`GET /batches/{id}`）、`batches.cancel`（`POST /batches/{id}/cancel`）。未標預設啟用者（尤其有狀態的刪除與取消條目）由管理員逐條啟用。目錄中另有多部分上傳與二進位回應的條目（`images.edits`、`images.variations`、`audio.speech`、`audio.transcriptions`、`audio.translations`、`files.create`、`files.content`），本版尚未提供，啟用它們被拒絕為 `invalid_endpoint`；事件串流也尚未提供，請求 `stream` 的呼叫被拒絕。路徑參數（`{model}`、`{id}`）只接受 `A-Za-z0-9._:-`、1 至 256 個字元，且不是 `.` 或 `..`（因此含 `/` 的模型識別碼不能用 `models.retrieve`）；查詢參數只接受條目列出者。
+
+**請求規則與錯誤類別**（pipeline 看到的，只有類別與 HTTP 狀態碼，沒有服務回的本文或訊息）：資源的 `defaults` 在先，pipeline 的值蓋過同名項目，其餘本文由 pipeline 完全提供；被鎖定的參數（`PARAMETER_LOCKED`）、不在允許清單的模型（`MODEL_NOT_ALLOWED`）、超過上限的數值（`VALUE_ABOVE_LIMIT`）、`stream`（`STREAM_NOT_SUPPORTED`）、過大的請求（`REQUEST_TOO_LARGE`）被拒絕且不送出請求；未啟用的條目（`ENDPOINT_NOT_ENABLED`）、目錄沒有的名稱（`UNKNOWN_ENDPOINT`）、不合規的路徑參數、查詢參數與本文（`INVALID_ARGUMENT`）同樣不送出。送出後：401 與 403 為 `DENIED`、429 為 `RATE_LIMITED`、5xx 為 `SERVER_ERROR`、其他非 2xx 為 `REQUEST_REJECTED`（都附狀態碼）、連不上為 `CONNECTION_FAILED`、離開根位址的重新導向為 `REDIRECT_BLOCKED`（不跟隨；根位址之內的重新導向會被跟隨，最多 5 次）、回應過大為 `RESPONSE_TOO_LARGE`、被取消為 `CANCELLED`、金鑰庫給不出金鑰為 `SECRET_UNAVAILABLE`；逾時各有專屬類別：`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT`、`QUOTA_WAIT_TIMEOUT`。Engine 不自動重試。pipeline 呼叫時可以縮短任何一種逾時，不能放寬。回傳給 pipeline 的回應標頭剝除名稱含 `auth`、`key`、`token`、`secret`、`cookie` 者（含 `Set-Cookie`、`WWW-Authenticate`、`Proxy-Authenticate`），其餘標頭值中出現金鑰處以 `***` 取代；回應本文 Engine 不處理（服務若把金鑰回射到成功的本文，pipeline 會拿到它，這是 ADR-019 接受的限度；Engine 自己不把本文寫進 log、trace 或錯誤，pipeline 若把它寫進 run 的 log 或讓 run 以它失敗，盡力而為的字串遮蔽會把金鑰換成 `***`）。
+
+**整體並行上限**：容量是同時持有的 run 數，每個 run 同時進行的請求數受 `requestsPerRun` 限制，因此服務端的同時請求數不超過容量乘以 `requestsPerRun`；資源的 `concurrencyLimit` 回報這個乘積，每 run 上限維持 1 時，它就是容量（目標服務最高並行為 1 時，容量設 1）。限度：降低容量不從持有者手上收回資源，降低後到持有者結束之前，服務端的並行請求數可以暫時高於新的上限（`concurrencyLimit` 已是新值）；run 取消或被強制釋放時 Engine 立即關閉連線並歸還額度，但服務端是否隨連線中斷而停止生成取決於服務，不停止時服務端的真實並行可能短暫高於 Engine 的計數；容量 1 時整個服務同一時間只有一個 run 持有，其他 run 在初始化階段排隊，即使持有者暫時沒有請求。
 
 ### `POST /api/v1/resources`
 
 認證：Bearer（admin）
 
-定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
+定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。`type` 為 `openai-compatible` 時 `settings` 見下方「`openai-compatible` 型別」，`secretAlias` 選填（本機服務可能不需要金鑰）；回傳的 `settings` 是寫出每個有效值的正規化形式（省略的項目以預設值寫出），`secretAlias` 是小寫的正規化形式。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `GET /api/v1/resources`
 
@@ -249,7 +283,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-修改容量、啟用狀態或型別專屬的設定。本文 `{"capacity": 2, "enabled": false, "settings": {...}}`，至少一項；`settings` 整份取代（`file` 為 `{"path": "..."}`，規則同建立），修改的設定使最近一次檢查結果（`lastCheck`）清除，只改容量或啟用狀態不影響它。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗，不影響持有者；修改設定不影響已持有者：持有者的存取端綁定取得當下的設定，之後取得的 run 才用新設定。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
+修改容量、啟用狀態、型別專屬的設定或機密別名。本文 `{"capacity": 2, "enabled": false, "settings": {...}, "secretAlias": "..."}`，至少一項；`settings` 整份取代（`file` 為 `{"path": "..."}`，`openai-compatible` 見下方，規則同建立，且同樣寫成正規化形式），`secretAlias` 換成另一個別名（規則同建立；沒有清除別名的修改，要去掉金鑰須刪除後重建）；修改的設定或別名使最近一次檢查結果（`lastCheck`）清除，只改容量或啟用狀態不影響它。只改容量或啟用時不重新檢查設定。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗，不影響持有者；修改設定不影響已持有者：持有者的存取端綁定取得當下的設定與機密，之後取得的 run 才用新設定。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `DELETE /api/v1/resources/{name}`
 
@@ -273,13 +307,13 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 主動檢查資源的實體是否可用，不取得容量，不影響進行中的 run、持有者與等待者；停用的資源也可檢查。檢查內容由型別決定：`counter` 沒有實體，一律通過；`file` 驗證根目錄可用、路徑沒有跳出根目錄、檔案所在的目錄存在或可建立、既有的檔案可讀寫（會真的開啟它，不建立也不截斷任何東西）。檢查有整體時間上限（`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，預設 10 秒），逾時是一種失敗類別。同一資源同時被檢查時共用同一次檢查與同一個答案；逾時而仍卡住的檢查未結束前，再次檢查立即回 `timeout`，不會再開新的檢查。
 
-200 回傳 `{ok, failure, checkedAt}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，同上）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
+200 回傳 `{ok, failure, checkedAt}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`connection_failed`（`openai-compatible`：服務連不上）、`rejected`（服務拒絕了金鑰，401 或 403）、`server_error`（服務回 5xx）、`unexpected_response`（服務有回應，但不是檢查要的：模型列表回了 2xx 以外的狀態，或回應過大）、`redirect_blocked`（服務把檢查導向根位址之外）、`alias_missing`（資源的金鑰別名不在金鑰庫，或 Engine 沒有組態金鑰庫；此時不送出任何請求，與 `secretStatus` 為 `missing` 一致）、`alias_invalid`（別名在金鑰庫，但機密不可使用，即 `secretStatus` 為 `invalid_secret`）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。`openai-compatible` 的檢查只做連線與一個輕量讀取：啟用了模型列表（`models.list`）時讀取它，否則只對根位址發一個 GET，任何不是拒絕或失敗的回應都算通過；它用自己的短逾時（上述 `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，連線、首位元組與閒置都以它為限），不用資源自己的逾時，不取得容量與每 run 的請求額度，也不產生任何內容。服務正在生成而來不及回應時結果是 `timeout`，不一定代表服務故障（目標服務並行為 1 時尤其如此）。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，同上）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
 
 ### `POST /api/v1/resources/{name}/holders/{runId}/release`
 
 認證：Bearer（admin）
 
-強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
+強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`、`openai-compatible`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案；`openai-compatible` 進行中的請求同時被取消（連線關閉，請求額度歸還，該呼叫得到 `CANCELLED`），但服務端是否隨連線中斷而停止生成取決於服務。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
 
 ## 機密（管理員）
 

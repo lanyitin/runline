@@ -45,3 +45,13 @@ tasks.register<Test>("verifyOpenAiService") {
   testLogging { showStandardStreams = true }
   outputs.upToDateWhen { false }
 }
+
+// Manual, for the Console's real-browser tests (WI-50): the Fake OpenAI compatible service of the
+// tests as a process of its own, held to the protocol by OpenAiServerContract. See
+// FakeOpenAiServerMain for its environment.
+tasks.register<JavaExec>("fakeOpenAiServer") {
+  group = "verification"
+  description = "Manual: runs the Fake OpenAI compatible service until stopped (FAKE_OPENAI_*)"
+  classpath = sourceSets.testFixtures.get().runtimeClasspath
+  mainClass = "dev.lawlan.runline.accessors.fake.FakeOpenAiServerMainKt"
+}

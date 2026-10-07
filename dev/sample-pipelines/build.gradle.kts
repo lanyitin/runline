@@ -12,7 +12,7 @@ dependencies {
 }
 
 // 每個情境一個 jar（以套件切開），方便在 Console 逐一上傳。輸出在 build/pipelines/。
-val scenarios = listOf("slow", "failing", "unsafe", "resource", "typed")
+val scenarios = listOf("slow", "failing", "unsafe", "resource", "typed", "usage")
 
 val scenarioJars = scenarios.map { scenario ->
   tasks.register<Jar>("${scenario}Jar") {

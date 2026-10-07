@@ -36,6 +36,16 @@ interface OpenAiObserver {
   /** The call ended, whichever way; [endpoint] is the catalog entry or `unknown`. */
   fun finished(resource: String, endpoint: String, outcome: OpenAiOutcome) {}
 
+  /**
+   * A stream is about to open, in the operation that opens it: whatever is returned comes back to
+   * [streamFinished] when the stream is over, which can be in another operation or thread. It is
+   * what a trace needs to give a stream a span of its own for as long as it lasts.
+   */
+  fun streamStarted(resource: String, endpoint: String): Any? = null
+
+  /** The stream whose [streamStarted] gave [handle] is over, with how it went. */
+  fun streamFinished(handle: Any?, resource: String, endpoint: String, outcome: OpenAiOutcome) {}
+
   companion object {
     val NONE: OpenAiObserver = object : OpenAiObserver {}
   }

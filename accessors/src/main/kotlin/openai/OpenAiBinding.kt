@@ -188,6 +188,9 @@ class OpenAiBinding(
 
     /** A stream took the call over, and tells the observer when it ends. */
     @Volatile var handedOver = false
+
+    /** What the observer gave for a stream when it began. */
+    @Volatile var streamHandle: Any? = null
     private val finished = AtomicBoolean()
 
     fun finish(endpoint: String, failure: ResourceFailure?, failedStatus: Int?) {
@@ -205,6 +208,8 @@ class OpenAiBinding(
               maxChunkGapMillis,
           )
       runCatching { observer.finished(resource, endpoint, outcome) }
+      if (handedOver)
+          runCatching { observer.streamFinished(streamHandle, resource, endpoint, outcome) }
     }
   }
 
@@ -256,6 +261,9 @@ class OpenAiBinding(
       if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
       report.sent = true
       runCatching { observer.started(resource, endpoint) }
+      if (plan.streaming)
+          report.streamHandle =
+              runCatching { observer.streamStarted(resource, endpoint) }.getOrNull()
       return exchange(call, plan, report)
     } finally {
       if (!call.keptOpen) call.release()

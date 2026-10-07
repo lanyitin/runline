@@ -9,6 +9,7 @@ import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.context.Context
 
 /**
  * What the Engine records of the calls on `openai-compatible` resources (ADR-019 decision 10,
@@ -22,6 +23,7 @@ import io.opentelemetry.api.trace.StatusCode
 class OpenAiTelemetry(openTelemetry: OpenTelemetry, private val usage: OpenAiUsage) :
     OpenAiObserver {
   private val meter = openTelemetry.getMeter("runline.resources.openai")
+  private val tracer = openTelemetry.getTracer("runline.resources.openai")
   private val inFlight =
       meter
           .upDownCounterBuilder("runline.resources.openai.requests.in_flight")
@@ -100,7 +102,34 @@ class OpenAiTelemetry(openTelemetry: OpenTelemetry, private val usage: OpenAiUsa
     outcome.failure?.let(::timeoutKind)?.let { timeouts.add(1, attributes(resource, KIND to it)) }
     outcome.usage?.prompt?.let { tokens.add(it, attributes(resource, KIND to "prompt")) }
     outcome.usage?.completion?.let { tokens.add(it, attributes(resource, KIND to "completion")) }
-    annotate(Span.current(), endpoint, label, outcome)
+    // A stream has a span of its own, which is told when the stream is over.
+    if (outcome.maxChunkGapMillis == null) annotate(Span.current(), endpoint, label, outcome)
+  }
+
+  override fun streamStarted(resource: String, endpoint: String): Any? {
+    val parent = Span.current()
+    if (!parent.spanContext.isValid) return null
+    return tracer
+        .spanBuilder("runline.resource.openai.stream")
+        .setParent(Context.current())
+        .setAttribute("runline.resource.name", resource)
+        .setAttribute("runline.resource.type", ResourceTypes.OPENAI_COMPATIBLE)
+        .startSpan()
+  }
+
+  override fun streamFinished(
+      handle: Any?,
+      resource: String,
+      endpoint: String,
+      outcome: OpenAiOutcome,
+  ) {
+    val span = handle as? Span ?: return
+    annotate(span, endpoint, outcome.failure?.name?.lowercase() ?: "ok", outcome)
+    outcome.maxChunkGapMillis?.let {
+      span.setAttribute("runline.resource.openai.max_chunk_gap_ms", it)
+    }
+    outcome.generationMillis?.let { span.setAttribute("runline.resource.openai.generation_ms", it) }
+    span.end()
   }
 
   /** The span of the request, if the call runs inside one. */

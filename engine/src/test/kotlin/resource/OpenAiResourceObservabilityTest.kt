@@ -441,4 +441,29 @@ class OpenAiResourceObservabilityTest {
         metric("runline.resources.openai.requests.in_flight")!!.longSumData.points.single().value,
     )
   }
+
+  @Test
+  fun `a stream is one span of the run's trace with its times, and the pulls are no spans`() {
+    define()
+    server.chunkDelayMillis = 100
+
+    ran("streamer", streamBody())
+
+    val root = spans.finishedSpanItems.single { it.name == "runline.run" }
+    val names =
+        spans.finishedSpanItems.map { it.name }.filter { it.startsWith("runline.resource.") }
+    assertEquals(1, names.count { it == "runline.resource.openai.stream" }, names.toString())
+    assertEquals(0, names.count { it.endsWith("stream.next") }, names.toString())
+    val span = spans.finishedSpanItems.single { it.name == "runline.resource.openai.stream" }
+    assertEquals(root.traceId, span.traceId)
+    assertEquals("chat.completions", attribute(span, "openai.endpoint"))
+    assertEquals("ok", attribute(span, "openai.outcome"))
+    fun long(key: String) =
+        span.attributes.get(AttributeKey.longKey("runline.resource.openai.$key"))
+    assertNotNull(long("quota_wait_ms"))
+    assertNotNull(long("first_byte_ms"))
+    assertTrue(long("max_chunk_gap_ms")!! >= 90, "gap ${long("max_chunk_gap_ms")}")
+    assertTrue(long("generation_ms")!! >= 300, "generation ${long("generation_ms")}")
+    assertEquals("lemon", attribute(span, "name"))
+  }
 }

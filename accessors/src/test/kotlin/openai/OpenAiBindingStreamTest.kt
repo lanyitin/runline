@@ -405,4 +405,40 @@ class OpenAiBindingStreamTest {
     assertEquals(ResourceFailure.QUOTA_WAIT_TIMEOUT, second.failure)
     close(c, first)
   }
+
+  @Test
+  fun `a stream that keeps producing is never cut by time and lasts longer than any one limit`() {
+    server.chunkDelayMillis = 250
+    val b = binding("\"timeouts\":{\"firstByteMs\":400,\"idleMs\":400}")
+
+    val start = System.nanoTime()
+    val opened = open(b)
+    val chunks = generateSequence { next(b, opened) }.toList()
+    val took = (System.nanoTime() - start) / 1_000_000
+
+    assertEquals(6, chunks.size)
+    assertTrue(took > 1000, "took $took ms, longer than first byte and idle together")
+  }
+
+  @Test
+  fun `a total limit cuts a stream that keeps producing, whether the resource or the pipeline sets it`() {
+    server.chunkDelayMillis = 250
+    val byResource = binding("\"timeouts\":{\"firstByteMs\":400,\"idleMs\":400,\"totalMs\":500}")
+    val opened = open(byResource)
+    val e = failure { generateSequence { next(byResource, opened) }.toList() }
+    assertEquals(ResourceFailure.TOTAL_TIMEOUT, e.failure)
+
+    val byPipeline = binding("\"timeouts\":{\"firstByteMs\":400,\"idleMs\":400}")
+    val asked =
+        byPipeline.execute(
+            "openai.stream.open",
+            mapOf(
+                "endpoint" to "chat.completions",
+                "body" to "{}",
+                "timeoutsMillis" to mapOf("total" to 500L),
+            ),
+        ) as Map<*, *>
+    val e2 = failure { generateSequence { next(byPipeline, asked as Map<String, Any?>) }.toList() }
+    assertEquals(ResourceFailure.TOTAL_TIMEOUT, e2.failure)
+  }
 }

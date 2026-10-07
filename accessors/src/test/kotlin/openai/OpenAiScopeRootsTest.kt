@@ -37,7 +37,11 @@ class OpenAiScopeRootsTest {
     server.close()
   }
 
-  private fun host(ready: Boolean = true, maxBytes: Long = 1_000_000): BoundResources {
+  private fun host(
+      ready: Boolean = true,
+      maxBytes: Long = 1_000_000,
+      declared: Map<String, Boolean> = mapOf("PIPELINE_SHARED" to true, "RUN_PRIVATE" to true),
+  ): BoundResources {
     val settings =
         (OpenAiSettings.parse(
                 Json.parseToJsonElement(
@@ -48,7 +52,7 @@ class OpenAiScopeRootsTest {
             .settings
     val binding = OpenAiBinding("lemon", settings).also { bindings += it }
     return BoundResources(mapOf("lemon" to binding)).also {
-      if (ready) it.workspaceReady(shared, runDir, maxBytes)
+      if (ready) it.workspaceReady(shared, runDir, maxBytes, declared)
     }
   }
 
@@ -160,5 +164,59 @@ class OpenAiScopeRootsTest {
     assertEquals(0, server.requests.size)
     assertEquals(listOf("secret.txt"), evil.toFile().list()!!.toList())
     assertEquals("evil secret", evil.resolve("secret.txt").toFile().readText())
+  }
+
+  @Test
+  fun `a scope the pipeline did not declare, or declared read-only, is no source and no target, and nothing is read, sent or written`() {
+    shared.resolve("in.txt").writeText("shared content")
+    runDir.resolve("in.txt").writeText("private content")
+    val declarations =
+        listOf(
+            emptyMap(), // no file scope at all
+            mapOf("PIPELINE_SHARED" to false), // read-only: a source, never a target
+        )
+
+    for (declared in declarations) {
+      val host = host(declared = declared)
+      // (a) the private scope is not declared by either: it is no source
+      assertEquals(
+          "PATH_REJECTED",
+          upload(host, mapOf("scope" to "RUN_PRIVATE", "path" to "in.txt"))["failure"],
+          "upload from an undeclared scope, $declared",
+      )
+      // (b) neither declaration allows a write, anywhere
+      for (scope in listOf("PIPELINE_SHARED", "RUN_PRIVATE")) {
+        assertEquals(
+            "PATH_REJECTED",
+            speech(host, mapOf("scope" to scope, "path" to "out.mp3"))["failure"],
+            "download into $scope, $declared",
+        )
+      }
+    }
+    // a read-only scope can still be read from; with none declared it cannot
+    assertEquals(
+        "PATH_REJECTED",
+        upload(
+            host(declared = emptyMap()),
+            mapOf("scope" to "PIPELINE_SHARED", "path" to "in.txt"),
+        )["failure"],
+    )
+    assertEquals(0, server.requests.size, "nothing reached the service")
+    assertEquals(listOf("in.txt"), shared.toFile().list()!!.toList(), "nothing was written")
+    assertEquals(listOf("in.txt"), runDir.toFile().list()!!.toList(), "nothing was written")
+  }
+
+  @Test
+  fun `a read-only scope is a source for an upload`() {
+    shared.resolve("in.txt").writeText("shared content")
+
+    val answer =
+        upload(
+            host(declared = mapOf("PIPELINE_SHARED" to false)),
+            mapOf("scope" to "PIPELINE_SHARED", "path" to "in.txt"),
+        )
+
+    assertEquals(true, answer["ok"], answer.toString())
+    assertEquals("shared content", server.requests.single().file("file")!!.bytes.decodeToString())
   }
 }

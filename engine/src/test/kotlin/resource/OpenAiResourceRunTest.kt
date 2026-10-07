@@ -50,8 +50,9 @@ class OpenAiResourceRunTest {
     extras += secrets
   }
 
-  private fun harness(maxConcurrent: Int = 4) =
+  private fun harness(maxConcurrent: Int = 4, maxBytesPerScope: Long = 1_000_000) =
       RunHarness(
+              maxBytesPerScope = maxBytesPerScope,
               maxConcurrent = maxConcurrent,
               resourceWaitTimeout = Duration.ofHours(1),
               secrets = secrets,
@@ -572,5 +573,113 @@ class OpenAiResourceRunTest {
     await("the service to see the connection go") { server.clientsGone == 1 }
     assertEquals(RunState.CANCELLED, h.awaitEnd(run).state)
     assertEquals(emptyList(), h.coordinator!!.activity("lemon").holders)
+  }
+
+  // ---- uploads and downloads (WI-53) ----
+
+  /** A pipeline that writes a file of [megabytes] MiB into its shared directory and uploads it. */
+  private fun uploading(megabytes: Int) =
+      """
+      OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "big.txt", "x".repeat($megabytes * 1024 * 1024));
+      String result;
+      try {
+        lemon.call(new OpenAiRequest("files.create", null, java.util.Collections.<String,String>emptyMap(), java.util.Collections.<String,String>emptyMap(), new OpenAiTimeouts(),
+            java.util.Collections.singletonMap("purpose", "batch"),
+            java.util.Collections.singletonList(OpenAiUpload.file("file", new OpenAiFile(FileScope.PIPELINE_SHARED, "big.txt"))),
+            new OpenAiSizes()));
+        result = "ok";
+      } catch (ResourceAccessException e) { result = e.getFailure().name(); }
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "result", result);
+      """
+          .trimIndent()
+
+  private val uploadSettings
+    get() = settings(extra = """"endpoints":["files.create","audio.speech","chat.completions"]""")
+
+  @Test
+  fun `a forced release cuts an upload that is going out, the service sees the client leave, and the next waiter gets the service`() {
+    val h = harness(maxConcurrent = 2, maxBytesPerScope = 64L * 1024 * 1024)
+    h.defineOpenAi("lemon", uploadSettings, capacity = 1)
+    server.uploadChunkDelayMillis = 20
+    val holder = h.upload("holder", uploading(20), declaration = declaration)
+    val next = h.upload("next", call("outcome"), declaration = declaration)
+    val first = h.start(holder, "holder")
+    await("the service to be receiving the file") { server.bytesReceived > 64 * 1024 }
+    val second = h.start(next, "next")
+    h.await(second, RunState.WAITING_FOR_RESOURCES)
+
+    h.coordinator!!.forceRelease("lemon", first, admin)
+    server.uploadChunkDelayMillis = 0
+
+    await("the service to see the client leave") { server.clientsGone == 1 }
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(second, seconds = 60).state)
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(first, seconds = 60).state)
+    assertEquals("CANCELLED", h.result("holder", "result"))
+    assertEquals(
+        1,
+        server.requests.size,
+        "the form never arrived whole; the one request is the next run's",
+    )
+  }
+
+  @Test
+  fun `cancelling a run that is downloading to a file cuts the download, no part of the file stays, and the capacity is free`() {
+    val h = harness(maxConcurrent = 2)
+    h.defineOpenAi("lemon", uploadSettings, capacity = 1)
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "audio/mpeg"))
+      response.chunk(ByteArray(4096) { 1 })
+      response.hang()
+      true
+    }
+    // The failure of the call is not caught: a run that is cancelled ends when it gives up.
+    val hash =
+        h.upload(
+            "caller",
+            """context.getAccessors().openAiCompatible("lemon").downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.PIPELINE_SHARED, "a.mp3"));""",
+            declaration = declaration,
+        )
+    val run = h.start(hash, "caller")
+    await("the answer to have begun") { server.requests.size == 1 }
+    Thread.sleep(300)
+
+    assertEquals(CancelResult.CancellationRequested, h.service.cancel(run, Visibility.All))
+
+    await("the service to see the client leave") { server.clientsGone == 1 }
+    assertEquals(RunState.CANCELLED, h.awaitEnd(run).state)
+    assertEquals(emptyList(), h.coordinator!!.activity("lemon").holders)
+    assertEquals(emptyList(), Files.list(h.shared("caller", "x").parent).use { it.toList() })
+  }
+
+  @Test
+  fun `what is downloaded to a directory counts for what the directory may hold, and what does not fit is not kept`() {
+    val h = harness(maxConcurrent = 2, maxBytesPerScope = 3000)
+    h.defineOpenAi("lemon", uploadSettings, capacity = 1)
+    val hash =
+        h.upload(
+            "caller",
+            """
+            OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+            String result;
+            try {
+              lemon.downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.PIPELINE_SHARED, "a.mp3"));
+              result = "ok";
+            } catch (ResourceAccessException e) { result = e.getFailure().name(); }
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "result", result);
+            """
+                .trimIndent(),
+            declaration = declaration,
+        )
+
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(h.start(hash, "caller")).state)
+
+    assertEquals("SCOPE_FULL", h.result("caller", "result"))
+    assertEquals(
+        listOf("result"),
+        Files.list(h.shared("caller", "x").parent).use { l ->
+          l.map { it.fileName.toString() }.toList()
+        },
+    )
   }
 }

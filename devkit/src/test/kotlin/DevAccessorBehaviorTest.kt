@@ -97,6 +97,9 @@ internal class DevRig(private val record: Boolean) : AccessorRig {
           shared.resolve(file).takeIf { Files.exists(it) }?.let(Files::readString)
         },
         putShared = { file, text -> Files.writeString(shared.resolve(file), text) },
+        sharedBytes = { file ->
+          shared.resolve(file).takeIf { Files.exists(it) }?.let(Files::readAllBytes)
+        },
         recorded =
             config.recording
                 ?.directory

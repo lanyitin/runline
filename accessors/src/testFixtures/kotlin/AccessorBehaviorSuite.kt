@@ -36,6 +36,8 @@ class RigOutcome(
      * Writes a file into the shared directory of the pipeline that ran, for what outlives a run.
      */
     val putShared: (String, String) -> Unit,
+    /** The bytes of a file in the shared directory of the pipeline that ran; null if none. */
+    val sharedBytes: (String) -> ByteArray?,
     /**
      * What a recording run recorded about resources (text); null for a host that does not record.
      */

@@ -10,6 +10,7 @@ import dev.lawlan.runline.core.RestrictedContext
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.nio.file.Path
+import java.util.concurrent.Callable
 import java.util.function.Function
 import java.util.function.Supplier
 
@@ -21,7 +22,9 @@ import java.util.function.Supplier
  * `outcome` entry.
  */
 class RunEntry(private val request: Map<String, Any?>) :
-    Supplier<String>, Function<Map<String, Any?>, Map<String, Any?>> {
+    Supplier<String>,
+    Function<Map<String, Any?>, Map<String, Any?>>,
+    Callable<Map<String, Boolean>> {
 
   private val pipelineClass: Class<*> by lazy {
     Class.forName(request["pipelineClass"] as String, false, javaClass.classLoader)
@@ -29,6 +32,15 @@ class RunEntry(private val request: Map<String, Any?>) :
   private val metadata: PipelineMetadata by lazy { PipelineMetadataReader.read(pipelineClass) }
 
   override fun get(): String = metadata.name
+
+  /**
+   * The file scopes the pipeline declared, by name, each with whether it declared it writable: what
+   * the host holds the pipeline's files in a resource call to, read here, from the declaration.
+   */
+  override fun call(): Map<String, Boolean> =
+      metadata.files.entries.associateTo(java.util.LinkedHashMap()) {
+        it.key.name to it.value.writable
+      }
 
   @Suppress("UNCHECKED_CAST")
   override fun apply(input: Map<String, Any?>): Map<String, Any?> {

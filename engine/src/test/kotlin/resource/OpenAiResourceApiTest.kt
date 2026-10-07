@@ -79,11 +79,44 @@ class OpenAiResourceApiTest : ResourceApiSupport() {
         assertEquals(1, settings["requestsPerRun"]!!.jsonPrimitive.int)
         assertEquals(32 * 1024 * 1024, settings["maxRequestBytes"]!!.jsonPrimitive.long)
         assertEquals(8 * 1024 * 1024, settings["maxResponseBytes"]!!.jsonPrimitive.long)
+        assertEquals(256 * 1024 * 1024, settings["maxDownloadBytes"]!!.jsonPrimitive.long)
         assertEquals(JsonNull, created["secretAlias"])
         assertEquals("not_set", created.text("secretStatus"))
         assertEquals(2, created["concurrencyLimit"]!!.jsonPrimitive.int)
         assertEquals(0, created.obj("usage")["inFlightRequests"]!!.jsonPrimitive.int)
         assertEquals(created, resource("lemon"))
+      }
+
+  @Test
+  fun `the uploads and the binary answers of the catalog can be enabled, one entry at a time`() =
+      testApplication {
+        engine()
+        val all =
+            listOf(
+                "images.edits",
+                "images.variations",
+                "audio.speech",
+                "audio.transcriptions",
+                "audio.translations",
+                "files.create",
+                "files.content",
+                "batches.create",
+            )
+
+        val response =
+            defineOpenAi(
+                "lemon",
+                1,
+                """{"baseUrl":"http://127.0.0.1:9/v1","endpoints":${all.joinToString(",", "[", "]") { "\"$it\"" }},"maxDownloadBytes":1000000}""",
+            )
+
+        assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
+        val settings = response.json().obj("settings")
+        assertEquals(
+            all.toSet(),
+            settings["endpoints"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+        )
+        assertEquals(1_000_000, settings["maxDownloadBytes"]!!.jsonPrimitive.long)
       }
 
   @Test
@@ -140,12 +173,13 @@ class OpenAiResourceApiTest : ResourceApiSupport() {
             """{"baseUrl":"http://h/v1","headers":{"Authorization":"x"}}""" to "invalid_header",
             """{"baseUrl":"http://h/v1","headers":{"X-Api-Key":"x"}}""" to "invalid_header",
             """{"baseUrl":"http://h/v1","endpoints":["no.such"]}""" to "invalid_endpoint",
-            """{"baseUrl":"http://h/v1","endpoints":["images.edits"]}""" to "invalid_endpoint",
+            """{"baseUrl":"http://h/v1","endpoints":["images.edit"]}""" to "invalid_endpoint",
             """{"baseUrl":"http://h/v1","defaults":{"messages":[]}}""" to
                 "invalid_request_defaults",
             """{"baseUrl":"http://h/v1","timeouts":{"idleMs":0}}""" to "invalid_timeout",
             """{"baseUrl":"http://h/v1","requestsPerRun":0}""" to "invalid_limit",
             """{"baseUrl":"http://h/v1","maxResponseBytes":-1}""" to "invalid_limit",
+            """{"baseUrl":"http://h/v1","maxDownloadBytes":0}""" to "invalid_limit",
         )
 
     for ((settings, problem) in cases) {

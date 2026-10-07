@@ -57,7 +57,11 @@ class OpenAiKeyLeakTest {
   private val runs = mutableListOf<UUID>()
 
   init {
-    h.defineOpenAi("lemon", """{"baseUrl":"${server.baseUrl}"}""", alias = "lemon-key")
+    h.defineOpenAi(
+        "lemon",
+        """{"baseUrl":"${server.baseUrl}","endpoints":["chat.completions","files.create","audio.speech","files.content"]}""",
+        alias = "lemon-key",
+    )
   }
 
   @AfterTest
@@ -244,5 +248,61 @@ class OpenAiKeyLeakTest {
     assertTrue(seen.contains("CONNECTION_FAILED"), seen)
     assertFalse(seen.contains("x-api-key"), seen)
     assertFalse(everything().contains(key), "the key is in something the Engine said")
+  }
+
+  @Test
+  fun `a service that echoes the key to an upload or a download, in its errors and its headers, gives the pipeline no key and no surface has it`() {
+    server.script = { request, response ->
+      val sent = request.header("authorization").orEmpty()
+      val echo =
+          mapOf(
+              "X-Debug" to "you sent $sent",
+              "X-Api-Key" to key,
+              "Content-Disposition" to "attachment; filename=\"$key.bin\"",
+              "Set-Cookie" to "session=$key",
+          )
+      if (request.path.endsWith("/files")) {
+        response.json(400, """{"error":{"message":"bad file, key $key"}}""", echo)
+      } else {
+        response.complete(200, "audio".toByteArray(), echo + ("Content-Type" to "audio/mpeg"))
+      }
+      true
+    }
+
+    val ended =
+        run(
+            "echoed",
+            """
+            OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+            StringBuilder seen = new StringBuilder();
+            try {
+              lemon.call(new OpenAiRequest("files.create", null, java.util.Collections.<String,String>emptyMap(), java.util.Collections.<String,String>emptyMap(), new OpenAiTimeouts(),
+                  java.util.Collections.singletonMap("purpose", "batch"),
+                  java.util.Collections.singletonList(OpenAiUpload.bytes("file", "a.txt", new byte[] {1})),
+                  new OpenAiSizes()));
+            } catch (ResourceAccessException e) {
+              seen.append(e.getFailure().name()).append("|").append(e.getStatus()).append("|").append(e.getMessage()).append("|").append(e.getCause()).append("#");
+            }
+            OpenAiBinaryResponse mem = lemon.download(new OpenAiRequest("audio.speech", "{}"));
+            seen.append(mem.getHeaders()).append("#");
+            OpenAiStoredResponse file = lemon.downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.PIPELINE_SHARED, "a.mp3"));
+            seen.append(file.getHeaders()).append("#");
+            try (OpenAiByteStream s = lemon.streamBytes(new OpenAiRequest("audio.speech", "{}"))) {
+              seen.append(s.getHeaders());
+            }
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "seen", seen.toString());
+            throw new RuntimeException("it said " + seen);
+            """
+                .trimIndent(),
+        )
+
+    assertEquals(RunState.FAILED, ended.state)
+    val seen = Files.readString(h.shared("echoed", "seen"))
+    assertTrue(seen.startsWith("REQUEST_REJECTED|400|"), seen)
+    assertFalse(seen.contains(key), seen)
+    assertTrue(seen.contains("Bearer ***"), seen)
+    assertFalse(seen.contains("x-api-key") || seen.contains("set-cookie"), seen)
+    assertFalse(everything().contains(key), "the key is in something the Engine said")
+    assertEquals(4, server.requests.size)
   }
 }

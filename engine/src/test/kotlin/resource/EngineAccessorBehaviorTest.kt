@@ -76,6 +76,9 @@ internal class EngineRig : AccessorRig {
           harness.shared(pipeline, file).takeIf { Files.exists(it) }?.let(Files::readString)
         },
         putShared = { file, text -> Files.writeString(harness.shared(pipeline, file), text) },
+        sharedBytes = { file ->
+          harness.shared(pipeline, file).takeIf { Files.exists(it) }?.let(Files::readAllBytes)
+        },
         recorded = null,
     )
   }

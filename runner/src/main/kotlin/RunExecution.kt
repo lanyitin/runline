@@ -4,6 +4,7 @@ import java.io.PrintWriter
 import java.io.StringWriter
 import java.net.URL
 import java.time.Duration
+import java.util.concurrent.Callable
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -135,6 +136,7 @@ internal class RunExecution(
     val name = describe.get().also { progress.pipelineName = it }
     val workspace = StandardStreams.unattributed { workspaces.prepare(name, request.runId) }
     progress.prepared = true
+    request.resources?.let { host -> tellDirectories(host, entry, workspace) }
     stop.get()?.let {
       return End(it.status, null)
     }
@@ -147,6 +149,27 @@ internal class RunExecution(
     } finally {
       timer?.cancel(false)
     }
+  }
+
+  /**
+   * Where the run's directories are, and which of them the pipeline declared and how, goes to the
+   * host of the accessors here, on the host's side: a recording run may use both, since its record
+   * is what the declaration is proposed from.
+   */
+  @Suppress("UNCHECKED_CAST")
+  private fun tellDirectories(host: ResourceHost, entry: Any, workspace: RunWorkspace) {
+    val declared =
+        if (request.recording != null) {
+          mapOf("PIPELINE_SHARED" to true, "RUN_PRIVATE" to true)
+        } else {
+          (entry as Callable<Map<String, Boolean>>).call()
+        }
+    host.workspaceReady(
+        workspace.sharedDir,
+        workspace.runDir,
+        workspace.maxBytesPerScope,
+        java.util.LinkedHashMap(declared),
+    )
   }
 
   private fun input(workspace: RunWorkspace): Map<String, Any?> =

@@ -20,11 +20,14 @@ interface ResourceHost {
    * Told by the Runner, from the host's own side of the boundary, where the run's two directories
    * are (ADR-009) and how much each may hold, as soon as they exist and before the pipeline body
    * starts. This is the only way a host learns where a scope is: a call from the run names a scope
-   * and a relative path, never a directory.
+   * and a relative path, never a directory. [writable] has, for each scope the pipeline declared
+   * (by name, `PIPELINE_SHARED` or `RUN_PRIVATE`), whether it declared it writable; a scope that is
+   * not in it is not the pipeline's to use.
    */
   fun workspaceReady(
       sharedDir: java.nio.file.Path,
       runDir: java.nio.file.Path,
       maxBytesPerScope: Long,
+      writable: Map<String, Boolean>,
   ) {}
 }

@@ -62,6 +62,8 @@ class RunHarness(
     /** What the Engine does with what `openai-compatible` calls report; nothing by default. */
     openAiObserver: dev.lawlan.runline.accessors.openai.OpenAiObserver =
         dev.lawlan.runline.accessors.openai.OpenAiObserver.NONE,
+    /** What each of a run's two directories may hold. */
+    maxBytesPerScope: Long = 1_000_000,
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -86,7 +88,7 @@ class RunHarness(
   val runRoot: Path = dir.resolve("runs")
   val workspaces =
       Workspaces(
-          WorkspaceConfig(sharedRoot, runRoot, 1_000_000, retention),
+          WorkspaceConfig(sharedRoot, runRoot, maxBytesPerScope, retention),
           Clock.systemUTC(),
       ) {
         workspaceEvents += it

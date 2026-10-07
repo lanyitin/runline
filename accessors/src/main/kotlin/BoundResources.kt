@@ -40,8 +40,13 @@ class BoundResources(
   /** Where the run's directories are, once the Runner has said; see [workspaceReady]. */
   @Volatile private var directories: WorkspaceDirectories? = null
 
-  override fun workspaceReady(sharedDir: Path, runDir: Path, maxBytesPerScope: Long) {
-    directories = WorkspaceDirectories(sharedDir, runDir, maxBytesPerScope)
+  override fun workspaceReady(
+      sharedDir: Path,
+      runDir: Path,
+      maxBytesPerScope: Long,
+      writable: Map<String, Boolean>,
+  ) {
+    directories = WorkspaceDirectories(sharedDir, runDir, maxBytesPerScope, writable)
   }
 
   override fun call(request: Map<String, Any?>): Map<String, Any?> {

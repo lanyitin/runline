@@ -12,6 +12,7 @@ internal class WorkspaceDirectories(
     private val shared: Path,
     private val run: Path,
     private val maxBytes: Long,
+    private val writable: Map<String, Boolean>,
 ) {
   /**
    * [arguments] with every file part and the target of a download pointed at the real directory of
@@ -25,25 +26,35 @@ internal class WorkspaceDirectories(
         val part = HashMap<String, Any?>(given as? Map<*, *> as? Map<String, Any?> ?: invalid())
         part.remove("root")
         part.remove("maxBytes")
-        if (part["bytes"] == null) part["root"] = rootOf(part["scope"])
+        if (part["bytes"] == null) part["root"] = rootOf(part["scope"], writing = false)
         part
       }
     }
     arguments["target"]?.let { given ->
       val target = HashMap<String, Any?>(given as? Map<*, *> as? Map<String, Any?> ?: invalid())
-      target["root"] = rootOf(target["scope"])
+      target["root"] = rootOf(target["scope"], writing = true)
       target["maxBytes"] = maxBytes
       result["target"] = target
     }
     return result
   }
 
-  private fun rootOf(scope: Any?): String =
-      when (scope) {
-        "PIPELINE_SHARED" -> shared.toString()
-        "RUN_PRIVATE" -> run.toString()
-        else -> invalid()
-      }
+  /**
+   * The directory of [scope] if the pipeline declared it, and declared it writable when it is
+   * [writing]: the host does not rely on the run's own check of that.
+   */
+  private fun rootOf(scope: Any?, writing: Boolean): String {
+    val root =
+        when (scope) {
+          "PIPELINE_SHARED" -> shared
+          "RUN_PRIVATE" -> run
+          else -> invalid()
+        }
+    val mayWrite =
+        writable[scope as String] ?: throw ResourceOperationFailure(ResourceFailure.PATH_REJECTED)
+    if (writing && !mayWrite) throw ResourceOperationFailure(ResourceFailure.PATH_REJECTED)
+    return root.toString()
+  }
 
   private fun invalid(): Nothing = throw ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
 }

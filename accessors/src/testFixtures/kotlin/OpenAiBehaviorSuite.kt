@@ -3,6 +3,7 @@ package dev.lawlan.runline.accessors.suite
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -425,5 +426,127 @@ abstract class OpenAiBehaviorSuite {
     assertTrue(outcome.succeeded, outcome.failure)
     await("the service to see the connection go") { server.clientsGone == 1 }
     assertEquals(0, server.inFlight)
+  }
+
+  private val none = "java.util.Collections.<String,String>emptyMap()"
+
+  /**
+   * A pipeline that writes a file into its shared directory, then does [body]; `all` is written.
+   */
+  private fun withFile(path: String, text: String, body: String) =
+      """
+      OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+      StringBuilder all = new StringBuilder();
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, ${java(path)}, ${java(text)});
+      try {
+        $body
+      } catch (ResourceAccessException e) {
+        all.append("failed=").append(e.getFailure().name()).append("|").append(e.getStatus()).append(";");
+      }
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "all", all.toString());
+      """
+          .trimIndent()
+
+  @Test
+  fun `a pipeline uploads a file of its own directory, which goes out as the file part of one multipart form`() {
+    rig.defineOpenAi("lemon", settings("\"endpoints\":[\"files.create\"]"), RigKey.Value(key))
+    val body =
+        withFile(
+            "data.jsonl",
+            "{\"custom_id\":\"1\"}",
+            """
+            OpenAiResponse r = lemon.call(new OpenAiRequest("files.create", null, $none, $none, new OpenAiTimeouts(),
+                java.util.Collections.singletonMap("purpose", "batch"),
+                java.util.Collections.singletonList(OpenAiUpload.file("file", new OpenAiFile(FileScope.PIPELINE_SHARED, "data.jsonl"))),
+                new OpenAiSizes()));
+            all.append("status=").append(r.getStatus()).append(";");
+            """,
+        )
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertEquals("status=200;", outcome.shared("all"))
+    val seen = server.requests.single()
+    assertEquals("Bearer $key", seen.header("authorization"))
+    assertEquals("batch", seen.field("purpose"))
+    assertEquals("data.jsonl", seen.file("file")!!.filename)
+    assertEquals("{\"custom_id\":\"1\"}", seen.file("file")!!.bytes.decodeToString())
+  }
+
+  @Test
+  fun `a pipeline has the audio as bytes, as a file of either directory, and as chunks it pulls`() {
+    rig.defineOpenAi("lemon", settings("\"endpoints\":[\"audio.speech\"]"), RigKey.Value(key))
+    val body =
+        """
+        OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+        StringBuilder all = new StringBuilder();
+        OpenAiBinaryResponse mem = lemon.download(new OpenAiRequest("audio.speech", "{}"));
+        all.append("mem=").append(mem.getBody().length).append(";");
+        OpenAiStoredResponse stored = lemon.downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.PIPELINE_SHARED, "a.mp3"));
+        all.append("shared=").append(stored.getPath()).append(":").append(stored.getSize()).append(";");
+        OpenAiStoredResponse priv = lemon.downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.RUN_PRIVATE, "deep/b.mp3"));
+        all.append("private=").append(priv.getPath()).append(":").append(priv.getSize()).append(";");
+        long total = 0;
+        try (OpenAiByteStream s = lemon.streamBytes(new OpenAiRequest("audio.speech", "{}"))) {
+          byte[] chunk;
+          while ((chunk = s.next()) != null) total += chunk.length;
+        }
+        all.append("streamed=").append(total).append(";");
+        context.getFiles().writeText(FileScope.PIPELINE_SHARED, "all", all.toString());
+        """
+            .trimIndent()
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    val size = FakeOpenAiServer.SPEECH.size
+    assertEquals(
+        "mem=$size;shared=a.mp3:$size;private=deep/b.mp3:$size;streamed=$size;",
+        outcome.shared("all"),
+    )
+    assertContentEquals(FakeOpenAiServer.SPEECH, outcome.sharedBytes("a.mp3"))
+    assertEquals(0, server.inFlight)
+  }
+
+  @Test
+  fun `a pipeline that names a path outside its directories is refused for a source and for a target, and nothing leaves or enters`() {
+    rig.defineOpenAi("lemon", settings("\"endpoints\":[\"files.create\",\"audio.speech\"]"))
+    val attempts =
+        listOf("../escape.txt", "/etc/passwd", "a/../../escape.txt", "")
+            .mapIndexed { i, path ->
+              """
+              try {
+                lemon.call(new OpenAiRequest("files.create", null, $none, $none, new OpenAiTimeouts(),
+                    java.util.Collections.singletonMap("purpose", "batch"),
+                    java.util.Collections.singletonList(OpenAiUpload.file("file", new OpenAiFile(FileScope.PIPELINE_SHARED, ${java(path)}), "x.txt")),
+                    new OpenAiSizes()));
+                all.append("up$i=ok;");
+              } catch (ResourceAccessException e) { all.append("up$i=").append(e.getFailure().name()).append(";"); }
+              try {
+                lemon.downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.RUN_PRIVATE, ${java(path)}));
+                all.append("down$i=ok;");
+              } catch (ResourceAccessException e) { all.append("down$i=").append(e.getFailure().name()).append(";"); }
+              """
+            }
+            .joinToString("\n")
+    val body =
+        """
+        OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+        StringBuilder all = new StringBuilder();
+        $attempts
+        context.getFiles().writeText(FileScope.PIPELINE_SHARED, "all", all.toString());
+        """
+            .trimIndent()
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertEquals(
+        (0..3).joinToString("") { "up$it=PATH_REJECTED;down$it=PATH_REJECTED;" },
+        outcome.shared("all"),
+    )
+    assertEquals(0, server.requests.size, "nothing was uploaded and nothing was asked for")
+    assertEquals(false, rig.resourceRoot.resolve("../escape.txt").normalize().toFile().exists())
   }
 }

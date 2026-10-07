@@ -195,7 +195,8 @@ class OpenAiFilesAccessorTest {
     files.call(
         OpenAiRequest(
             "files.create",
-            files = listOf(OpenAiUpload.file("file", OpenAiFile(FileScope.RUN_PRIVATE, "in/a.bin"))),
+            files =
+                listOf(OpenAiUpload.file("file", OpenAiFile(FileScope.RUN_PRIVATE, "in/a.bin"))),
         )
     )
     files.downloadTo(

@@ -360,4 +360,140 @@ class OpenAiBindingMultipartTest {
     }
     assertEquals(0, server.requests.size)
   }
+
+  @Test
+  fun `an image edit takes the image and a mask, the prompt and the model as fields, and the image comes back whole`() {
+    val image = ByteArray(300) { (it * 3).toByte() }
+    val mask = ByteArray(50) { it.toByte() }
+
+    val answer =
+        upload(
+            binding("\"endpoints\":[\"images.edits\"]"),
+            endpoint = "images.edits",
+            fields = mapOf("model" to "m", "prompt" to "blue", "response_format" to "b64_json"),
+            files = listOf(bytesPart("image", "a.png", image), bytesPart("mask", "m.png", mask)),
+        )
+
+    val seen = server.requests.single()
+    assertEquals("/v1/images/edits", seen.path)
+    assertEquals(
+        listOf("model", "prompt", "response_format", "image", "mask"),
+        seen.parts!!.map { it.name },
+    )
+    assertContentEquals(mask, seen.file("mask")!!.bytes)
+    val body = Json.parseToJsonElement(answer["body"] as String).jsonObject
+    assertTrue(
+        body["data"].toString().contains(java.util.Base64.getEncoder().encodeToString(image))
+    )
+  }
+
+  @Test
+  fun `a recording is transcribed to text, and the answer is the service's own text`() {
+    val answer =
+        upload(
+            binding("\"endpoints\":[\"audio.transcriptions\",\"audio.translations\"]"),
+            endpoint = "audio.transcriptions",
+            fields = mapOf("model" to "w", "response_format" to "text"),
+            files = listOf(bytesPart("file", "hello.wav", ByteArray(64))),
+        )
+    val translated =
+        upload(
+            binding("\"endpoints\":[\"audio.translations\"]"),
+            endpoint = "audio.translations",
+            fields = mapOf("model" to "w"),
+            files = listOf(bytesPart("file", "hallo.wav", ByteArray(8))),
+        )
+
+    assertEquals("transcript of hello.wav (64 bytes)", answer["body"])
+    assertTrue((translated["body"] as String).contains("hallo.wav"))
+    assertEquals("/v1/audio/translations", server.requests.last().path)
+  }
+
+  private fun transcribe(settings: String, fields: Map<String, String>) =
+      upload(
+          binding("\"endpoints\":[\"audio.transcriptions\"],$settings"),
+          endpoint = "audio.transcriptions",
+          fields = fields,
+          files = listOf(bytesPart("file", "a.wav", ByteArray(8))),
+      )
+
+  @Test
+  fun `the resource's default model is the model field of a form that has none, and the pipeline's own wins`() {
+    val settings = "\"defaults\":{\"model\":\"whisper-1\"}"
+
+    transcribe(settings, emptyMap())
+    transcribe(settings, mapOf("model" to "mine"))
+
+    assertEquals(listOf("whisper-1", "mine"), server.requests.map { it.field("model") })
+  }
+
+  @Test
+  fun `a form that breaks the resource's rules is refused and nothing is sent`() {
+    val settings =
+        "\"allowedModels\":[\"w1\"],\"lockedParameters\":[\"temperature\"],\"maxValues\":{\"max_tokens\":5}"
+
+    val model =
+        assertFailsWith<ResourceOperationFailure> { transcribe(settings, mapOf("model" to "w2")) }
+    val none = assertFailsWith<ResourceOperationFailure> { transcribe(settings, emptyMap()) }
+    val locked =
+        assertFailsWith<ResourceOperationFailure> {
+          transcribe(settings, mapOf("model" to "w1", "temperature" to "0.1"))
+        }
+
+    assertEquals(ResourceFailure.MODEL_NOT_ALLOWED, model.failure)
+    assertEquals(ResourceFailure.MODEL_NOT_ALLOWED, none.failure)
+    assertEquals(ResourceFailure.PARAMETER_LOCKED, locked.failure)
+    assertEquals(0, server.requests.size)
+  }
+
+  @Test
+  fun `a number field above the administrator's ceiling is refused, and one that is no number too`() {
+    val settings = "\"maxValues\":{\"temperature\":1}"
+
+    val above =
+        assertFailsWith<ResourceOperationFailure> {
+          transcribe(settings, mapOf("temperature" to "2"))
+        }
+    val text =
+        assertFailsWith<ResourceOperationFailure> {
+          transcribe(settings, mapOf("temperature" to "hot"))
+        }
+    transcribe(settings, mapOf("temperature" to "0.5"))
+
+    assertEquals(ResourceFailure.VALUE_ABOVE_LIMIT, above.failure)
+    assertEquals(ResourceFailure.INVALID_ARGUMENT, text.failure)
+    assertEquals(1, server.requests.size)
+  }
+
+  @Test
+  fun `a form is for the entries that take one, and a JSON body is for the others`() {
+    val b = binding("\"endpoints\":[\"files.create\",\"chat.completions\"]")
+
+    val formOnJson =
+        assertFailsWith<ResourceOperationFailure> {
+          upload(b, endpoint = "chat.completions", fields = mapOf("purpose" to "x"))
+        }
+    val filesOnJson =
+        assertFailsWith<ResourceOperationFailure> {
+          upload(
+              b,
+              endpoint = "chat.completions",
+              fields = emptyMap(),
+              files = listOf(bytesPart("file", "a", ByteArray(1))),
+          )
+        }
+    val bodyOnForm =
+        assertFailsWith<ResourceOperationFailure> {
+          upload(
+              b,
+              files = listOf(bytesPart("file", "a.txt", ByteArray(1))),
+              extra = mapOf("body" to "{}"),
+          )
+        }
+
+    assertEquals(ResourceFailure.INVALID_ARGUMENT, formOnJson.failure)
+    assertEquals(ResourceFailure.INVALID_ARGUMENT, filesOnJson.failure)
+    assertEquals(ResourceFailure.INVALID_ARGUMENT, bodyOnForm.failure)
+    assertEquals(0, server.requests.size)
+  }
 }

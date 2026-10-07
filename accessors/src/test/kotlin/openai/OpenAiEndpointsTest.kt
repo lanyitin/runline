@@ -77,11 +77,7 @@ class OpenAiEndpointsTest {
     // Entries come in as they are carried out (WI-53): what is left here cannot be enabled.
     assertEquals(
         setOf(
-            "images.edits",
-            "images.variations",
             "audio.speech",
-            "audio.transcriptions",
-            "audio.translations",
             "files.content",
         ),
         undelivered,

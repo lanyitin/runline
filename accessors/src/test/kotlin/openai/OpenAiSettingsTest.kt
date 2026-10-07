@@ -219,7 +219,6 @@ class OpenAiSettingsTest {
             """["no.such.endpoint"]""",
             """["chat/completions"]""",
             """[]""",
-            """["images.edits"]""",
             """["files.content"]""",
             """["audio.speech"]""",
             """"chat.completions"""",

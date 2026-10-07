@@ -64,7 +64,14 @@ private constructor(
       val path = endpoint.pathFor(stringMap(arguments["pathParameters"]))
       val query = endpoint.queryFor(stringMap(arguments["query"]))
       val limits = limitsOf(settings.timeouts, arguments["timeoutsMillis"])
-      val upload = if (endpoint.body == BodyKind.MULTIPART) uploadOf(endpoint, arguments) else null
+      val multipart = endpoint.body == BodyKind.MULTIPART
+      // A form is for the entries that take one, a JSON body for the others: never both.
+      val form =
+          (arguments["fields"] as? Map<*, *>)?.isNotEmpty() == true ||
+              (arguments["files"] as? List<*>)?.isNotEmpty() == true
+      if (form && !multipart) throw invalid()
+      if (multipart && arguments["body"] != null) throw invalid()
+      val upload = if (multipart) uploadOf(settings, endpoint, arguments) else null
       val text = arguments["body"]
       if (text != null && text !is String) throw invalid()
       val body =
@@ -82,7 +89,11 @@ private constructor(
     private fun invalid() = ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
 
     /** The form a pipeline asked for: its text fields and the file parts it gave. */
-    private fun uploadOf(endpoint: OpenAiEndpoint, arguments: Map<String, Any?>): UploadForm {
+    private fun uploadOf(
+        settings: OpenAiSettings,
+        endpoint: OpenAiEndpoint,
+        arguments: Map<String, Any?>,
+    ): UploadForm {
       val parts =
           (arguments["files"] as? List<*> ?: emptyList<Any?>()).map { given ->
             val part = given as Map<*, *>
@@ -106,7 +117,23 @@ private constructor(
       if (!endpoint.fileParts.all { !it.required || it.field in given }) throw invalid()
       val fields = stringMap(arguments["fields"])
       if (!endpoint.fields.containsAll(fields.keys)) throw invalid()
-      return UploadForm(fields, parts)
+      if (fields.keys.any { it in settings.lockedParameters }) {
+        throw ResourceOperationFailure(ResourceFailure.PARAMETER_LOCKED)
+      }
+      val merged = LinkedHashMap(fields)
+      val model = settings.defaults["model"]
+      if (endpoint.takesModel && "model" !in merged && model != null) {
+        merged["model"] = (model as JsonPrimitive).content
+      }
+      if (endpoint.takesModel) {
+        checkModel(settings, merged["model"]?.let { JsonPrimitive(it) })
+      }
+      for ((name, ceiling) in settings.maxValues) {
+        val value = fields[name] ?: continue
+        val number = value.toDoubleOrNull() ?: throw invalid()
+        if (number > ceiling) throw ResourceOperationFailure(ResourceFailure.VALUE_ABOVE_LIMIT)
+      }
+      return UploadForm(merged, parts)
     }
 
     private fun stringMap(value: Any?): Map<String, String> {

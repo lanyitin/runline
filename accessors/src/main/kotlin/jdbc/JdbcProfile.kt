@@ -47,10 +47,19 @@ interface JdbcProfile {
   val resetStatements: List<String>
 
   /**
-   * Statements that give a connection the session settings the Engine wants, run when it is opened
-   * and again after [resetStatements].
+   * True only for a profile whose database has no session state to clear (so [resetStatements] may
+   * be empty). A profile that is empty without saying so is refused by [JdbcProfiles], so that a
+   * new database can never skip the reset by forgetting it.
    */
-  val startStatements: List<String>
+  val resetNotNeeded: Boolean
+    get() = false
+
+  /**
+   * Statements that give a connection the session settings the Engine wants and the resource's
+   * extra properties asked for, run when it is opened and again after [resetStatements] (which
+   * returns a session to the server's defaults, not to what it was opened with).
+   */
+  fun startStatements(extra: Map<String, String>): List<String>
 
   /** The values passing between Java and the database. */
   val values: JdbcValues
@@ -99,6 +108,11 @@ class JdbcProfiles(profiles: List<JdbcProfile>) {
 
   init {
     require(byKind.size == profiles.size) { "two profiles for one kind of database" }
+    for (profile in profiles) {
+      require(profile.resetStatements.isNotEmpty() || profile.resetNotNeeded) {
+        "the profile of ${profile.kind} has no reset statements and does not say none are needed"
+      }
+    }
   }
 
   fun find(kind: String): JdbcProfile? = byKind[kind]

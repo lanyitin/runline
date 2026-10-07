@@ -16,10 +16,18 @@ internal class PoolExhausted : RuntimeException("no connection is left in the po
  */
 internal class JdbcConnectionPool(
     private val maxConnections: Int,
+    /**
+     * Brings a connection that has been used back to the state of a new one and says whether it is
+     * shown to be so; one that is not is closed and never given out again.
+     */
+    private val clean: (Connection) -> Boolean,
     private val open: () -> Connection,
 ) : AutoCloseable {
   private val lock = Any()
   private val idle = ArrayDeque<Connection>()
+
+  /** Every connection that is open, in use or not, so that closing the pool closes them all. */
+  private val everyOpen = HashSet<Connection>()
   private var out = 0
   private val closed = AtomicBoolean()
 
@@ -37,26 +45,47 @@ internal class JdbcConnectionPool(
       out++
     }
     try {
-      return open()
+      val connection = open()
+      synchronized(lock) { everyOpen += connection }
+      return connection
     } catch (e: Throwable) {
       synchronized(lock) { out-- }
       throw e
     }
   }
 
-  /** Gives [connection] back; it is kept for the next call unless the pool is closed. */
+  /**
+   * Gives [connection] back. It is cleaned first, and kept for the next run only if that worked and
+   * showed it clean; otherwise (and when the pool is closed) it is closed.
+   */
   fun release(connection: Connection) {
+    val usable = !closed.get() && runCatching { clean(connection) }.getOrDefault(false)
     val keep =
         synchronized(lock) {
           out--
-          if (closed.get()) false else idle.addFirst(connection).let { true }
+          if (usable && !closed.get()) idle.addFirst(connection).let { true } else false
         }
-    if (!keep) runCatching { connection.close() }
+    if (!keep) forget(connection)
+  }
+
+  private fun forget(connection: Connection) {
+    synchronized(lock) { everyOpen -= connection }
+    runCatching { connection.close() }
+  }
+
+  /** Closes [connection] instead of keeping it: its state cannot be trusted. */
+  fun discard(connection: Connection) {
+    synchronized(lock) { out-- }
+    forget(connection)
   }
 
   override fun close() {
     if (!closed.compareAndSet(false, true)) return
-    val toClose = synchronized(lock) { idle.toList().also { idle.clear() } }
+    val toClose =
+        synchronized(lock) {
+          idle.clear()
+          everyOpen.toList().also { everyOpen.clear() }
+        }
     toClose.forEach { runCatching { it.close() } }
   }
 }

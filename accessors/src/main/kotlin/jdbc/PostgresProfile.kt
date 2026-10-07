@@ -29,13 +29,33 @@ object PostgresProfile : JdbcProfile {
           "tcpKeepAlive" to PropertyRule { it == "true" || it == "false" },
       )
   override val healthQuery = "SELECT 1"
-  override val resetStatements: List<String> = emptyList()
+
+  /**
+   * `DISCARD ALL` is `CLOSE ALL`, `UNLISTEN *`, `pg_advisory_unlock_all()`, `DISCARD PLANS`,
+   * `DISCARD SEQUENCES`, `DISCARD TEMP`, `DEALLOCATE ALL` and `RESET ALL`, the last of which also
+   * undoes `SET ROLE` and `SET SESSION AUTHORIZATION`: all that a session can keep. It cannot run
+   * inside a transaction block, so the pool rolls back and turns autocommit on first.
+   */
+  override val resetStatements: List<String> = listOf("DISCARD ALL")
 
   /**
    * A time of the database reads the same wherever the Engine runs: the driver would otherwise give
-   * the server the time zone of the Engine's machine.
+   * the server the time zone of the Engine's machine. The application name and the schemas the
+   * administrator set are set again too, because `DISCARD ALL` returns them to the server's.
    */
-  override val startStatements: List<String> = listOf("SET TIME ZONE 'UTC'")
+  override fun startStatements(extra: Map<String, String>): List<String> =
+      listOf(
+          "SET TIME ZONE 'UTC'",
+          "SET application_name TO ${literal(extra["ApplicationName"] ?: DEFAULT_APPLICATION)}",
+      ) +
+          listOfNotNull(
+              extra["currentSchema"]?.let { schemas ->
+                "SET search_path TO " + schemas.split(',').joinToString(",") { literal(it) }
+              }
+          )
+
+  private fun literal(text: String) = "'" + text.replace("'", "''") + "'"
+
   override val values: JdbcValues = PostgresValues
 
   override fun acceptsAddress(host: String, database: String) =
@@ -51,7 +71,7 @@ object PostgresProfile : JdbcProfile {
       extra: Map<String, String>,
   ): Properties {
     val properties = Properties()
-    properties.setProperty("ApplicationName", "runline")
+    properties.setProperty("ApplicationName", DEFAULT_APPLICATION)
     properties.setProperty("user", username)
     // An empty password, not none: with none the driver would look for one in the files and the
     // environment of the Engine's host, which is nobody's decision about this resource.
@@ -100,6 +120,7 @@ object PostgresProfile : JdbcProfile {
   private val DATABASE = Regex("[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}")
   private val IDENTIFIERS =
       Regex("[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}")
+  private const val DEFAULT_APPLICATION = "runline"
   private const val LOGIN_MARGIN_SECONDS = 5L
   private val STATE = Regex("[0-9A-Z]{5}")
 }

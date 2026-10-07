@@ -134,6 +134,9 @@ class JdbcLimitsTest {
 
     both.forEach { it.get(10, TimeUnit.SECONDS) }
     assertEquals(2, using)
+    // The run holds its connections until it is done with the resource.
+    assertEquals(2, rig.pools.activeConnections("db"))
+    host.invalidateAll(dev.lawlan.runline.accessors.Invalidation.RUN_ENDED)
     assertEquals(0, rig.pools.activeConnections("db"))
   }
 

@@ -10,8 +10,8 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Statement
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ScheduledThreadPoolExecutor
-import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
@@ -59,27 +59,42 @@ internal constructor(
     private val credential: JdbcCredential,
     private val pool: JdbcConnectionPool,
     private val observer: JdbcObserver,
+    /** Tells the pools that this run is done with its generation; called once. */
+    private val done: () -> Unit,
 ) : ResourceBinding {
   override val type: String = ResourceTypes.JDBC_POOL
 
+  /** A connection of the run, and when it was last used. */
+  private class Held(val connection: Connection, var lastUsedNanos: Long = System.nanoTime())
+
+  private val lock = ReentrantLock()
+  private val freed = lock.newCondition()
+
+  /** The run's connections that no statement is using, and how many the run has in all. */
+  private val idle = java.util.ArrayDeque<Held>()
+  private var owned = 0
+
   /** The transaction of the run on this resource, if one is open; one statement at a time. */
-  private class Transaction(val connection: Connection) {
+  private class Transaction(val held: Held) {
     val lock = ReentrantLock()
   }
 
   @Volatile private var transaction: Transaction? = null
   private val transactionLock = ReentrantLock()
 
-  /** How many connections the run may use at once; the pool is large enough for every run's. */
-  private val share = Semaphore(settings.connectionsPerRun, true)
+  /** The statements running now, with their connections, which an abort cuts off. */
+  private val running = ConcurrentHashMap<Statement, Connection>()
+
+  @Volatile private var aborted = false
 
   /** Cuts off a statement that has run too long; made when it is first needed. */
-  private val timer: ScheduledThreadPoolExecutor by lazy {
+  private val timerOnce = lazy {
     ScheduledThreadPoolExecutor(1) { task ->
           Thread.ofPlatform().name("jdbc-statement-timer-$resource").daemon().unstarted(task)
         }
         .apply { removeOnCancelPolicy = true }
   }
+  private val timer: ScheduledThreadPoolExecutor by timerOnce
 
   override fun execute(operation: String, arguments: Map<String, Any?>): Any? {
     if (operation !in OPERATIONS) throw refused()
@@ -111,11 +126,51 @@ internal constructor(
     }
   }
 
+  /**
+   * Stops what the run is doing: every statement that is running is cancelled in the database and
+   * its connection is cut, so that it cannot go on even if the database cannot be reached, and
+   * whoever waits for a connection is let go. It does not wait for them.
+   */
+  override fun abort() {
+    aborted = true
+    lock.withLock { freed.signalAll() }
+    for ((statement, connection) in running) {
+      // The cancel goes to the database over a new connection and can take as long as that does,
+      // so it has a limit; the connection is cut whatever came of it.
+      val cancel = Thread.ofPlatform().daemon().start { runCatching { statement.cancel() } }
+      runCatching { cancel.join(CANCEL_LIMIT_MILLIS) }
+      runCatching { connection.abort(Runnable::run) }
+    }
+  }
+
+  /**
+   * Ends the run's use of the resource: an open transaction is rolled back, the connections are
+   * given back to the pool, which cleans each of them before another run can have it (and closes
+   * one that it cannot show to be clean), and the run leaves its generation.
+   */
   override fun close() {
-    if (timer.isShutdown.not()) timer.shutdownNow()
+    try {
+      val open = transaction
+      transaction = null
+      lock.withLock {
+        if (open != null) idle += open.held
+        while (idle.isNotEmpty()) {
+          val held = idle.removeFirst()
+          // The pool cleans it, or closes it when it cannot show it clean (a connection cut by
+          // an abort is closed already).
+          runCatching { pool.release(held.connection) }
+        }
+        owned = 0
+      }
+    } finally {
+      if (timerOnce.isInitialized()) timer.shutdownNow()
+      done()
+    }
   }
 
   private fun refused() = ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
+
+  private fun cancelled() = ResourceOperationFailure(ResourceFailure.CANCELLED)
 
   private fun noArguments(arguments: Map<String, Any?>) {
     if (arguments.isNotEmpty()) throw refused()
@@ -135,13 +190,19 @@ internal constructor(
     val parameters = parametersOf(arguments["parameters"])
     val open = transaction
     if (open != null) {
-      return open.lock.withLock { guarded { run(open.connection, sql, parameters) } }
+      return open.lock.withLock { guarded { run(open.held.connection, sql, parameters) } }
     }
-    val connection = connect()
+    val held = acquire()
+    var keep = true
     try {
-      return guarded { run(connection, sql, parameters) }
+      return guarded { run(held.connection, sql, parameters) }
+    } catch (e: ResourceOperationFailure) {
+      // A connection that was cut off, or that broke, or whose statement was stopped halfway, is
+      // not used again.
+      if (e.failure in UNUSABLE_AFTER || held.connection.isClosed) keep = false
+      throw e
     } finally {
-      give(connection)
+      if (keep) free(held) else drop(held)
     }
   }
 
@@ -165,20 +226,49 @@ internal constructor(
     return parameters
   }
 
-  /** A connection of the run's share: the run waits for its own share, never for another run's. */
-  private fun connect(): Connection {
+  /**
+   * A connection for a statement: one of the run's that is free, or a new one of the pool's while
+   * the run has fewer than its share, or else the run waits for one of its own. The pool has room
+   * for every run's whole share, so what is waited for is only the run's own.
+   */
+  private fun acquire(): Held {
     if (credential is JdbcCredential.Unavailable) {
       observer.acquireFailed(resource, ResourceFailure.SECRET_UNAVAILABLE)
       throw ResourceOperationFailure(ResourceFailure.SECRET_UNAVAILABLE)
     }
-    if (!share.tryAcquire(settings.quotaWaitMillis, TimeUnit.MILLISECONDS)) {
-      observer.acquireFailed(resource, ResourceFailure.QUOTA_WAIT_TIMEOUT)
-      throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
+    val deadline = System.nanoTime() + settings.quotaWaitMillis * 1_000_000
+    lock.lock()
+    try {
+      while (true) {
+        if (aborted) throw cancelled()
+        val free = idle.pollFirst()
+        if (free != null) {
+          if (stillGood(free)) return free
+          owned--
+          pool.discard(free.connection)
+          continue
+        }
+        if (owned < settings.connectionsPerRun) {
+          owned++
+          break
+        }
+        val left = deadline - System.nanoTime()
+        if (left <= 0) {
+          observer.acquireFailed(resource, ResourceFailure.QUOTA_WAIT_TIMEOUT)
+          throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
+        }
+        freed.awaitNanos(left)
+      }
+    } finally {
+      lock.unlock()
     }
     try {
-      return pool.borrow()
+      return Held(pool.borrow())
     } catch (e: Throwable) {
-      share.release()
+      lock.withLock {
+        owned--
+        freed.signalAll()
+      }
       val failure =
           when (e) {
             is SQLException -> failure(e)
@@ -190,26 +280,44 @@ internal constructor(
     }
   }
 
-  /** Gives a connection, and the run's share of them, back. */
-  private fun give(connection: Connection) {
-    try {
-      pool.release(connection)
-    } finally {
-      share.release()
+  /**
+   * A connection that has been idle a while may have been dropped by the database or the network.
+   */
+  private fun stillGood(held: Held): Boolean {
+    if (held.connection.isClosed) return false
+    if (System.nanoTime() - held.lastUsedNanos < STALE_NANOS) return true
+    return runCatching { held.connection.isValid(2) }.getOrDefault(false)
+  }
+
+  /** The statement is done with [held], which the run keeps for its next one. */
+  private fun free(held: Held) {
+    held.lastUsedNanos = System.nanoTime()
+    lock.withLock {
+      idle += held
+      freed.signalAll()
+    }
+  }
+
+  /** [held] is closed and no longer the run's. */
+  private fun drop(held: Held) {
+    pool.discard(held.connection)
+    lock.withLock {
+      owned--
+      freed.signalAll()
     }
   }
 
   private fun begin(): Any? {
     transactionLock.withLock {
       if (transaction != null) throw ResourceOperationFailure(ResourceFailure.TRANSACTION_STATE)
-      val connection = connect()
+      val held = acquire()
       try {
-        connection.autoCommit = false
+        held.connection.autoCommit = false
       } catch (e: SQLException) {
-        give(connection)
+        drop(held)
         throw failure(e)
       }
-      transaction = Transaction(connection)
+      transaction = Transaction(held)
     }
     return null
   }
@@ -219,13 +327,15 @@ internal constructor(
       val open = transaction ?: throw ResourceOperationFailure(ResourceFailure.TRANSACTION_STATE)
       open.lock.withLock {
         transaction = null
+        val connection = open.held.connection
         try {
-          if (commit) open.connection.commit() else open.connection.rollback()
-          open.connection.autoCommit = true
+          if (commit) connection.commit() else connection.rollback()
+          connection.autoCommit = true
+          free(open.held)
         } catch (e: SQLException) {
+          // Whatever state it is in, the connection is closed, which ends the transaction.
+          drop(open.held)
           throw failure(e)
-        } finally {
-          give(open.connection)
         }
       }
     }
@@ -242,11 +352,16 @@ internal constructor(
 
   private fun failure(e: SQLException, timedOut: Boolean = false): ResourceOperationFailure {
     val classified = profile.classify(e)
-    val failure = if (timedOut) ResourceFailure.TOTAL_TIMEOUT else classified.failure
+    val failure =
+        when {
+          aborted -> ResourceFailure.CANCELLED
+          timedOut -> ResourceFailure.TOTAL_TIMEOUT
+          else -> classified.failure
+        }
     return ResourceOperationFailure(
         failure,
         JdbcFailureCause.of(failure, e, (credential as? JdbcCredential.Password)?.value),
-        sqlState = if (timedOut) null else classified.sqlState,
+        sqlState = if (timedOut || aborted) null else classified.sqlState,
         withErrorId = true,
     )
   }
@@ -273,6 +388,7 @@ internal constructor(
   /** Runs [body], which executes [statement], and cuts it off when it takes longer than allowed. */
   private fun <T> limited(statement: Statement, body: () -> T): T {
     val timedOut = AtomicBoolean()
+    running[statement] = statement.connection
     val cutOff =
         timer.schedule(
             {
@@ -283,12 +399,16 @@ internal constructor(
             TimeUnit.MILLISECONDS,
         )
     try {
-      return body()
+      val result = body()
+      // An answer that came as the run was cut off is not given: nothing may complete after it.
+      if (aborted) throw cancelled()
+      return result
     } catch (e: SQLException) {
       if (timedOut.get()) throw failure(e, timedOut = true)
       throw e
     } finally {
       cutOff.cancel(false)
+      running.remove(statement)
     }
   }
 
@@ -355,6 +475,15 @@ internal constructor(
     val OPERATIONS = setOf(QUERY, UPDATE, BEGIN, COMMIT, ROLLBACK)
     val STATEMENT_MEMBERS = setOf("sql", "parameters")
     const val FIXED_SIZE = 8L
+    const val CANCEL_LIMIT_MILLIS = 2_000L
+    const val STALE_NANOS = 1_000_000_000L
+    val UNUSABLE_AFTER =
+        setOf(
+            ResourceFailure.CANCELLED,
+            ResourceFailure.TOTAL_TIMEOUT,
+            ResourceFailure.CONNECTION_FAILED,
+            ResourceFailure.CONNECT_TIMEOUT,
+        )
   }
 }
 

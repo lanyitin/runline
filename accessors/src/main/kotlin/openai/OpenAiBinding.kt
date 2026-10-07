@@ -358,7 +358,7 @@ class OpenAiBinding(
                 ?: if (Thread.currentThread().isInterrupted || e.cause is InterruptedException) {
                   interrupted(call, e)
                 } else {
-                  e
+                  classifyIo(e)
                 }
           }
       stopped(call)?.let { stop -> throw stop }

@@ -1,6 +1,7 @@
 package dev.lawlan.runline.accessors.openai
 
 import dev.lawlan.runline.accessors.ResourceOperationFailure
+import dev.lawlan.runline.accessors.fake.ClientGone
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
 import dev.lawlan.runline.core.ResourceFailure
 import java.util.concurrent.Executors
@@ -209,5 +210,29 @@ class OpenAiBindingStreamTest {
     } finally {
       pulling.shutdownNow()
     }
+  }
+
+  @Test
+  fun `a service that breaks off in the middle of a stream is a connection failure, and what came before was delivered`() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.event("""{"n":1}""")
+      response.event("""{"n":2}""")
+      Thread.sleep(100)
+      response.abort()
+      throw ClientGone()
+    }
+    val b = binding()
+    val opened = open(b)
+
+    val before = listOf(next(b, opened), next(b, opened))
+    val e = failure { next(b, opened) }
+
+    assertEquals(listOf("""{"n":1}""", """{"n":2}"""), before)
+    assertEquals(ResourceFailure.CONNECTION_FAILED, e.failure)
+    assertEquals(ResourceFailure.CONNECTION_FAILED, failure { next(b, opened) }.failure)
+    assertEquals(0, server.inFlight)
+    server.script = null
+    assertEquals(200, callWithQuotaWait(b, 200)["status"], "the share is free again")
   }
 }

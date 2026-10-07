@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.ThrowableProxy
 import ch.qos.logback.core.AppenderBase
+import dev.lawlan.runline.engine.artifact.VersionResolver
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.trigger.*
@@ -84,7 +85,7 @@ class TriggerRig(
           .build()
   val harness = RunHarness(maxConcurrent = maxConcurrent, openTelemetry = otel)
   val store = PostgresTriggerStore(harness.dataSource)
-  val admin = TriggerAdmin(harness.definitions, harness.artifacts, store, clock)
+  val admin = TriggerAdmin(harness.definitions, VersionResolver(harness.artifacts), store, clock)
   val catalog = TriggerCatalog(harness.definitions, store)
   val telemetry = TriggerTelemetry(otel)
   val firer = TriggerFirer(harness.service, store, telemetry)

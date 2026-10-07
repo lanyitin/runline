@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine
 
 import dev.lawlan.runline.engine.artifact.ErrorResponse
+import dev.lawlan.runline.engine.artifact.VersionOutcome
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.auth.authorized
 import dev.lawlan.runline.engine.run.ParameterErrorResponse
@@ -24,15 +25,17 @@ import kotlinx.coroutines.withContext
  * changer is recorded as the name of the caller's token. A webhook's secret is shown only in the
  * response that creates the trigger or rotates the secret, and in no other response.
  *
- * - `POST /api/v1/triggers`: body `{name, kind: "cron"|"webhook", contentHash, pipeline,
- *   parameters?, cron?, timeZone?, enabled?}`. 201 with `{trigger, secret}` and the `Location`
- *   (`secret` only for a webhook); 404 `definition_not_found`; 409 `trigger_exists`; 422
- *   `invalid_parameters` (naming each parameter) or `invalid_trigger` (the `problem` says which
- *   part); 400 `bad_request`.
+ * - `POST /api/v1/triggers`: body `{name, kind: "cron"|"webhook", contentHash, uploader?, pipeline,
+ *   parameters?, cron?, timeZone?, enabled?}`; 409 `ambiguous_version` when several uploaders have
+ *   the content and none is named. 201 with `{trigger, secret}` and the `Location` (`secret` only
+ *   for a webhook); 404 `definition_not_found`; 409 `trigger_exists`; 422 `invalid_parameters`
+ *   (naming each parameter) or `invalid_trigger` (the `problem` says which part); 400
+ *   `bad_request`.
  * - `GET /api/v1/triggers`, `GET /api/v1/triggers/{name}`: triggers; 404 `trigger_not_found`.
- * - `PATCH /api/v1/triggers/{name}`: body with at least one of `{contentHash, pipeline, parameters,
- *   enabled, cron, timeZone}`; changes the binding (parameters are checked against the version it
- *   moves to), parameters, schedule, enabled. 200 with the trigger; the same refusals as creation.
+ * - `PATCH /api/v1/triggers/{name}`: body with at least one of `{contentHash, uploader, pipeline,
+ *   parameters, enabled, cron, timeZone}`; changes the binding (parameters are checked against the
+ *   version it moves to), parameters, schedule, enabled. 200 with the trigger; the same refusals as
+ *   creation.
  * - `DELETE /api/v1/triggers/{name}`: unbinds; 204 or 404. The record of firings goes with it.
  * - `POST /api/v1/triggers/{name}/rotate-secret`: 200 with `{trigger, secret}`; the old secret is
  *   void at once; 409 `not_a_webhook`; 404.
@@ -72,6 +75,7 @@ fun Application.configureTriggerRoutes() {
                         request.cron,
                         request.timeZone,
                         request.enabled,
+                        request.uploader,
                     ),
                     call.caller,
                 )
@@ -90,6 +94,8 @@ fun Application.configureTriggerRoutes() {
                     ErrorResponse("trigger_exists", "已經有名為「${request.name}」的 trigger。"),
                 )
             CreateTriggerResult.DefinitionNotFound -> call.respondDefinitionNotFound()
+            is CreateTriggerResult.AmbiguousVersion ->
+                call.respondAmbiguousVersion(VersionOutcome.Ambiguous(result.uploaders))
             is CreateTriggerResult.InvalidParameters ->
                 call.respondInvalidParameters(result.problems)
             is CreateTriggerResult.Invalid -> call.respondInvalid(result.problem)
@@ -127,6 +133,7 @@ fun Application.configureTriggerRoutes() {
                       name,
                       UpdateTrigger(
                           request.contentHash,
+                          request.uploader,
                           request.pipeline,
                           request.parameters,
                           request.enabled,
@@ -140,6 +147,8 @@ fun Application.configureTriggerRoutes() {
               is UpdateTriggerResult.Updated -> call.respond(viewOf(catalog, result.trigger.name))
               UpdateTriggerResult.NotFound -> call.respondTriggerNotFound()
               UpdateTriggerResult.DefinitionNotFound -> call.respondDefinitionNotFound()
+              is UpdateTriggerResult.AmbiguousVersion ->
+                  call.respondAmbiguousVersion(VersionOutcome.Ambiguous(result.uploaders))
               is UpdateTriggerResult.InvalidParameters ->
                   call.respondInvalidParameters(result.problems)
               is UpdateTriggerResult.Invalid -> call.respondInvalid(result.problem)

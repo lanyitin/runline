@@ -283,7 +283,7 @@ fun Application.configureDependencyInjection() {
     provide<TriggerAdmin> {
       TriggerAdmin(
           resolve<DefinitionStore>(),
-          resolve<ArtifactStore>(),
+          resolve<VersionResolver>(),
           resolve<TriggerStore>(),
           resolve<Clock>(),
       )

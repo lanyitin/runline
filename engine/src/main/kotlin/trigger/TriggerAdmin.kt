@@ -1,7 +1,9 @@
 package dev.lawlan.runline.engine.trigger
 
-import dev.lawlan.runline.engine.artifact.ArtifactStore
 import dev.lawlan.runline.engine.artifact.DefinitionStore
+import dev.lawlan.runline.engine.artifact.VersionOutcome
+import dev.lawlan.runline.engine.artifact.VersionResolver
+import dev.lawlan.runline.engine.artifact.visibility
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.run.ParameterCheck
 import dev.lawlan.runline.engine.run.ParameterProblem
@@ -19,11 +21,17 @@ data class CreateTrigger(
     val cronExpression: String? = null,
     val timeZone: String? = null,
     val enabled: Boolean = true,
+    /** Whose version of the content, when an administrator can see several (ADR-020). */
+    val uploader: String? = null,
 )
 
 /** What to change about a trigger; what is null stays as it is. */
 data class UpdateTrigger(
     val contentHash: String? = null,
+    /**
+     * With [contentHash]: whose version to move to. Alone: whose version of the current content.
+     */
+    val uploader: String? = null,
     val pipeline: String? = null,
     val parameters: Map<String, String>? = null,
     val enabled: Boolean? = null,
@@ -63,6 +71,9 @@ sealed interface CreateTriggerResult {
   data object DefinitionNotFound : CreateTriggerResult
 
   data class InvalidParameters(val problems: List<ParameterProblem>) : CreateTriggerResult
+
+  /** Several uploaders have the content and none was named. */
+  data class AmbiguousVersion(val uploaders: List<String>) : CreateTriggerResult
 }
 
 sealed interface UpdateTriggerResult {
@@ -75,6 +86,9 @@ sealed interface UpdateTriggerResult {
   data object DefinitionNotFound : UpdateTriggerResult
 
   data class InvalidParameters(val problems: List<ParameterProblem>) : UpdateTriggerResult
+
+  /** Several uploaders have the content the binding moves to and none was named. */
+  data class AmbiguousVersion(val uploaders: List<String>) : UpdateTriggerResult
 }
 
 sealed interface RotateSecretResult {
@@ -95,24 +109,29 @@ sealed interface RotateSecretResult {
  */
 class TriggerAdmin(
     private val definitions: DefinitionStore,
-    private val artifacts: ArtifactStore,
+    private val resolver: VersionResolver,
     private val triggers: TriggerStore,
     private val clock: Clock,
 ) {
   private val log = LoggerFactory.getLogger(TriggerAdmin::class.java)
 
-  private fun soleUploader(contentHash: String) = artifacts.uploadersOf(contentHash).singleOrNull()
-
   fun create(request: CreateTrigger, by: ApiIdentity): CreateTriggerResult {
     if (!NAME.matches(request.name)) return CreateTriggerResult.Invalid(InvalidTrigger.NAME)
     val schedule = scheduleOf(request.kind, request.cronExpression, request.timeZone)
     if (schedule is Schedule.Refused) return CreateTriggerResult.Invalid(schedule.problem)
+    // An administrator sees every version, and none is preferred: the uploader must be clear.
+    val owner =
+        when (
+            val version = resolver.resolve(request.contentHash, request.uploader, by.visibility)
+        ) {
+          is VersionOutcome.Resolved -> version.value
+          is VersionOutcome.Ambiguous ->
+              return CreateTriggerResult.AmbiguousVersion(version.uploaders)
+          VersionOutcome.NotFound -> return CreateTriggerResult.DefinitionNotFound
+        }
     val definition =
-        definitions.find(
-            request.contentHash,
-            soleUploader(request.contentHash) ?: return CreateTriggerResult.DefinitionNotFound,
-            request.pipeline,
-        ) ?: return CreateTriggerResult.DefinitionNotFound
+        definitions.find(request.contentHash, owner, request.pipeline)
+            ?: return CreateTriggerResult.DefinitionNotFound
     (validateParameters(definition.metadata.parameters, request.parameters)
             as? ParameterCheck.Invalid)
         ?.let {
@@ -158,13 +177,25 @@ class TriggerAdmin(
             request.timeZone ?: current.timeZone,
         )
     if (schedule is Schedule.Refused) return UpdateTriggerResult.Invalid(schedule.problem)
+    // The binding stays on the version it has unless the request says to move it: a content hash
+    // alone is a move and must be clear about whose version; an uploader alone picks among the
+    // versions of the current content.
+    val contentHash = request.contentHash ?: current.contentHash
+    val moves = request.contentHash != null || request.uploader != null
+    val owner =
+        if (!moves) {
+          current.uploader
+        } else {
+          when (val version = resolver.resolve(contentHash, request.uploader, by.visibility)) {
+            is VersionOutcome.Resolved -> version.value
+            is VersionOutcome.Ambiguous ->
+                return UpdateTriggerResult.AmbiguousVersion(version.uploaders)
+            VersionOutcome.NotFound -> return UpdateTriggerResult.DefinitionNotFound
+          }
+        }
     val definition =
-        definitions.find(
-            request.contentHash ?: current.contentHash,
-            if (request.contentHash == null) current.uploader
-            else soleUploader(request.contentHash) ?: return UpdateTriggerResult.DefinitionNotFound,
-            request.pipeline ?: current.pipeline,
-        ) ?: return UpdateTriggerResult.DefinitionNotFound
+        definitions.find(contentHash, owner, request.pipeline ?: current.pipeline)
+            ?: return UpdateTriggerResult.DefinitionNotFound
     val parameters = request.parameters ?: current.parameters
     (validateParameters(definition.metadata.parameters, parameters) as? ParameterCheck.Invalid)
         ?.let {

@@ -8,6 +8,8 @@ data class CreateTriggerRequest(
     /** `cron` or `webhook`. */
     val kind: String,
     val contentHash: String,
+    /** Whose version of the content, when several uploaders have it (ADR-020). */
+    val uploader: String? = null,
     val pipeline: String,
     val parameters: Map<String, String> = emptyMap(),
     /** Cron triggers: a standard five-field expression. */
@@ -21,6 +23,8 @@ data class CreateTriggerRequest(
 @Serializable
 data class UpdateTriggerRequest(
     val contentHash: String? = null,
+    /** Whose version to move to (with [contentHash]) or to use of the current content. */
+    val uploader: String? = null,
     val pipeline: String? = null,
     val parameters: Map<String, String>? = null,
     val enabled: Boolean? = null,
@@ -37,6 +41,8 @@ data class TriggerResponse(
     val name: String,
     val kind: String,
     val contentHash: String,
+    /** Whose version of the content the trigger is bound to. */
+    val uploader: String,
     val pipeline: String,
     /** The parameters as the administrator gave them. */
     val parameters: Map<String, String>,
@@ -85,6 +91,7 @@ fun TriggerView.toResponse(): TriggerResponse =
         name = trigger.name,
         kind = trigger.kind.name.lowercase(),
         contentHash = trigger.contentHash,
+        uploader = trigger.uploader,
         pipeline = trigger.pipeline,
         parameters = trigger.parameters,
         effectiveParameters = effectiveParameters,

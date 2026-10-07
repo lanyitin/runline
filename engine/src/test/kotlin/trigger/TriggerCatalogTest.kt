@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.trigger
 
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
+import dev.lawlan.runline.engine.artifact.VersionResolver
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.db.dataSourceOf
@@ -18,7 +19,8 @@ class TriggerCatalogTest {
   private val definitions = PostgresDefinitionStore(dataSource)
   private val store = PostgresTriggerStore(dataSource)
   private val clock = MutableClock()
-  private val admin = TriggerAdmin(definitions, PostgresArtifactStore(dataSource), store, clock)
+  private val admin =
+      TriggerAdmin(definitions, VersionResolver(PostgresArtifactStore(dataSource)), store, clock)
   private val catalog = TriggerCatalog(definitions, store)
   private val root = ApiIdentity("root", Role.ADMIN)
   private val v1 = pipelines.save("v1", "nightly")

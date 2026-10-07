@@ -21,10 +21,13 @@ import kotlin.test.*
 class ResourceAccessorRunTest {
   private val harnesses = mutableListOf<RunHarness>()
 
-  private fun harness(maxConcurrent: Int = 3) =
-      RunHarness(maxConcurrent = maxConcurrent, resourceWaitTimeout = Duration.ofHours(1)).also {
-        harnesses += it
-      }
+  private fun harness(maxConcurrent: Int = 3, maxReadBytes: Long = 10L * 1024 * 1024) =
+      RunHarness(
+              maxConcurrent = maxConcurrent,
+              resourceWaitTimeout = Duration.ofHours(1),
+              maxReadBytes = maxReadBytes,
+          )
+          .also { harnesses += it }
 
   @AfterTest fun closeAll() = harnesses.forEach { it.close() }
 
@@ -295,5 +298,133 @@ class ResourceAccessorRunTest {
         )
 
     assertEquals(Verdict.SAFE, h.definitions.find(hash, "safe-user")!!.verdict)
+  }
+
+  @Test
+  fun `a read beyond the limit of the Engine's configuration fails as too large`() {
+    val h = harness(maxReadBytes = 8)
+    h.defineFile("log", "out.txt")
+    val hash =
+        h.upload(
+            "reader",
+            """
+            FileAccessor log = context.getAccessors().file("log");
+            log.writeText("12345678");
+            String atLimit = log.readText();
+            log.appendText("9");
+            String result = "ok";
+            try { log.readText(); } catch (ResourceAccessException e) { result = e.getFailure().name(); }
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "seen", atLimit + "|" + result);
+            """
+                .trimIndent(),
+            declaration = usingTyped("log" to "file"),
+        )
+
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(h.start(hash, "reader")).state)
+
+    assertEquals("12345678|TOO_LARGE", Files.readString(h.shared("reader", "seen")))
+  }
+
+  @Test
+  fun `a file whose directory became unusable after it was defined fails the run as unavailable`() {
+    val h = harness()
+    h.defineFile("log", "d/out.txt")
+    val hash =
+        h.upload(
+            "needs-file",
+            """context.getFiles().writeText(FileScope.PIPELINE_SHARED, "entered", "x");""",
+            declaration = usingTyped("log" to "file"),
+        )
+    Files.writeString(h.resourceRoot.resolve("d"), "now a file, where a directory should be")
+
+    val failed = h.awaitEnd(h.start(hash, "needs-file"))
+
+    assertEquals(RunState.FAILED, failed.state)
+    assertEquals(ResourceFailures.UNAVAILABLE, failed.failure!!.type)
+    assertFalse(h.exists("needs-file", "entered"))
+    assertEquals(emptyList(), h.coordinator!!.activity("log").holders)
+  }
+
+  @Test
+  fun `of two runs in different class loaders on a file of capacity one only one holds it at a time, first come first served`() {
+    val h = harness(maxConcurrent = 3)
+    h.defineFile("log", "out.txt")
+    fun writer(name: String, holds: Boolean) =
+        h.upload(
+            name,
+            (if (holds) holdUntilReleased("$name-started") else "") +
+                """
+                FileAccessor log = context.getAccessors().file("log");
+                log.appendText("$name;");
+                """
+                    .trimIndent(),
+            declaration = usingTyped("log" to "file"),
+        )
+    val first = writer("first", holds = true)
+    val second = writer("second", holds = false)
+    val third = writer("third", holds = false)
+    val a = h.start(first, "first")
+    h.awaitFile(h.shared("first", "first-started"))
+    val b = h.start(second, "second")
+    h.await(b, RunState.WAITING_FOR_RESOURCES)
+    val c = h.start(third, "third")
+    h.await(c, RunState.WAITING_FOR_RESOURCES)
+
+    assertEquals(listOf(a), h.coordinator!!.activity("log").holders.map { it.runId })
+    assertFalse(Files.exists(h.resourceRoot.resolve("out.txt")), "nobody else touched the file yet")
+    h.release("first")
+
+    listOf(a, b, c).forEach { assertEquals(RunState.SUCCEEDED, h.awaitEnd(it).state) }
+    assertEquals("first;second;third;", Files.readString(h.resourceRoot.resolve("out.txt")))
+  }
+
+  @Test
+  fun `with capacity two two runs hold the same file together and the Engine does not coordinate their content`() {
+    val h = harness(maxConcurrent = 3)
+    h.defineFile("log", "out.txt", capacity = 2)
+    fun holder(name: String) =
+        h.upload(
+            name,
+            "context.getAccessors().file(\"log\").appendText(\"$name;\");" +
+                holdUntilReleased("$name-started"),
+            declaration = usingTyped("log" to "file"),
+        )
+    val a = h.start(holder("a"), "a")
+    val b = h.start(holder("b"), "b")
+    h.awaitFile(h.shared("a", "a-started"))
+    h.awaitFile(h.shared("b", "b-started"))
+
+    assertEquals(setOf(a, b), h.coordinator!!.activity("log").holders.map { it.runId }.toSet())
+    h.release("a")
+    h.release("b")
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(a).state)
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(b).state)
+    assertEquals(
+        setOf("a;", "b;"),
+        Files.readString(h.resourceRoot.resolve("out.txt"))
+            .split(";")
+            .filter { it.isNotEmpty() }
+            .map { "$it;" }
+            .toSet(),
+    )
+  }
+
+  @Test
+  fun `deleting a file resource leaves the file where it is`() {
+    val h = harness()
+    h.defineFile("log", "out.txt")
+    Files.writeString(h.resourceRoot.resolve("out.txt"), "keep me")
+
+    val removed =
+        ResourceRemoval(h.resourceStore, h.coordinator!!, NoDeclarations).remove("log", admin)
+
+    assertEquals(RemovalOutcome.Removed, removed)
+    assertEquals("keep me", Files.readString(h.resourceRoot.resolve("out.txt")))
+  }
+
+  private object NoDeclarations : ResourceDeclarationStore {
+    override fun declaredBy(names: Collection<String>) = names.associateWith {
+      ResourceDeclarations(emptyList())
+    }
   }
 }

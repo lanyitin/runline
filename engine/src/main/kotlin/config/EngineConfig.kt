@@ -83,6 +83,8 @@ data class ResourceSettings(
     val root: Path,
     /** The longest a check of a resource's entity may take; then it fails as a timeout. */
     val checkTimeout: Duration,
+    /** The most one read of a file may return; a bigger file fails as too large. */
+    val maxReadBytes: Long,
 )
 
 /** How long run, log and trigger records are kept, and how the clean-up runs (WI-20). */
@@ -154,6 +156,8 @@ data class EngineConfig(
     const val DEFAULT_SHUTDOWN_GRACE_SECONDS = 30L
     private const val DEFAULT_RESOURCE_WAIT_SECONDS = 3600L
     private const val DEFAULT_CHECK_TIMEOUT_SECONDS = 10L
+    private const val DEFAULT_MAX_READ_BYTES =
+        dev.lawlan.runline.accessors.FileEntity.DEFAULT_MAX_READ_BYTES
 
     /** Parses [config]; reports all problems at once, without echoing any value. */
     fun from(config: ApplicationConfig): EngineConfig {
@@ -265,6 +269,7 @@ data class EngineConfig(
                   .toInt(),
           )
       val resourceRoot = required("resources.root")
+      val maxReadBytes = optionalNumber("resources.maxReadBytes", min = 1) ?: DEFAULT_MAX_READ_BYTES
       val checkTimeout =
           Duration.ofSeconds(
               optionalNumber("resources.checkTimeoutSeconds", min = 1)
@@ -288,6 +293,14 @@ data class EngineConfig(
                   ),
           )
 
+      // The files of resources are a scope of their own; they may not reach into the directories of
+      // ADR-009, nor those into them. Only the names of the keys are said, never a path.
+      for ((key, other) in
+          listOf("workspace.sharedRoot" to sharedRoot, "workspace.runRoot" to runRoot)) {
+        if (overlaps(resourceRoot, other)) {
+          problems += "resources.root must not be, contain or lie inside $key"
+        }
+      }
       if (problems.isNotEmpty()) {
         throw ConfigurationException(invalid(problems))
       }
@@ -300,8 +313,26 @@ data class EngineConfig(
           runs,
           retention,
           TelemetryConfig(text("telemetry.serviceName") ?: DEFAULT_SERVICE_NAME),
-          ResourceSettings(Path.of(resourceRoot), checkTimeout),
+          ResourceSettings(Path.of(resourceRoot), checkTimeout, maxReadBytes),
       )
+    }
+
+    /**
+     * Whether two directories are the same or one holds the other, links resolved if they exist.
+     */
+    private fun overlaps(a: String, b: String): Boolean {
+      if (a.isBlank() || b.isBlank()) return false
+      val first = canonical(a)
+      val second = canonical(b)
+      return first.startsWith(second) || second.startsWith(first)
+    }
+
+    private fun canonical(path: String): Path {
+      val absolute = Path.of(path).toAbsolutePath().normalize()
+      // The part that exists has its links resolved, the rest (not made yet) is kept as written.
+      var existing: Path? = absolute
+      while (existing != null && !java.nio.file.Files.exists(existing)) existing = existing.parent
+      return existing?.toRealPath()?.resolve(existing.relativize(absolute)) ?: absolute
     }
 
     private fun parseTokens(raw: String?, problems: MutableList<String>): List<ApiToken> {

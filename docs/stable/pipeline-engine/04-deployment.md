@@ -31,7 +31,8 @@
 ## 組態與密鑰（12-Factor）
 
 - 資料庫連線、API token、webhook 密鑰基底、白名單初始值、並行 run 上限、run 執行期目錄、目錄根位置與用量上限、保留期限、上傳大小與解壓後上限、關閉寬限時間、遙測服務名稱、埠號，皆經環境變數或部署平台的密鑰機制提供。必填項缺漏或格式錯誤時，Engine 啟動即失敗並一次列出所有問題（只列鍵名，不含值）。
-- 型別化資源的機密（資料庫密碼、API 金鑰）保存在 PKCS12 金鑰庫檔案，Engine 以唯讀方式開啟；金鑰庫路徑、密碼來源（機密檔優先，環境變數備選）與 `file` 資源的根目錄都經環境變數提供，金鑰庫與其密碼不寫入版本庫、資料庫與映像檔（[ADR-019](adr/ADR-019-typed-shared-resources.md)）。組態項目名稱與掛載方式由 [WI-41](work-items/WI-41-keystore-secrets.md)、[WI-42](work-items/WI-42-keystore-deployment.md)、[WI-43](work-items/WI-43-resource-accessor-boundary.md) 實作時寫入本文與兩份平台指南。
+- 型別化資源的機密（資料庫密碼、API 金鑰）保存在 PKCS12 金鑰庫檔案，Engine 以唯讀方式開啟；金鑰庫路徑、密碼來源（機密檔優先，環境變數備選）與 `file` 資源的根目錄都經環境變數提供，金鑰庫與其密碼不寫入版本庫、資料庫與映像檔（[ADR-019](adr/ADR-019-typed-shared-resources.md)）。金鑰庫的組態項目名稱與掛載方式由 [WI-41](work-items/WI-41-keystore-secrets.md)、[WI-42](work-items/WI-42-keystore-deployment.md) 實作時寫入本文與兩份平台指南；`file` 資源的根目錄見下一條。
+- `file` 型別共享資源的檔案都在資源根目錄之下（`RUNLINE_RESOURCE_ROOT`，必填）。它是與 pipeline 共享目錄、run 私有目錄並列的第三個目錄：三者不得相同或互為上下層，否則 Engine 啟動失敗並列出鍵名（`resources.root` 與 `workspace.sharedRoot` 或 `workspace.runRoot`，不含路徑）。根目錄需是持久儲存（Docker 的磁碟區、systemd 的狀態目錄），其備份、容量與還原由部署環境負責，Engine 只要求它存在且可讀寫；根目錄不存在或不可讀寫時 Engine 仍可啟動，只有需要它的資源的檢查與 run 的初始化失敗（註明資源不可用）。選用：`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`（資源檢查的整體時間上限，預設 10 秒）、`RUNLINE_RESOURCE_MAX_READ_BYTES`（單次讀取檔案的大小上限，預設 10 MiB，超過回報「檔案過大」）。
 - 業務狀態（jar、定義、run 紀錄與 log）在 PostgreSQL。
 - 例外：pipeline 共享目錄的內容位於 Engine 本機的持久儲存（掛載的磁碟區），位置由環境變數提供（[ADR-009](adr/ADR-009-file-scopes.md)）。Run 私有目錄是暫存，不需持久。
 - 擴為多實例前，共享目錄需改為各實例可共用的儲存。
@@ -60,6 +61,7 @@ v1 單實例。Cron 排程、run 並行上限、run 排程佇列與共享資源�
 
 - PostgreSQL 定期備份，包含 jar 與 pipeline 定義。
 - Pipeline 共享目錄所在的磁碟區是否備份，由營運者依資料重要性決定；預設視為可重建的快取。
+- 資源根目錄（`file` 資源的檔案）所在的磁碟區視為資料：備份與還原由營運者負責，Engine 不備份它，刪除資源也不刪除其檔案。
 - Engine 重啟時，狀態為進行中的 run 一律標記為「中斷」，不自動重跑。
 
 ## 優雅關閉

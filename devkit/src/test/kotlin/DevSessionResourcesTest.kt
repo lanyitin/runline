@@ -73,4 +73,19 @@ class DevSessionResourcesTest {
     assertEquals(DevSession.EXIT_OK, code, output)
     assertTrue("acquired locally: log" in output && "released: log" in output, output)
   }
+
+  @Test
+  fun `a file resource whose path cannot be used is said so and nothing runs`() {
+    java.nio.file.Files.createDirectories(tmp.resolve("project/.runline/resources"))
+    java.nio.file.Files.writeString(
+        tmp.resolve("project/.runline/resources/d"),
+        "a file where a directory should be",
+    )
+
+    val code = execute(resources = "log=file:d/out.txt", declared = typedFile)
+
+    assertEquals(DevSession.EXIT_NOT_STARTED, code)
+    assertTrue("log" in output && "cannot be used" in output, output)
+    assertTrue("[stdout]" !in output)
+  }
 }

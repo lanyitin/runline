@@ -37,9 +37,29 @@ private class HostFile(
     return call("file.read", emptyMap()) as String
   }
 
+  override fun readBytes(): ByteArray {
+    record(IoAccess.READ)
+    return call("file.readBytes", emptyMap()) as ByteArray
+  }
+
   override fun writeText(text: String) {
     record(IoAccess.WRITE)
     call("file.write", mapOf("text" to text))
+  }
+
+  override fun writeBytes(bytes: ByteArray) {
+    record(IoAccess.WRITE)
+    call("file.writeBytes", mapOf("bytes" to bytes))
+  }
+
+  override fun appendText(text: String) {
+    record(IoAccess.WRITE)
+    call("file.append", mapOf("text" to text))
+  }
+
+  override fun appendBytes(bytes: ByteArray) {
+    record(IoAccess.WRITE)
+    call("file.appendBytes", mapOf("bytes" to bytes))
   }
 
   /** Only the name, the type and the kind of action: never a path or content. */

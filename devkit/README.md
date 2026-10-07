@@ -20,6 +20,8 @@ Exit code: 0 succeeded, 1 the run did not succeed, 2 nothing was run (bad argume
 |---|---|---|
 | `RUNLINE_SHARED_ROOT` | Root of the per-pipeline shared directories (kept between executions) | `.runline/shared` in the project |
 | `RUNLINE_RUN_ROOT` | Root of the per-run private directories (fresh each execution) | `.runline/runs` in the project |
+| `RUNLINE_RESOURCE_ROOT` | Root of the files of `file` shared resources (ADR-019) | `.runline/resources` in the project |
+| `RUNLINE_RESOURCES` | The local definitions of shared resources (there is no Engine to ask): comma-separated `name=type[:path]`, e.g. `audit=file:logs/out.txt,gate=counter`; a resource the pipeline declares with a type must be defined here with that type, or nothing runs | none |
 | `RUNLINE_ALLOW_LIST` | Comma-separated allow list entries that replace the default list completely: a package (`kotlin`), a package followed by `:exact` for "this package only" (`kotlin:exact`), or `class:` plus a fully qualified class (`class:java.io.PrintStream`: that class and its nested classes only). The format is the Engine's `ALLOWLIST_PACKAGES` format (shared, `AllowListText` in the analyzer module). An invalid entry fails at startup; the earlier trailing `!` form is no longer accepted and fails with a message that says to use `:exact`. Set but empty means an empty list | the project's default allow list (`DefaultAllowList` of the analyzer module) |
 | `RUNLINE_ALLOW_LIST_VERSION` | Version shown with the verdict when `RUNLINE_ALLOW_LIST` is set; ignored for the default list, which carries its own version | `local` (`local-empty` for an empty list) |
 | `RUNLINE_SHOW_ALLOW_LIST` | `true` lists every entry of the list used, in the form `RUNLINE_ALLOW_LIST` reads | off |

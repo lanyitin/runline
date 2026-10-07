@@ -244,6 +244,7 @@ private fun InvalidResource.message() =
       InvalidResource.INVALID_SETTINGS -> "這個資源型別沒有這些設定欄位。"
       InvalidResource.INVALID_SECRET_ALIAS -> "這個資源型別沒有機密別名，或別名不合規。"
       InvalidResource.PATH_OUTSIDE_ROOT -> "路徑不在資源根目錄內：路徑必須是相對於資源根目錄的路徑，不能是絕對路徑，也不能跳出根目錄。"
+      InvalidResource.PATH_UNUSABLE -> "路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫。"
       InvalidResource.IMMUTABLE_NAME -> "資源名稱建立後不能修改。"
       InvalidResource.IMMUTABLE_TYPE -> "資源型別建立後不能修改；要換型別請刪除後重新建立。"
     }

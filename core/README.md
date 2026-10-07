@@ -33,6 +33,10 @@ Enforcement is cooperative: only IO performed through the context is checked. `R
 implementation that applies the metadata; the Runner constructs it with the scope directories prepared during
 initialization.
 
+## Typed resources: accessors
+
+A pipeline that declared a typed shared resource reaches it through `context.accessors` (ADR-019). `accessors.file(name)` returns a `FileAccessor` (`readText`, `readBytes`, `writeText`, `writeBytes`, `appendText`, `appendBytes`) for the one file behind a `file` resource: no path is exposed and no other file can be reached. It refuses, with a `ResourceAccessException` whose `failure` says why, a resource the pipeline did not declare (`NOT_DECLARED`), declared by name only (`NO_TYPE_DECLARED`), declared with another type (`TYPE_MISMATCH`) or that the host did not provide (`NOT_PROVIDED`); there is no operation to acquire a resource while a run executes (ADR-007). Operation failures carry a category (`ENDED`, `FORCE_RELEASED`, `PATH_REJECTED`, `NOT_FOUND`, `TOO_LARGE`, `FAILED`) and an errorId, never a path. The operations execute on the host's side (Engine or development entry) through `ResourceLink`, whose only call takes and returns JDK types; the host's side is the `accessors` module, which is not part of the run runtime. Using accessors does not change the safe/unsafe verdict.
+
 ## Recording mode (development entry only)
 
 `RecordingContext` is the same context in another mode, used by the development entry to learn what a pipeline does.

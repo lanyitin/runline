@@ -53,6 +53,9 @@ services:
       # The pipelines' shared directories survive restarts (ADR-009); run private directories are
       # scratch space inside the container.
       - shared:/var/lib/runline/shared
+      # The files of `file` shared resources (ADR-019). Backup and capacity of this volume are the
+      # operator's: the Engine only needs it to exist and be writable.
+      - resources:/var/lib/runline/resources
     # RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in .env) plus 15 seconds; Docker's default of
     # 10 seconds would kill the Engine inside its grace time. Raise both together.
     stop_grace_period: 45s
@@ -75,3 +78,4 @@ services:
 volumes:
   postgres-data:
   shared:
+  resources:

@@ -57,7 +57,7 @@ class ResourceBehaviors(private val byType: Map<ResourceType, ResourceBehavior>)
         ResourceBehaviors(
             mapOf(
                 ResourceType.COUNTER to CounterBehavior,
-                ResourceType.FILE to FileBehavior(settings.root),
+                ResourceType.FILE to FileBehavior(settings.root, settings.maxReadBytes),
             )
         )
   }

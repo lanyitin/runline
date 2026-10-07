@@ -66,6 +66,9 @@ Every run executes in its own class loader whose parent is only the JDK, so a ru
 | `RUNLINE_RUNTIME_DIR` (required) | Directory with the run runtime jars (`run-runtime/` of the distribution) |
 | `RUNLINE_MAX_CONCURRENT_RUNS` (required) | Runs executing at once; further runs queue |
 | `RUNLINE_SHARED_ROOT`, `RUNLINE_RUN_ROOT` (required) | Pipeline shared directories (persistent storage) and run private directories (scratch space) |
+| `RUNLINE_RESOURCE_ROOT` (required) | Where the files of `file` shared resources live (persistent storage). Must not be, contain or lie inside the shared or run directory (the Engine refuses to start otherwise); a root that is missing or unusable does not stop the Engine, it fails the checks and runs of the resources that need it |
+| `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS` (optional, 10) | The longest a check of a resource (`POST /api/v1/resources/{name}/check`) may take; then it answers `timeout` |
+| `RUNLINE_RESOURCE_MAX_READ_BYTES` (optional, 10485760) | The most one read through a `file` resource may return; a larger file fails the read as too large |
 | `RUNLINE_WORKSPACE_MAX_BYTES`, `RUNLINE_FAILED_RUN_RETENTION_SECONDS` (required) | Size limit per directory; how long a failed, cancelled or interrupted run keeps its private directory |
 | `RUNLINE_RUN_TIMEOUT_SECONDS` (optional) | Cooperative limit on a pipeline body; none by default |
 | `RUNLINE_SHUTDOWN_GRACE_SECONDS` (optional, 30) | The grace time of a shutdown: how long it waits for requests in flight, and again for runs it asked to stop (see "Shutdown" below) |
@@ -95,7 +98,7 @@ Database migrations are a separate one-off process (`./gradlew :engine:migrate`,
 ## Deployment files: Docker and systemd (WI-39, ADR-018)
 `deploy/` holds the runnable form of `docs/stable/pipeline-engine/04-deployment-docker.md` and `04-deployment-systemd.md` (thresholds and settings are defined there; where a file and the document differ, the document is right). Both platforms run the same artifact, the output of `./gradlew :engine:engineDistribution` (`engine/build/engine-dist/`: `engine.jar` and `run-runtime/`), and need PostgreSQL 17. Use a release build (`-Prunline.release=true`, clean checkout) for anything you deploy. Nothing in `deploy/` holds a secret: the `*.example` files carry placeholders, and the real `.env` / `runline.env` are ignored by git.
 
-Environment variables you must set (the Engine lists every missing one at startup and refuses to start): `POSTGRES_URL` (JDBC URL), `POSTGRES_USER`, `POSTGRES_PASSWORD`, `API_TOKENS` (`name:role:token,...`), `RUNLINE_RUNTIME_DIR`, `RUNLINE_SHARED_ROOT`, `RUNLINE_RUN_ROOT`, `RUNLINE_MAX_CONCURRENT_RUNS`, `RUNLINE_WORKSPACE_MAX_BYTES`, `RUNLINE_FAILED_RUN_RETENTION_SECONDS`. `RUNLINE_SHUTDOWN_GRACE_SECONDS` defaults to 30; the platform's stop timeout (`stop_grace_period`, `TimeoutStopSec`) is that plus 15 and has to be raised with it. Without an OTLP collector, set `OTEL_TRACES_EXPORTER=none`, `OTEL_LOGS_EXPORTER=none` and `OTEL_METRICS_EXPORTER=none`, or a shutdown waits for the exporters to time out.
+Environment variables you must set (the Engine lists every missing one at startup and refuses to start): `POSTGRES_URL` (JDBC URL), `POSTGRES_USER`, `POSTGRES_PASSWORD`, `API_TOKENS` (`name:role:token,...`), `RUNLINE_RUNTIME_DIR`, `RUNLINE_SHARED_ROOT`, `RUNLINE_RUN_ROOT`, `RUNLINE_RESOURCE_ROOT`, `RUNLINE_MAX_CONCURRENT_RUNS`, `RUNLINE_WORKSPACE_MAX_BYTES`, `RUNLINE_FAILED_RUN_RETENTION_SECONDS`. `RUNLINE_SHUTDOWN_GRACE_SECONDS` defaults to 30; the platform's stop timeout (`stop_grace_period`, `TimeoutStopSec`) is that plus 15 and has to be raised with it. Without an OTLP collector, set `OTEL_TRACES_EXPORTER=none`, `OTEL_LOGS_EXPORTER=none` and `OTEL_METRICS_EXPORTER=none`, or a shutdown waits for the exporters to time out.
 
 - **Docker** (`deploy/docker/`): `Dockerfile` (JDK 25 runtime image, unprivileged user, the JVM as the main process; its build context is `engine/build/engine-dist`), `compose.yaml` (`postgres`, the one-off `migrate`, `engine` on port 8080 with a readiness health check) and `.env.example`.
   ```
@@ -105,7 +108,7 @@ Environment variables you must set (the Engine lists every missing one at startu
   docker compose -f deploy/docker/compose.yaml up --build -d                            # postgres, migration, engine
   docker compose -f deploy/docker/compose.yaml ps                                       # engine shows (healthy)
   ```
-  The shared directories of pipelines and the database are named volumes (`docker compose down -v` deletes them). The health check needs a Docker that supports `start_interval` (25 or later); older ones ignore it and probe every 10 seconds.
+  The shared directories of pipelines, the files of `file` resources (`RUNLINE_RESOURCE_ROOT`, a volume of its own in the image and in `compose.yaml`) and the database are named volumes (`docker compose down -v` deletes them). The health check needs a Docker that supports `start_interval` (25 or later); older ones ignore it and probe every 10 seconds.
 - **systemd** (`deploy/systemd/`): `runline-migrate.service` (one-off), `runline-engine.service`, `runline-wait-ready` (the readiness wait), the optional `runline-liveness.timer` / `.service` / `runline-liveness-check`, and `runline.env.example`. The host needs JDK 25 at `/usr/bin/java` (adjust `ExecStart` otherwise), no Node.
   ```
   useradd --system --no-create-home --shell /usr/sbin/nologin runline

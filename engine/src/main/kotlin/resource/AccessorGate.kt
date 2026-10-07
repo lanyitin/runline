@@ -37,6 +37,10 @@ class AccessorGate(
       prepared[run.id] = prepare(run)
       decision
     } catch (e: ResourceUnavailable) {
+      coordinator
+          .granted(run.id)[e.resource]
+          ?.takeIf { it.type == ResourceType.FILE }
+          ?.let { telemetry.pathCheckFailed(ResourceLabel(it.name, it.type.wireName)) }
       GateDecision.Refused(
           FailureInfo(
               ResourceFailures.UNAVAILABLE,
@@ -76,7 +80,7 @@ class AccessorGate(
       val resource = granted[name] ?: continue
       behaviors.of(resource.type)?.bind(resource)?.let { bindings[name] = it }
     }
-    val observer = EngineResourceObserver(run.id, run.pipelineName, runTelemetry)
+    val observer = EngineResourceObserver(run.id, run.pipelineName, runTelemetry, telemetry)
     return Prepared(BoundResources(bindings, observer), observer)
   }
 }

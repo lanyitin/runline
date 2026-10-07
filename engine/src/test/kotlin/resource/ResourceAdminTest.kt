@@ -260,7 +260,7 @@ class ResourceAdminTest {
           store,
           Clock.fixed(now, ZoneOffset.UTC),
           ResourceBehaviors.forEngine(
-              ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10))
+              ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10), 10L * 1024 * 1024)
           ),
       ) {
         changes.incrementAndGet()
@@ -332,5 +332,49 @@ class ResourceAdminTest {
     )
     assertEquals(path("b.txt"), fileAdmin.find("log")!!.settings)
     assertEquals(1, changes.get(), "only the change that happened is announced")
+  }
+
+  @Test
+  fun `a path that leads out of the root through a link is refused as outside, when defined and when changed`() {
+    val outside = java.nio.file.Files.createTempDirectory("outside")
+    resourceRoot.resolve("link").also { java.nio.file.Files.createSymbolicLink(it, outside) }
+
+    assertEquals(
+        CreateResourceResult.Invalid(InvalidResource.PATH_OUTSIDE_ROOT),
+        fileAdmin.create("log", 1, root, "file", path("link/out.txt")),
+    )
+    fileAdmin.create("fine", 1, root, "file", path("out.txt"))
+    assertEquals(
+        UpdateResourceResult.Invalid(InvalidResource.PATH_OUTSIDE_ROOT),
+        fileAdmin.update("fine", null, null, root, settings = path("link/out.txt")),
+    )
+    assertEquals(path("out.txt"), fileAdmin.find("fine")!!.settings)
+  }
+
+  @Test
+  fun `a path that cannot be used now is refused as unusable and nothing is stored`() {
+    java.nio.file.Files.writeString(resourceRoot.resolve("plain"), "a file, not a directory")
+
+    assertEquals(
+        CreateResourceResult.Invalid(InvalidResource.PATH_UNUSABLE),
+        fileAdmin.create("log", 1, root, "file", path("plain/out.txt")),
+    )
+    assertNull(fileAdmin.find("log"))
+    fileAdmin.create("fine", 1, root, "file", path("out.txt"))
+    assertEquals(
+        UpdateResourceResult.Invalid(InvalidResource.PATH_UNUSABLE),
+        fileAdmin.update("fine", null, null, root, settings = path("plain/out.txt")),
+    )
+  }
+
+  @Test
+  fun `defining a file resource never opens the file, so a blocking one cannot hold the request`() {
+    val pipe = resourceRoot.resolve("pipe")
+    val made = ProcessBuilder("mkfifo", pipe.toString()).start()
+    check(made.waitFor() == 0) { "cannot make a named pipe here" }
+
+    val created = fileAdmin.create("log", 1, root, "file", path("pipe"))
+
+    assertIs<CreateResourceResult.Created>(created)
   }
 }

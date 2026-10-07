@@ -53,6 +53,8 @@
 |---|---|---|
 | `RUNLINE_SHARED_ROOT` | pipeline 共享目錄的根位置（多次執行間保留） | 專案內 `.runline/shared` |
 | `RUNLINE_RUN_ROOT` | run 私有目錄的根位置（每次執行全新） | 專案內 `.runline/runs` |
+| `RUNLINE_RESOURCE_ROOT` | `file` 型別共享資源的檔案所在的根位置（[ADR-019](pipeline-engine/adr/ADR-019-typed-shared-resources.md)） | 專案內 `.runline/resources` |
+| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，`file` 的路徑相對於根位置，`counter` 沒有路徑，例如 `audit=file:logs/out.txt,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動 | 無 |
 | `RUNLINE_ALLOW_LIST` | 用逗號分隔的白名單條目，會完全取代預設白名單：套件（`kotlin`）、套件後加 `:exact` 表示「僅此套件」（`kotlin:exact`）、`class:` 開頭表示完整類別（`class:java.io.PrintStream`，只放行該類別與其巢狀類別）；格式與 Engine 的 `ALLOWLIST_PACKAGES` 相同（由 analyzer 的 `AllowListText` 共用）；名稱不合法時啟動即失敗，已不再接受的尾端 `!` 形式也會失敗並提示改用 `:exact`；設為空字串表示空清單 | 專案的預設白名單（analyzer 模組的 `DefaultAllowList`，Engine 首次啟動也用它） |
 | `RUNLINE_ALLOW_LIST_VERSION` | 設定了 `RUNLINE_ALLOW_LIST` 時，判定中顯示的白名單版本；預設清單有自己的版本，此變數對它無效 | `local`（清單為空時為 `local-empty`） |
 | `RUNLINE_SHOW_ALLOW_LIST` | 設為 `true` 時列出所用清單的全部條目（格式同 `RUNLINE_ALLOW_LIST`） | 不列出 |
@@ -62,6 +64,12 @@
 | `RUNLINE_RECORD_DIR` | 開啟錄製時，輸出檔的根位置（其下以 run 識別碼分子目錄） | 專案內 `.runline/recordings` |
 
 白名單由 Engine 的管理員維護，本機不會自動取得。開發入口預設使用專案的預設白名單（印出文字、讀取標準輸入的典型 Kotlin pipeline 在其下為 safe；直接使用檔案、網路或啟動行程者為 unsafe）。判定輸出會標明所用的是預設值還是 `RUNLINE_ALLOW_LIST` 覆寫的內容，並顯示版本與條目數量；這**不代表** Engine 現行的白名單版本，管理員修改後兩者可能不同。要看到與 Engine 一致的判定，請把 `RUNLINE_ALLOW_LIST` 設成與 Engine 相同的條目（以 `RUNLINE_SHOW_ALLOW_LIST=true` 可列出本機使用的全部條目，作為修改的起點）。
+
+## 型別化共享資源（`file`）
+
+pipeline 在 `@PipelineDefinition` 以 `typedResources = [TypedResource(name = "audit", type = ResourceTypes.FILE)]` 宣告需要某個 `file` 資源後，在 `run` 中以 `context.accessors.file("audit")` 取得存取端：`readText`/`readBytes`、`writeText`/`writeBytes`（覆寫）、`appendText`/`appendBytes`。存取端不暴露路徑，只能碰那一個檔案；單次讀取有大小上限（預設 10 MiB，超過得到 `TOO_LARGE`）。取用沒有宣告型別的資源、只宣告名稱的資源或型別不符者，得到 `ResourceAccessException`（`failure` 為 `NOT_DECLARED`、`NO_TYPE_DECLARED`、`TYPE_MISMATCH`），沒有「執行中取得資源」的操作。run 結束後存取端失效，之後的操作失敗（`ENDED`）。錯誤只含類別（`NOT_FOUND`、`PATH_REJECTED`、`TOO_LARGE`、`FAILED` 與 errorId），不含路徑。
+
+開發入口以 `RUNLINE_RESOURCES` 與 `RUNLINE_RESOURCE_ROOT` 在本機提供同一份契約：初始化立即成功（沒有競爭），行為與 Engine 以同一組驗收測試驗證。容量 N 的資源在 Engine 中只限制同時持有的 run 數，**不提供檔案內容層級的協調**。使用存取端不改變 safe 或 unsafe 的判定。
 
 ## 錄製 IO 與 metadata 提案
 
@@ -99,7 +107,7 @@ run 結束後（失敗也有，但提案只反映失敗之前的 IO），在 `RU
 
 1. 涵蓋限度與錄製模式的說明。
 2. 「依據」表：每一項用到的檔案目錄與讀寫、主機、指令，以及次數。
-3. 「採用」：可直接貼上的三個 `@PipelineDefinition` 成員（`files`、`network`、`processes`），有 Kotlin 與 Java 兩種寫法。
+3. 「採用」：可直接貼上的 `@PipelineDefinition` 成員（`files`、`network`、`processes`，用過型別化資源時多一個 `typedResources`），有 Kotlin 與 Java 兩種寫法。
 
 採用步驟：
 
@@ -114,7 +122,7 @@ run 結束後（失敗也有，但提案只反映失敗之前的 IO），在 `RU
 
 - 只涵蓋這次執行走過的路徑；沒走到的分支用到的 IO 不在提案內，提案可能過窄。可用不同輸入多錄幾次，並自行合併。
 - 只涵蓋經由 context 的 IO。直接使用 JDK 的 IO 類別（例如 `java.io.File`、`java.net.Socket`、`ProcessBuilder`）不會被錄製；這類 IO 只會在靜態分析的 unsafe 判定中出現。
-- 提案不含共享資源、參數與 trigger。
+- 提案含用過的型別化資源（名稱與型別，`typedResources`；只記錄名稱、型別與讀或寫，不含路徑與內容），不含只宣告名稱的資源、容量、參數與 trigger。
 - 外部行程記錄的是 pipeline 傳給 context 的指令（第一個元素），原樣照錄；若寫的是路徑，提案裡就是該路徑。
 - 錄製資料只用來產生提案，不用於重放或 mock。
 - 在 IntelliJ IDEA 中加環境變數執行錄製，尚未實測。

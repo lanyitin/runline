@@ -8,10 +8,11 @@
 #   docker build -f deploy/docker/Dockerfile -t runline-engine engine/build/engine-dist
 FROM eclipse-temurin:25-jre
 
-# A dedicated unprivileged account. The two directories are the places the Engine writes to: the
-# shared root must be a volume (ADR-009), the run root is scratch space.
+# A dedicated unprivileged account. The three directories are the places the Engine writes to: the
+# shared root (ADR-009) and the resource root (the files of `file` shared resources, ADR-019) must
+# be volumes, the run root is scratch space. The three are siblings: none may be inside another.
 RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin runline \
-    && mkdir -p /var/lib/runline/shared /var/lib/runline/runs \
+    && mkdir -p /var/lib/runline/shared /var/lib/runline/runs /var/lib/runline/resources \
     && chown -R runline:runline /var/lib/runline
 
 # engine.jar and run-runtime/ stay two separate parts (ADR-001): run-runtime/ must not hold Engine
@@ -22,11 +23,12 @@ COPY --chown=root:root run-runtime/ /app/run-runtime/
 ENV RUNLINE_RUNTIME_DIR=/app/run-runtime \
     RUNLINE_SHARED_ROOT=/var/lib/runline/shared \
     RUNLINE_RUN_ROOT=/var/lib/runline/runs \
+    RUNLINE_RESOURCE_ROOT=/var/lib/runline/resources \
     PORT=8080
 
 USER runline
 EXPOSE 8080
-VOLUME /var/lib/runline/shared
+VOLUME /var/lib/runline/shared /var/lib/runline/resources
 
 # The JVM is the main process (PID 1, so it gets SIGTERM itself); exec form, no shell. The
 # migration and the health check use the same engine.jar with another main class (04 "Deployment

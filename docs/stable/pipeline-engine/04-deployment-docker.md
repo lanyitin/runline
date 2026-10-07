@@ -18,7 +18,7 @@
 |---|---|
 | `postgres` | PostgreSQL，資料磁碟區持久 |
 | 遷移（一次性） | 使用與 Engine 相同的產物與環境變數，先於 Engine 執行（`java -cp engine.jar dev.lawlan.runline.engine.db.MigrateKt`）；Engine 容器相依於「遷移成功完成」 |
-| `engine` | 相依遷移完成與資料庫健康；埠 8080；共享目錄掛載持久磁碟區（[ADR-009](adr/ADR-009-file-scopes.md)），run 私有目錄為暫存 |
+| `engine` | 相依遷移完成與資料庫健康；埠 8080；共享目錄掛載持久磁碟區（[ADR-009](adr/ADR-009-file-scopes.md)），資源根目錄（`/var/lib/runline/resources`，`RUNLINE_RESOURCE_ROOT` 由映像設定）掛載另一個持久磁碟區，run 私有目錄為暫存 |
 
 ## 設定項目與建議值
 
@@ -30,6 +30,12 @@
 | 重啟政策 | 除非手動停止否則重啟（`unless-stopped`） | 單機 Docker 只在行程結束時重啟 |
 | 停止等待（`stop_grace_period`） | `RUNLINE_SHUTDOWN_GRACE_SECONDS` 加 15 秒（預設 45 秒） | Docker 預設 10 秒不足 |
 | 結束代碼 | Engine 優雅關閉後以 0 結束 | 平台不需特例（已實作並由 `packagedTest` 驗證，見 [04](04-deployment.md)「部署入口」） |
+
+## 資源根目錄（`file` 型別共享資源）
+
+- 映像內有 `/var/lib/runline/resources`，擁有者是 Engine 的非特權帳號，`RUNLINE_RESOURCE_ROOT` 預設指向它；它是 `VOLUME`，Compose 把具名磁碟區 `resources` 掛在這裡。與共享目錄（`/var/lib/runline/shared`）、run 私有目錄（`/var/lib/runline/runs`）並列，三者互不包含（包含關係會使 Engine 啟動失敗）。
+- 磁碟區的備份、容量與還原由部署環境負責；`docker compose down -v` 會刪除它。容器重建（`up --force-recreate`）不影響其中的檔案。
+- 以真實 Docker 驗證：`./gradlew :engine:packagedTest --tests '*DockerResourceVolumeTest*'` 用 `deploy/docker/compose.yaml` 與 Dockerfile 建立整組服務，確認 Engine 以非特權帳號寫入掛載的根目錄，並在重建容器之後檔案仍在、檢查端點回報可用。
 
 ## 已接受的限度
 

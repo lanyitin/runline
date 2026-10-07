@@ -18,6 +18,7 @@ internal class EngineResourceObserver(
     private val runId: UUID,
     private val pipeline: String,
     private val traces: RunTelemetry,
+    private val telemetry: ResourceTelemetry,
 ) : ResourceObserver {
   private val log = LoggerFactory.getLogger(EngineResourceObserver::class.java)
 
@@ -25,6 +26,9 @@ internal class EngineResourceObserver(
   @Volatile var runLog: (String) -> Unit = {}
 
   override fun <T> operation(resource: String, type: String, operation: String, body: () -> T): T {
+    if (type == ResourceType.FILE.wireName) {
+      telemetry.fileOperation(ResourceLabel(resource, type))
+    }
     val span = traces.resourceOperation(runId, resource, type, operation)
     try {
       return body()
@@ -44,6 +48,9 @@ internal class EngineResourceObserver(
       errorId: String?,
       cause: Throwable?,
   ) {
+    if (type == ResourceType.FILE.wireName && failure == ResourceFailure.PATH_REJECTED) {
+      telemetry.pathCheckFailed(ResourceLabel(resource, type))
+    }
     log.warn(
         "Run {} (pipeline {}): {} on shared resource {} ({}) failed: {}{}",
         runId,

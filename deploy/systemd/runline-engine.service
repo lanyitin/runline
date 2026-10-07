@@ -14,8 +14,10 @@ Type=simple
 User=runline
 Group=runline
 EnvironmentFile=/etc/runline/runline.env
-# Persistent shared directories of pipelines (/var/lib/runline) and scratch run directories (/run/runline).
-StateDirectory=runline
+# Persistent shared directories of pipelines (/var/lib/runline), the persistent files of `file`
+# shared resources (/var/lib/runline-resources, beside it and not inside it) and scratch run
+# directories (/run/runline).
+StateDirectory=runline runline-resources
 RuntimeDirectory=runline
 ExecStart=/usr/bin/java -jar /opt/runline/engine.jar
 # Waits until the Engine answers ready (60 seconds in total, refused connections are waited out),

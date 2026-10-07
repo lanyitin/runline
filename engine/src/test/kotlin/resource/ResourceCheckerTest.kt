@@ -31,7 +31,8 @@ import kotlinx.serialization.json.JsonPrimitive
 class ResourceCheckerTest {
   private val root: Path = Files.createTempDirectory("check-root")
   private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
-  private val behaviors = ResourceBehaviors.forEngine(ResourceSettings(root, Duration.ofSeconds(1)))
+  private val behaviors =
+      ResourceBehaviors.forEngine(ResourceSettings(root, Duration.ofSeconds(1), 1024L * 1024))
   private val admin = ResourceAdmin(store, Clock.systemUTC(), behaviors) {}
   private val ops = ApiIdentity("ops", Role.ADMIN)
   private val reader = InMemoryMetricReader.create()

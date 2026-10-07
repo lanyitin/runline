@@ -127,6 +127,9 @@ retention:
 # not usable does not stop the Engine; the checks and the runs of the resources that need it fail.
 # RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS (optional, default 10): the longest a check of a resource's
 # entity (POST /api/v1/resources/{name}/check) may take; after it the check fails as a timeout.
+# RUNLINE_RESOURCE_MAX_READ_BYTES (optional, default 10485760): the most one read through a file
+# resource may return; a larger file fails the read as too large.
 resources:
   root: "$RUNLINE_RESOURCE_ROOT:"
   checkTimeoutSeconds: "$RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS:"
+  maxReadBytes: "$RUNLINE_RESOURCE_MAX_READ_BYTES:"

@@ -55,6 +55,7 @@ class RunHarness(
     shutdownGrace: Duration = Duration.ofSeconds(5),
     jarDirectory: Path? = null,
     openTelemetry: OpenTelemetry = OpenTelemetry.noop(),
+    maxReadBytes: Long = 10L * 1024 * 1024,
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -67,7 +68,9 @@ class RunHarness(
   /** Where the files of `file` resources live; a directory of its own, apart from the others. */
   val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
   val behaviors =
-      ResourceBehaviors.forEngine(ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10)))
+      ResourceBehaviors.forEngine(
+          ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10), maxReadBytes)
+      )
   val resourceAdmin =
       ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }
   val workspaceEvents = CopyOnWriteArrayList<WorkspaceEvent>()

@@ -317,6 +317,50 @@ class EngineConfigTest {
   }
 
   @Test
+  fun `one read of a file resource has a default size limit and the limit is configurable`() {
+    assertEquals(10L * 1024 * 1024, parse().resources.maxReadBytes)
+    assertEquals(
+        2048L,
+        parse("resources.maxReadBytes" to "2048").resources.maxReadBytes,
+    )
+    for (value in listOf("0", "-5", "big")) {
+      val e =
+          assertFailsWith<ConfigurationException>(value) {
+            parse("resources.maxReadBytes" to value)
+          }
+      assertTrue(e.message!!.contains("resources.maxReadBytes"), e.message)
+    }
+  }
+
+  @Test
+  fun `the resource root must not be, hold or lie inside the shared or the run directory`() {
+    val clashes =
+        listOf(
+            "workspace.sharedRoot" to "/var/lib/runline-resources",
+            "workspace.runRoot" to "/var/lib/runline-resources",
+            "workspace.sharedRoot" to "/var/lib/runline-resources/shared",
+            "workspace.runRoot" to "/var/lib/runline-resources/runs",
+            "workspace.sharedRoot" to "/var/lib",
+            "workspace.runRoot" to "/var/lib/runline-resources/../runline-resources",
+        )
+    for ((key, value) in clashes) {
+      val e = assertFailsWith<ConfigurationException>("$key=$value") { parse(key to value) }
+      assertTrue(e.message!!.contains("resources.root"), e.message)
+      assertTrue(e.message!!.contains(key), "$key missing from: ${e.message}")
+      assertFalse(e.message!!.contains(value), "no value in: ${e.message}")
+    }
+  }
+
+  @Test
+  fun `a resource root next to the shared and run directories, not in them, is fine`() {
+    parse(
+        "resources.root" to "/var/lib/runline/resources",
+        "workspace.sharedRoot" to "/var/lib/runline/shared",
+        "workspace.runRoot" to "/var/lib/runline/runs",
+    )
+  }
+
+  @Test
   fun `the wait for shared resources has a default limit`() {
     assertEquals(java.time.Duration.ofHours(1), parse().runs.resourceWaitTimeout)
   }

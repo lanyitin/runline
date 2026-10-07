@@ -150,7 +150,7 @@ abstract class AccessorBehaviorSuite {
   }
 
   @Test
-  fun `a directory swapped for a link to somewhere else is not followed and nothing lands outside`() {
+  fun `a link to somewhere else in place of a directory is never followed and nothing lands outside`() {
     rig.defineFile("log", "d/out.txt")
     val outside = Files.createTempDirectory("outside")
     val d = rig.resourceRoot.resolve("d").createDirectories()
@@ -167,10 +167,10 @@ abstract class AccessorBehaviorSuite {
             typed = mapOf("log" to "file"),
         )
 
-    assertTrue(outcome.succeeded, outcome.failure)
-    val written = outcome.shared("write")!!
-    assertTrue(written.startsWith("PATH_REJECTED|"), written)
-    assertFalse(written.contains(outside.toString()), written)
+    // The link is there before the run: a host that looks at the file when it prepares the run
+    // refuses it then, one that does not refuses the first operation; none follows it.
+    assertFalse(outcome.succeeded, "the run must not get an accessor to a file outside the root")
+    assertTrue(outcome.shared("write") == null, "the body must not have run")
     assertFalse(outside.resolve("out.txt").exists())
   }
 
@@ -230,5 +230,24 @@ abstract class AccessorBehaviorSuite {
     } else {
       assertNull(outcome.recorded, "only the development entry records")
     }
+  }
+
+  @Test
+  fun `a file bigger than one read may return fails the read as too large`() {
+    rig.defineFile("log", "big.txt")
+    Files.write(rig.resourceRoot.resolve("big.txt"), ByteArray(10 * 1024 * 1024 + 1))
+
+    val outcome =
+        rig.run(
+            """
+            ${failureOf("context.getAccessors().file(\"log\").readText();")}
+            ${write("read")}
+            """
+                .trimIndent(),
+            typed = mapOf("log" to "file"),
+        )
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertTrue(outcome.shared("read")!!.startsWith("TOO_LARGE|"), outcome.shared("read"))
   }
 }

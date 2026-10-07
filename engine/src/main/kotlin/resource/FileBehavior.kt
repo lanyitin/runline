@@ -5,7 +5,6 @@ import dev.lawlan.runline.accessors.FileEntity
 import dev.lawlan.runline.accessors.FileProbe
 import dev.lawlan.runline.accessors.FileProblem
 import dev.lawlan.runline.accessors.ResourceBinding
-import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlinx.serialization.json.JsonObject
@@ -15,19 +14,26 @@ import kotlinx.serialization.json.JsonPrimitive
  * One file under the resource root (ADR-019). The settings are the path of the file, relative to
  * the root; the type has no secret.
  */
-internal class FileBehavior(private val root: Path) : ResourceBehavior {
+internal class FileBehavior(private val root: Path, private val maxReadBytes: Long) :
+    ResourceBehavior {
   override fun problemWith(settings: JsonObject?, secretAlias: String?): InvalidResource? {
     if (secretAlias != null) return InvalidResource.INVALID_SECRET_ALIAS
     val path = pathOf(settings) ?: return InvalidResource.INVALID_SETTINGS
     if (!isInsideRoot(path)) return InvalidResource.PATH_OUTSIDE_ROOT
-    return null
+    // As it is on the file system now, links resolved; nothing is opened, so nothing can block.
+    return when (FileProbe.check(root, path, open = false)) {
+      null -> null
+      FileProblem.PATH_OUTSIDE_ROOT -> InvalidResource.PATH_OUTSIDE_ROOT
+      else -> InvalidResource.PATH_UNUSABLE
+    }
   }
 
   override fun bind(resource: SharedResource): ResourceBinding {
-    if (!Files.isDirectory(root) || !Files.isReadable(root) || !Files.isWritable(root)) {
-      throw ResourceUnavailable(resource.name)
-    }
-    return FileBinding(FileEntity(root, checkNotNull(pathOf(resource.settings))))
+    val path = checkNotNull(pathOf(resource.settings))
+    // Without opening anything, so that a run that is about to start can never be held up by a
+    // file.
+    if (FileProbe.check(root, path, open = false) != null) throw ResourceUnavailable(resource.name)
+    return FileBinding(FileEntity(root, path, maxReadBytes))
   }
 
   override fun check(resource: SharedResource): CheckFailure? =

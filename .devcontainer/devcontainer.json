@@ -12,6 +12,7 @@
     "POSTGRES_PASSWORD": "runline",
     "RUNLINE_SHARED_ROOT": "/var/tmp/runline/shared",
     "RUNLINE_RUN_ROOT": "/var/tmp/runline/runs",
+    "RUNLINE_RESOURCE_ROOT": "/var/tmp/runline/resources",
     "RUNLINE_WORKSPACE_MAX_BYTES": "1073741824",
     "RUNLINE_FAILED_RUN_RETENTION_SECONDS": "86400",
     "RUNLINE_MAX_CONCURRENT_RUNS": "4",

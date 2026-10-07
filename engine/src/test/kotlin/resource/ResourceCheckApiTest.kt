@@ -162,4 +162,34 @@ class ResourceCheckApiTest : ResourceApiSupport() {
         assertTrue(tookMs in 900..8_000, "took $tookMs ms for a limit of 1000")
         assertEquals("timeout", resource("pipe")["lastCheck"]!!.jsonObject.text("failure"))
       }
+
+  @Test
+  fun `an Engine whose resource root is missing starts, and says so when a file resource is defined or checked`() =
+      testApplication {
+        engineWithRoot()
+        define("gate", 1)
+        defineFile("log", "out.txt")
+        val gone = root.resolveSibling(root.fileName.toString() + "-gone")
+        Files.move(root, gone)
+        try {
+          val ready = client.get("/api/v1/health/ready")
+          assertEquals(HttpStatusCode.OK, ready.status)
+          assertEquals("root_unavailable", check("log").json().text("failure"))
+          assertEquals(JsonPrimitive(true), check("gate").json()["ok"], "a counter needs no root")
+          val refused = defineFile("other", "x.txt")
+          assertEquals(HttpStatusCode.UnprocessableEntity, refused.status)
+          assertEquals("path_unusable", refused.json().text("problem"))
+        } finally {
+          Files.move(gone, root)
+        }
+      }
+
+  @Test
+  fun `an Engine started with a root that does not exist is ready and serves everything else`() =
+      testApplication {
+        engine("resources.root" to root.resolve("never-made").toString())
+
+        assertEquals(HttpStatusCode.OK, client.get("/api/v1/health/ready").status)
+        assertEquals(HttpStatusCode.Created, define("gate", 1).status)
+      }
 }

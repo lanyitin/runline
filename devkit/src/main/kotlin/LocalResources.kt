@@ -3,6 +3,7 @@ package dev.lawlan.runline.devkit
 import dev.lawlan.runline.accessors.BoundResources
 import dev.lawlan.runline.accessors.FileBinding
 import dev.lawlan.runline.accessors.FileEntity
+import dev.lawlan.runline.accessors.FileProbe
 import dev.lawlan.runline.accessors.Invalidation
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceObserver
@@ -66,7 +67,14 @@ internal class LocalResources(
       }
       if (type == ResourceTypes.FILE) {
         Files.createDirectories(settings.root)
-        bindings[name] = FileBinding(FileEntity(settings.root, checkNotNull(local.path)))
+        val path = checkNotNull(local.path)
+        // The same look at the file the Engine takes when it prepares a run (nothing is opened).
+        FileProbe.check(settings.root, path, open = false)?.let {
+          throw LocalResourceProblem(
+              "The file resource '$name' cannot be used: $it (its file is below RUNLINE_RESOURCE_ROOT)."
+          )
+        }
+        bindings[name] = FileBinding(FileEntity(settings.root, path))
       }
     }
     return if (bindings.isEmpty()) null else BoundResources(bindings, ConsoleObserver(out))

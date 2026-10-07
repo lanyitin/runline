@@ -10,7 +10,7 @@
 | 執行環境 | 主機安裝 JDK 25；不需要 Node |
 | 服務帳號 | 專用的非特權帳號 |
 | 組態與密鑰 | 環境檔提供環境變數，權限限制為服務帳號可讀；不寫在單元檔中（12-Factor） |
-| 目錄 | 共享目錄用持久的狀態目錄（[ADR-009](adr/ADR-009-file-scopes.md)），run 私有目錄用暫存目錄 |
+| 目錄 | 共享目錄用持久的狀態目錄（[ADR-009](adr/ADR-009-file-scopes.md)），`file` 資源的根目錄用另一個持久的狀態目錄（`StateDirectory=runline runline-resources`，位置 `/var/lib/runline-resources`，與 `/var/lib/runline` 並列而不在其中），run 私有目錄用暫存目錄 |
 
 ## 單元與相依
 
@@ -30,6 +30,10 @@
 | 停止等待（`TimeoutStopSec`） | `RUNLINE_SHUTDOWN_GRACE_SECONDS` 加 15 秒（預設 45 秒） | 預設 90 秒夠用，仍建議明確設定並與寬限時間連動 |
 | 就緒等待 | 啟動後步驟輪詢就緒探測（可用 `java -cp engine.jar dev.lawlan.runline.engine.HealthCheckKt ready`，以結束代碼判斷），總逾時 60 秒，逾時則單元失敗 | 讓相依單元等到就緒；Engine 啟動完成前尚未綁定連接埠，輪詢會得到連線被拒，須視為「繼續等待」而不是失敗；腳本由 `deploy/` 提供 |
 | 存活檢查（選用） | 計時器 15 秒、單次逾時 3 秒、連續失敗 3 次後重啟 | 取代 `WatchdogSec`（不採用，JVM 需 sd_notify 支援）|
+
+## 資源根目錄（`file` 型別共享資源）
+
+`runline.env.example` 設定 `RUNLINE_RESOURCE_ROOT=/var/lib/runline-resources`，單元的 `StateDirectory=runline runline-resources` 在啟動時建立並交給服務帳號。三個目錄（共享、資源、run 私有）不得互為上下層；注意 `/var/lib/runline-resources` 與 `/var/lib/runline` 是並列的兩個目錄，不是父子。備份、容量與還原由營運者負責。這份單元檔的 `StateDirectory` 與目錄所有權**沒有**在 systemd 上實測過（開發環境沒有 systemd），Docker 版本以真實 Docker 驗證。
 
 ## 已接受的限度
 

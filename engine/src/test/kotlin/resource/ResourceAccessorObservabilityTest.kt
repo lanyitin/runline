@@ -21,6 +21,7 @@ import kotlin.test.*
 class ResourceAccessorObservabilityTest {
   private val spans = InMemorySpanExporter.create()
   private val logs = CapturedLogs()
+  private val metrics = io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader.create()
   private val otel =
       OpenTelemetrySdk.builder()
           .setTracerProvider(
@@ -28,7 +29,29 @@ class ResourceAccessorObservabilityTest {
                   .addSpanProcessor(SimpleSpanProcessor.create(spans))
                   .build()
           )
+          .setMeterProvider(
+              io.opentelemetry.sdk.metrics.SdkMeterProvider.builder()
+                  .registerMetricReader(metrics)
+                  .build()
+          )
           .build()
+
+  /** The sum of a counter's points of [resource]; the labels are checked to be name and type. */
+  private fun count(metric: String, resource: String): Long {
+    val points =
+        metrics
+            .collectAllMetrics()
+            .firstOrNull { it.name == metric }
+            ?.longSumData
+            ?.points
+            ?.filter { it.attributes.asMap().values.contains(resource) }
+            .orEmpty()
+    points.forEach {
+      assertEquals(setOf("resource", "type"), it.attributes.asMap().keys.map { k -> k.key }.toSet())
+    }
+    return points.sumOf { it.value }
+  }
+
   private val h =
       RunHarness(
           maxConcurrent = 2,
@@ -134,5 +157,30 @@ class ResourceAccessorObservabilityTest {
     val lines = runLog(id).joinToString("\n")
     assertTrue(lines.contains("強制釋放"), lines)
     assertTrue(logs.lines.any { it.contains("released by force") && it.contains("ops") })
+  }
+
+  @Test
+  fun `operations on a file are counted by resource and type`() {
+    ran()
+
+    assertEquals(1L, count("runline.resources.file.operations", "log"))
+    assertEquals(1L, count("runline.resources.file.operations", "broken"))
+  }
+
+  @Test
+  fun `a path that fails its look is counted, at the start of a run`() {
+    h.defineFile("log", "d/out.txt")
+    val hash =
+        h.upload(
+            "needs",
+            "context.getAccessors().file(\"log\").writeText(\"x\");",
+            declaration = usingTyped("log" to "file"),
+        )
+    Files.writeString(h.resourceRoot.resolve("d"), "in the way")
+
+    assertEquals(RunState.FAILED, h.awaitEnd(h.start(hash, "needs")).state)
+
+    assertEquals(1L, count("runline.resources.file.path_check_failures", "log"))
+    assertEquals(0L, count("runline.resources.file.operations", "log"))
   }
 }

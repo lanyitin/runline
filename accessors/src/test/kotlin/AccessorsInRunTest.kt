@@ -16,6 +16,7 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
+import kotlin.io.path.readBytes
 import kotlin.io.path.readText
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -191,5 +192,59 @@ class AccessorsInRunTest {
     assertEquals(RunStatus.SUCCEEDED, running.result.get(30, TimeUnit.SECONDS).status)
     assertEquals("FORCE_RELEASED", shared("forced", "after-outcome").readText())
     assertEquals("before", resourceRoot.resolve("notes.txt").readText())
+  }
+
+  @Test
+  fun `bytes and text, written, appended to and read, come out as they went in`() {
+    val jar =
+        jar(
+            "forms",
+            """
+            FileAccessor notes = context.getAccessors().file("notes");
+            notes.writeText("one");
+            notes.appendText("-two");
+            String text = notes.readText();
+            notes.writeBytes(new byte[] {1, 2, 3});
+            notes.appendBytes(new byte[] {4});
+            byte[] bytes = notes.readBytes();
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "seen.txt",
+                text + "|" + java.util.Arrays.toString(bytes));
+            """
+                .trimIndent(),
+        )
+
+    val result = run(jar, fileHost("notes" to "notes.txt"))
+
+    assertEquals(RunStatus.SUCCEEDED, result.status, result.failure?.trace)
+    assertEquals("one-two|[1, 2, 3, 4]", shared("forms", "seen.txt").readText())
+    assertEquals(listOf<Byte>(1, 2, 3, 4), resourceRoot.resolve("notes.txt").readBytes().toList())
+  }
+
+  @Test
+  fun `a read of a file beyond the limit fails as too large and returns nothing of it`() {
+    val host =
+        BoundResources(
+            mapOf("notes" to FileBinding(FileEntity(resourceRoot, "big.txt", maxReadBytes = 10)))
+        )
+    val jar =
+        jar(
+            "big",
+            """
+            FileAccessor notes = context.getAccessors().file("notes");
+            notes.writeText("0123456789");
+            String atLimit = notes.readText();
+            notes.appendText("x");
+            String result = "ok";
+            try { notes.readText(); } catch (ResourceAccessException e) { result = e.getFailure().name(); }
+            try { notes.readBytes(); } catch (ResourceAccessException e) { result = result + "," + e.getFailure().name(); }
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "seen.txt", atLimit + "|" + result);
+            """
+                .trimIndent(),
+        )
+
+    val result = run(jar, host)
+
+    assertEquals(RunStatus.SUCCEEDED, result.status, result.failure?.trace)
+    assertEquals("0123456789|TOO_LARGE,TOO_LARGE", shared("big", "seen.txt").readText())
   }
 }

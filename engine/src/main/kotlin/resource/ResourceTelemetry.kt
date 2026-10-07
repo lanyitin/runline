@@ -51,6 +51,21 @@ class ResourceTelemetry(openTelemetry: OpenTelemetry) {
           .setDescription("Checks of a resource's entity that did not pass")
           .build()
 
+  private val fileOperations =
+      meter
+          .counterBuilder("runline.resources.file.operations")
+          .setDescription("Operations through accessors of file resources (name and type only)")
+          .build()
+  private val pathCheckFailures =
+      meter
+          .counterBuilder("runline.resources.file.path_check_failures")
+          .setDescription("Looks at the path of a file resource that found it unusable or outside")
+          .build()
+
+  fun fileOperation(resource: ResourceLabel) = fileOperations.add(1, resource.attributes())
+
+  fun pathCheckFailed(resource: ResourceLabel) = pathCheckFailures.add(1, resource.attributes())
+
   /** An administrator's check of [resource] ended; the category of a failure is in the log. */
   fun checked(resource: ResourceLabel, ok: Boolean) {
     checks.add(1, resource.attributes())

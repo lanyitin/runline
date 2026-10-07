@@ -25,11 +25,12 @@ enum class FileProblem {
 object FileProbe {
   /**
    * What stops the file at [relative] below [root] from being used, or null. Nothing is made or
-   * changed. An existing file is really opened, for reading and for writing (without creating or
-   * truncating anything), which is the only honest way to know; so a file that blocks an open (a
-   * named pipe nobody is at the other end of) blocks this call, and the caller sets the limit.
+   * changed. With [open] an existing file is really opened, for reading and for writing (without
+   * creating or truncating anything), which is the only honest way to know; so a file that blocks
+   * an open (a named pipe nobody is at the other end of) blocks this call, and the caller sets the
+   * limit. Without it the file system is only asked about permissions, which never blocks.
    */
-  fun check(root: Path, relative: String): FileProblem? {
+  fun check(root: Path, relative: String, open: Boolean = true): FileProblem? {
     if (!Files.isDirectory(root) || !Files.isReadable(root) || !Files.isWritable(root)) {
       return FileProblem.ROOT_UNAVAILABLE
     }
@@ -40,6 +41,10 @@ object FileProbe {
           return FileProblem.PATH_OUTSIDE_ROOT
         }
     if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return checkParent(file)
+    if (!open) {
+      val usable = Files.isReadable(file) && Files.isWritable(file)
+      return if (usable) null else FileProblem.NOT_READABLE_WRITABLE
+    }
     return try {
       Files.newByteChannel(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).close()
       Files.newByteChannel(file, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS).close()

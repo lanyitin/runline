@@ -9,9 +9,22 @@ interface Accessors {
 
 /** Controlled access to the one file behind a `file` resource; the path is never exposed. */
 interface FileAccessor {
+  /**
+   * The whole file as UTF-8 text; fails with [ResourceFailure.TOO_LARGE] beyond the host's limit.
+   */
   fun readText(): String
 
+  fun readBytes(): ByteArray
+
+  /** Replaces the content of the file, making the file if it is not there. */
   fun writeText(text: String)
+
+  fun writeBytes(bytes: ByteArray)
+
+  /** Adds to the end of the file, making the file if it is not there. */
+  fun appendText(text: String)
+
+  fun appendBytes(bytes: ByteArray)
 }
 
 /** Why an accessor refused to be used or an operation on it failed. */
@@ -29,6 +42,9 @@ enum class ResourceFailure {
 
   /** The path of the file leads out of the resource root, which no operation may do. */
   PATH_REJECTED,
+
+  /** The file is larger than a single read may return. */
+  TOO_LARGE,
 
   /** The file the resource names does not exist (yet). */
   NOT_FOUND,

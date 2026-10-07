@@ -9,10 +9,19 @@ class FileBinding(private val entity: FileEntity) : ResourceBinding {
   override fun execute(operation: String, arguments: Map<String, Any?>): Any? =
       when (operation) {
         "file.read" -> entity.readBytes().decodeToString()
-        "file.write" -> {
-          entity.writeBytes((arguments["text"] as String).encodeToByteArray())
-          null // an answer holds JDK types only, which Unit is not
-        }
+        "file.readBytes" -> entity.readBytes()
+        "file.write" ->
+            done { entity.writeBytes((arguments["text"] as String).encodeToByteArray()) }
+        "file.writeBytes" -> done { entity.writeBytes(arguments["bytes"] as ByteArray) }
+        "file.append" ->
+            done { entity.appendBytes((arguments["text"] as String).encodeToByteArray()) }
+        "file.appendBytes" -> done { entity.appendBytes(arguments["bytes"] as ByteArray) }
         else -> error("unknown operation $operation")
       }
+
+  /** An answer holds JDK types only, which Unit is not. */
+  private fun done(action: () -> Unit): Any? {
+    action()
+    return null
+  }
 }

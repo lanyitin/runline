@@ -22,26 +22,46 @@ import java.nio.file.StandardOpenOption
  * their own to be swapped; closing it fully needs `openat` on a directory descriptor, which the JDK
  * does not offer.
  */
-class FileEntity(private val root: Path, private val relative: String) {
+class FileEntity(
+    private val root: Path,
+    private val relative: String,
+    private val maxReadBytes: Long = DEFAULT_MAX_READ_BYTES,
+) {
   fun readBytes(): ByteArray = io {
     val file = Confinement.locate(root, relative, createParents = false)
     Files.newByteChannel(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use {
-      java.nio.channels.Channels.newInputStream(it).readAllBytes()
+      // One byte more than the limit is read, so a file over it is told from one exactly at it.
+      val bytes = java.nio.channels.Channels.newInputStream(it).readNBytes(limitPlusOne())
+      if (bytes.size > maxReadBytes) throw ResourceOperationFailure(ResourceFailure.TOO_LARGE)
+      bytes
     }
   }
 
-  fun writeBytes(bytes: ByteArray) {
+  private fun limitPlusOne(): Int =
+      if (maxReadBytes >= Int.MAX_VALUE - 8) Int.MAX_VALUE - 8 else (maxReadBytes + 1).toInt()
+
+  fun writeBytes(bytes: ByteArray) = put(bytes, StandardOpenOption.TRUNCATE_EXISTING)
+
+  /** Adds [bytes] to the end of the file, making it when it is not there. */
+  fun appendBytes(bytes: ByteArray) = put(bytes, StandardOpenOption.APPEND)
+
+  private fun put(bytes: ByteArray, mode: StandardOpenOption) {
     io {
       val file = Confinement.locate(root, relative, createParents = true)
       Files.newByteChannel(
               file,
               StandardOpenOption.WRITE,
               StandardOpenOption.CREATE,
-              StandardOpenOption.TRUNCATE_EXISTING,
+              mode,
               LinkOption.NOFOLLOW_LINKS,
           )
           .use { it.write(java.nio.ByteBuffer.wrap(bytes)) }
     }
+  }
+
+  companion object {
+    /** The most one read returns unless the host says otherwise: 10 MiB. */
+    const val DEFAULT_MAX_READ_BYTES = 10L * 1024 * 1024
   }
 
   /** What went wrong on the file system, as a category; the exception goes along for the log. */

@@ -30,6 +30,9 @@ enum class InvalidResource(val problem: String) {
   /** The path of a `file` resource is not inside the resource root (ADR-019). */
   PATH_OUTSIDE_ROOT("path_outside_root"),
 
+  /** The path of a `file` resource cannot be used now: no root, no directory, or no access. */
+  PATH_UNUSABLE("path_unusable"),
+
   /** A change of name: a resource is identified by its name for good. */
   IMMUTABLE_NAME("immutable_name"),
 

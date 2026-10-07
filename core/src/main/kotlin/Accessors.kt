@@ -183,7 +183,9 @@ enum class ResourceFailure {
 }
 
 /** Thrown by an accessor; carries the failure category and never a path or system message. */
-class ResourceAccessException(
+class ResourceAccessException
+@JvmOverloads
+constructor(
     val resource: String,
     val failure: ResourceFailure,
     val errorId: String? = null,

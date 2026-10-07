@@ -1,6 +1,7 @@
 [versions]
 cron-utils = "9.2.1"
 flyway = "13.9.0"
+kotlinx-serialization = "1.11.0"
 kotlin = "2.4.0"
 ktfmt-gradle = "0.27.0"
 logback = "1.5.37"
@@ -14,6 +15,7 @@ testcontainers = "2.0.5"
 cron-utils = { module = "com.cronutils:cron-utils", version.ref = "cron-utils" }
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 opentelemetry-exporterOtlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
 opentelemetry-ktorInstrumentation = { module = "io.opentelemetry.instrumentation:opentelemetry-ktor-3.0", version.ref = "opentelemetry-ktor" }

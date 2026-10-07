@@ -12,6 +12,8 @@ kotlin { jvmToolchain(25) }
 dependencies {
   implementation(project(":core"))
   implementation(project(":runner"))
+  // The JSON of the requests an `openai-compatible` resource merges and the answers it reads.
+  implementation(libs.kotlinx.serialization.json)
 
   // The behavior every host of accessors must show, run by the Engine's and the development
   // entry's own tests (WI-43): the same acceptance tests for both.

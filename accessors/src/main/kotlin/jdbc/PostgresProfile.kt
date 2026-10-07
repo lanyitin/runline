@@ -101,7 +101,9 @@ object PostgresProfile : JdbcProfile {
           state == "08001" && e.hasCause<SocketTimeoutException>() ->
               ResourceFailure.CONNECT_TIMEOUT
           // The account or the password is not accepted (class 28, "invalid authorization").
-          state != null && state.startsWith("28") -> ResourceFailure.DENIED
+          // 08004 is the driver's "the server rejected the connection": no password for the method
+          // the server asks for, or a rule of the server that does not let the account in.
+          state != null && state.startsWith("28") || state == "08004" -> ResourceFailure.DENIED
           // Class 08 is "connection exception"; 53300 is too many connections, 57P01 to 57P03 is a
           // server that is shutting down or not yet up.
           state != null && state.startsWith("08") -> ResourceFailure.CONNECTION_FAILED

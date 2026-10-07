@@ -75,13 +75,7 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
       credential: JdbcCredential,
       capacity: Int,
   ): JdbcConnectionPool {
-    val url = profile.url(settings.host, settings.port, settings.database)
     val password = (credential as? JdbcCredential.Password)?.value
-    val prepare = { connection: Connection ->
-      connection.createStatement().use { statement ->
-        profile.startStatements(settings.properties).forEach { statement.execute(it) }
-      }
-    }
     val clean = { connection: Connection ->
       // Nothing of a transaction, then everything of the session, then what the Engine wants of
       // it; and only a connection that is open, in autocommit and answers is kept.
@@ -94,28 +88,12 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
             connection.createStatement().use { statement ->
               profile.resetStatements.forEach { statement.execute(it) }
             }
-            prepare(connection)
+            JdbcConnector.start(profile, settings, connection)
             connection.autoCommit && connection.isValid(5)
           }
     }
     return JdbcConnectionPool(capacity * settings.connectionsPerRun, clean) {
-      val connection =
-          profile.connect(
-              url,
-              profile.properties(
-                  settings.username,
-                  password,
-                  settings.connectTimeoutMillis,
-                  settings.properties,
-              ),
-          )
-      try {
-        prepare(connection)
-      } catch (e: Throwable) {
-        runCatching { connection.close() }
-        throw e
-      }
-      connection
+      JdbcConnector.open(profile, settings, password)
     }
   }
 

@@ -441,4 +441,24 @@ class OpenAiBindingStreamTest {
     val e2 = failure { generateSequence { next(byPipeline, asked as Map<String, Any?>) }.toList() }
     assertEquals(ResourceFailure.TOTAL_TIMEOUT, e2.failure)
   }
+
+  @Test
+  fun `one event larger than the resource keeps in memory ends the stream as too large`() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.event("small")
+      response.event("x".repeat(5000))
+      response.hang()
+      true
+    }
+    val b = binding("\"maxResponseBytes\":1000")
+    val opened = open(b)
+
+    val first = next(b, opened)
+    val e = failure { next(b, opened) }
+
+    assertEquals("small", first)
+    assertEquals(ResourceFailure.RESPONSE_TOO_LARGE, e.failure)
+    await("the service to see the connection go") { server.clientsGone == 1 }
+  }
 }

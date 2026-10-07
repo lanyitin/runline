@@ -397,7 +397,7 @@ class OpenAiBinding(
   ): Map<String, Any?> {
     val wire = Wire(call, response.body(), sentAt)
     val id = streamIds.incrementAndGet()
-    val events = ServerSentEvents { wire.read(it) }
+    val events = ServerSentEvents(settings.maxResponseBytes.toInt()) { wire.read(it) }
     val headers = answerHeaders(response.headers().map())
     val opened = OpenStream(call, report, endpoint, events)
     call.owner = opened

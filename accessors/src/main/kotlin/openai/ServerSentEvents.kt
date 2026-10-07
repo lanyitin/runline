@@ -1,5 +1,7 @@
 package dev.lawlan.runline.accessors.openai
 
+import dev.lawlan.runline.accessors.ResourceOperationFailure
+import dev.lawlan.runline.core.ResourceFailure
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 
@@ -8,7 +10,11 @@ import java.nio.charset.StandardCharsets
  * with what has come and returns how many bytes that is, or -1 at the end. An event is the text of
  * its `data` lines.
  */
-internal class ServerSentEvents(private val read: (ByteArray) -> Int) {
+internal class ServerSentEvents(
+    /** The most bytes one event may take; a longer one fails with RESPONSE_TOO_LARGE. */
+    private val maxEventBytes: Int = Int.MAX_VALUE,
+    private val read: (ByteArray) -> Int,
+) {
   private val buffer = ByteArray(BUFFER)
   private var position = 0
   private var limit = 0
@@ -26,6 +32,7 @@ internal class ServerSentEvents(private val read: (ByteArray) -> Int) {
       if (line.startsWith("data:")) {
         if (any) data.append('\n')
         data.append(line.removePrefix("data:").removePrefix(" "))
+        if (data.length > maxEventBytes) throw tooLarge()
         any = true
       }
     }
@@ -44,9 +51,12 @@ internal class ServerSentEvents(private val read: (ByteArray) -> Int) {
       }
       val b = buffer[position++]
       if (b == '\n'.code.toByte()) return out.toString(StandardCharsets.UTF_8).removeSuffix("\r")
+      if (out.size() >= maxEventBytes) throw tooLarge()
       out.write(b.toInt())
     }
   }
+
+  private fun tooLarge() = ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE)
 
   private companion object {
     const val BUFFER = 8 * 1024

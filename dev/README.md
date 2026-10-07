@@ -51,6 +51,7 @@ Engine 的設定全由環境變數給（腳本把它們備齊；全是本機示�
 | `demo-unsafe.jar` | `demo-unsafe` | **UNSAFE**：原因為網路與行程未設限（`UNRESTRICTED_ACCESS`）與 `java.io.File` 不在白名單（`NOT_ALLOW_LISTED`） | 判定原因；以開發人員建 run 得 409 `unsafe_not_allowed`；用 admin token 在 unsafe 設定允許後，run 才能建立並成功（只印出暫存目錄是否存在） |
 | `demo-resource.jar` | `demo-resource` | SAFE，宣告共享資源 `demo-printer`，持有約 20 秒 | 上傳後有警告「尚未定義」；建 run 得 409 `resources_unavailable`；admin 在共享資源頁定義 `demo-printer`（容量 1）後可建；連建兩個 run，第二個為 WAITING_FOR_RESOURCES；停用資源則等待中的 run 失敗、新 run 再得 409 |
 | `demo-typed.jar` | `demo-typed` | SAFE，宣告共享資源 `demo-printer` 並期望它是 `file` 型別 | `demo-printer` 定義為計數（counter）時，pipeline 頁的資源宣告顯示「已定義為其他型別」並有警告 `resource_type_mismatch`，建 run 被拒；資源頁的 `demo-printer` 卡片在宣告者中列出它與期望的型別（WI-49） |
+| `demo-usage.jar` | `demo-pool-usage`、`demo-llm-usage` | SAFE，分別使用 `jdbc-pool` 資源 `demo-db`（查詢一次後持有連線 `holdSeconds` 秒）與 `openai-compatible` 資源 `demo-llm`（一次 chat completion） | 需先定義 `demo-db` 與 `demo-llm`；run 進行中，資源頁卡片顯示使用中的連線數與進行中的請求數（WI-50）；未定義時建 run 被拒 |
 
 建議流程：
 

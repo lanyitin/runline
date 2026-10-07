@@ -55,7 +55,6 @@
   id="openai-base-url"
   label={i18n.t('resources.setting.baseUrl')}
   help={i18n.t('resources.form.openai.baseUrl.help')}
-  placeholder="http://localhost:8000/api/v1"
   error={errors['openai-base-url']}
   bind:value={fields.baseUrl}
   oninput={() => onchange('openai-base-url', 'openai-settings')}

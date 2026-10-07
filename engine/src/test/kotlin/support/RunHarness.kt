@@ -65,8 +65,13 @@ class RunHarness(
     /** What each of a run's two directories may hold. */
     maxBytesPerScope: Long = 1_000_000,
     /** What the Engine does with what `jdbc-pool` statements report; nothing by default. */
-    jdbcObserver: dev.lawlan.runline.accessors.jdbc.JdbcObserver =
-        dev.lawlan.runline.accessors.jdbc.JdbcObserver.NONE,
+    jdbcObserverFor:
+        (
+            dev.lawlan.runline.accessors.jdbc.JdbcPools
+        ) -> dev.lawlan.runline.accessors.jdbc.JdbcObserver =
+        {
+          dev.lawlan.runline.accessors.jdbc.JdbcObserver.NONE
+        },
     /** The databases the Engine carries a profile for. */
     jdbcProfiles: dev.lawlan.runline.accessors.jdbc.JdbcProfiles =
         dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
@@ -91,7 +96,7 @@ class RunHarness(
           openAiObserver,
           jdbcProfiles,
           jdbcPools,
-          jdbcObserver,
+          jdbcObserverFor(jdbcPools),
       )
   val resourceAdmin =
       ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }

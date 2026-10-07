@@ -461,4 +461,39 @@ class OpenAiBindingStreamTest {
     assertEquals(ResourceFailure.RESPONSE_TOO_LARGE, e.failure)
     await("the service to see the connection go") { server.clientsGone == 1 }
   }
+
+  @Test
+  fun `a stream is asked for as an event stream, with the key and the headers of the resource and nothing of the pipeline's`() {
+    val b =
+        OpenAiBinding(
+            "lemon",
+            (OpenAiSettings.parse(
+                    Json.parseToJsonElement(
+                            """{"baseUrl":"${server.baseUrl}","organization":"org-1","headers":{"X-Team":"blue"}}"""
+                        )
+                        .jsonObject
+                ) as SettingsResult.Valid)
+                .settings,
+            OpenAiCredential.Key("sk-stream-0123456789"),
+        )
+    bindings += b
+
+    val opened =
+        b.execute(
+            "openai.stream.open",
+            mapOf(
+                "endpoint" to "chat.completions",
+                "body" to "{}",
+                "headers" to mapOf("Authorization" to "Bearer evil"),
+            ),
+        ) as Map<String, Any?>
+    next(b, opened)
+
+    val seen = server.requests.single()
+    assertEquals("text/event-stream", seen.header("accept"))
+    assertEquals("Bearer sk-stream-0123456789", seen.header("authorization"))
+    assertEquals(1, seen.headers["authorization"]!!.size)
+    assertEquals("org-1", seen.header("openai-organization"))
+    assertEquals("blue", seen.header("x-team"))
+  }
 }

@@ -306,7 +306,8 @@ class OpenAiBinding(
     var hops = 0
     while (true) {
       val client = clientFor(call.limits.connectMillis)
-      val response = awaitHeaders(call, client, request(uri, method, body, call.limits))
+      val response =
+          awaitHeaders(call, client, request(uri, method, body, call.limits, plan.streaming))
       val status = response.statusCode()
       call.stream = response.body()
       report.status = status
@@ -495,9 +496,10 @@ class OpenAiBinding(
       method: String,
       body: ByteArray?,
       limits: OpenAiLimits,
+      streaming: Boolean,
   ): HttpRequest {
     val builder = HttpRequest.newBuilder(uri).timeout(Duration.ofMillis(limits.firstByteMillis))
-    builder.header("Accept", "application/json")
+    builder.header("Accept", if (streaming) "text/event-stream" else "application/json")
     if (body != null) builder.header("Content-Type", "application/json")
     (credential as? OpenAiCredential.Key)?.let {
       builder.header("Authorization", "Bearer ${it.value}")

@@ -17,5 +17,6 @@ class RealOpenAiServerContractTest : OpenAiServerContract() {
           System.getenv("RUNLINE_OPENAI_CONTRACT_URL"),
           System.getenv("RUNLINE_OPENAI_CONTRACT_MODEL") ?: "default",
           System.getenv("RUNLINE_OPENAI_CONTRACT_KEY")?.takeIf { it.isNotEmpty() },
+          missingEndpointsAllowed = true,
       )
 }

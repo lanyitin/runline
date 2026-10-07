@@ -24,9 +24,34 @@ class FakeRequest(
     /** The request target as sent: path and query. */
     val target: String,
     val headers: Map<String, List<String>>,
-    val body: String,
+    /** The body exactly as it came, bytes. */
+    val rawBody: ByteArray,
 ) {
+  /** The body as text, for the requests that are JSON. */
+  val body: String = rawBody.toString(StandardCharsets.UTF_8)
+
   val path: String = target.substringBefore('?')
+
+  /**
+   * The parts of a `multipart/form-data` body, read the way a server reads them: null when the body
+   * is not multipart, or is not well formed (a server answers that with a 400).
+   */
+  val parts: List<FakePart>? by lazy {
+    val type = header("content-type") ?: return@lazy null
+    if (!type.lowercase().startsWith("multipart/form-data")) return@lazy null
+    val boundary =
+        Regex("boundary=(?:\"([^\"]+)\"|([^;\\s]+))").find(type)?.let {
+          it.groupValues[1].ifEmpty { it.groupValues[2] }
+        } ?: return@lazy null
+    FakePart.parse(rawBody, boundary)
+  }
+
+  /** The text of the field [name], when the request is multipart and has one. */
+  fun field(name: String): String? =
+      parts?.firstOrNull { it.name == name && it.filename == null }?.bytes?.toString(Charsets.UTF_8)
+
+  /** The file part [name], when the request is multipart and has one. */
+  fun file(name: String): FakePart? = parts?.firstOrNull { it.name == name && it.filename != null }
 
   val query: Map<String, String> =
       target
@@ -76,6 +101,23 @@ class FakeOpenAiServer(
    * connection's own thread, so it may take as long as it likes (and notice the client leaving).
    */
   @Volatile var script: ((FakeRequest, FakeResponse) -> Boolean)? = null
+
+  /** What a client uploaded to `/files`, by the id the Fake gave it. */
+  class StoredFile(
+      val id: String,
+      val filename: String,
+      val purpose: String,
+      val bytes: ByteArray,
+  ) {
+    fun toJson() =
+        """{"id":"$id","object":"file","bytes":${bytes.size},"created_at":1,"filename":${Json.encodeToString(kotlinx.serialization.json.JsonPrimitive.serializer(), kotlinx.serialization.json.JsonPrimitive(filename))},"purpose":"$purpose"}"""
+  }
+
+  private val stored = java.util.concurrent.ConcurrentHashMap<String, StoredFile>()
+
+  /** The files that were uploaded to the Fake. */
+  val storedFiles: Map<String, StoredFile>
+    get() = stored.toMap()
 
   private val seen = CopyOnWriteArrayList<FakeRequest>()
   private val current = AtomicInteger()
@@ -153,7 +195,7 @@ class FakeOpenAiServer(
         } else {
           buffered.readNBytes(headers["content-length"]?.firstOrNull()?.toInt() ?: 0)
         }
-    return FakeRequest(parts[0], parts[1], headers, body.toString(StandardCharsets.UTF_8))
+    return FakeRequest(parts[0], parts[1], headers, body)
   }
 
   private fun line(input: InputStream): String? {
@@ -197,6 +239,12 @@ class FakeOpenAiServer(
     }
     if (responseDelayMillis > 0) response.pause(responseDelayMillis)
     val sub = request.path.removePrefix(rootPath)
+    if (request.header("content-type")?.lowercase()?.startsWith("multipart/form-data") == true) {
+      return routeMultipart(request, sub, response)
+    }
+    if (sub == "/files" || sub.startsWith("/files/")) return routeFiles(request, sub, response)
+    if (sub == "/batches" || sub.startsWith("/batches/"))
+        return routeBatches(request, sub, response)
     val body: JsonObject? =
         if (request.method == "POST") {
           try {
@@ -228,6 +276,7 @@ class FakeOpenAiServer(
               200,
               """{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"model":"$model","usage":{"prompt_tokens":2,"total_tokens":2}}""",
           )
+      request.method == "POST" && sub == "/audio/speech" -> speak(response)
       request.method == "GET" && sub == "/models" ->
           response.json(
               200,
@@ -248,6 +297,164 @@ class FakeOpenAiServer(
               error("Unknown path ${request.path}", "invalid_request_error", "not_found"),
           )
     }
+  }
+
+  /** The files a client uploaded: listed, retrieved, read back and deleted. */
+  private fun routeFiles(request: FakeRequest, sub: String, response: FakeResponse) {
+    val rest = sub.removePrefix("/files").removePrefix("/")
+    val id = rest.substringBefore('/')
+    val content = rest.substringAfter('/', "") == "content"
+    val file = stored[id]
+    when {
+      request.method == "GET" && rest.isEmpty() ->
+          response.json(
+              200,
+              """{"object":"list","data":[${stored.values.joinToString(",") { it.toJson() }}]}""",
+          )
+      file == null ->
+          response.json(
+              404,
+              error("No such File object: $id", "invalid_request_error", "file_not_found"),
+          )
+      request.method == "GET" && content ->
+          response.complete(200, file.bytes, mapOf("Content-Type" to "application/octet-stream"))
+      request.method == "GET" && rest == id -> response.json(200, file.toJson())
+      request.method == "DELETE" && rest == id -> {
+        stored.remove(id)
+        response.json(200, """{"id":"$id","object":"file","deleted":true}""")
+      }
+      else ->
+          response.json(
+              404,
+              error("Unknown path ${request.path}", "invalid_request_error", "not_found"),
+          )
+    }
+  }
+
+  /** A batch the Fake was asked for, and where it is in its life. */
+  private class Batch(val id: String, val input: String, @Volatile var status: String) {
+    fun toJson() =
+        """{"id":"$id","object":"batch","endpoint":"/v1/chat/completions","input_file_id":"$input","completion_window":"24h","status":"$status","created_at":1}"""
+  }
+
+  private val batches = java.util.concurrent.ConcurrentHashMap<String, Batch>()
+
+  /** The batches of uploaded files: created, listed, retrieved and cancelled. */
+  private fun routeBatches(request: FakeRequest, sub: String, response: FakeResponse) {
+    val rest = sub.removePrefix("/batches").removePrefix("/")
+    val id = rest.substringBefore('/')
+    val batch = batches[id]
+    when {
+      request.method == "POST" && rest.isEmpty() -> {
+        val input =
+            (Json.parseToJsonElement(request.body) as? JsonObject)
+                ?.get("input_file_id")
+                ?.jsonPrimitive
+                ?.content
+        if (input == null || !stored.containsKey(input)) {
+          return response.json(
+              400,
+              error("input_file_id is not a file", "invalid_request_error", "invalid_input_file"),
+          )
+        }
+        val created = Batch("batch-fake-${batches.size + 1}", input, "validating")
+        batches[created.id] = created
+        response.json(200, created.toJson())
+      }
+      request.method == "GET" && rest.isEmpty() ->
+          response.json(
+              200,
+              """{"object":"list","data":[${batches.values.joinToString(",") { it.toJson() }}]}""",
+          )
+      batch == null ->
+          response.json(
+              404,
+              error("No such Batch: $id", "invalid_request_error", "batch_not_found"),
+          )
+      request.method == "GET" && rest == id -> response.json(200, batch.toJson())
+      request.method == "POST" && rest == "$id/cancel" -> {
+        batch.status = "cancelling"
+        response.json(200, batch.toJson())
+      }
+      else ->
+          response.json(
+              404,
+              error("Unknown path ${request.path}", "invalid_request_error", "not_found"),
+          )
+    }
+  }
+
+  /** What a service answers to a multipart form: the uploads of files, audio and images. */
+  private fun routeMultipart(request: FakeRequest, sub: String, response: FakeResponse) {
+    if (request.method != "POST" || request.parts == null) {
+      return response.json(
+          400,
+          error("The multipart body is malformed.", "invalid_request_error", "invalid_multipart"),
+      )
+    }
+    when (sub) {
+      "/files" -> {
+        val file =
+            request.file("file")
+                ?: return response.json(
+                    400,
+                    error("'file' is a required property", "invalid_request_error", "missing_file"),
+                )
+        val purpose = request.field("purpose") ?: "assistants"
+        val id = "file-fake-${stored.size + 1}"
+        stored[id] = StoredFile(id, file.filename!!, purpose, file.bytes)
+        response.json(200, stored.getValue(id).toJson())
+      }
+      "/audio/transcriptions",
+      "/audio/translations" -> transcribe(request, response)
+      "/images/edits",
+      "/images/variations" -> images(request, response)
+      else ->
+          response.json(
+              404,
+              error("Unknown path ${request.path}", "invalid_request_error", "not_found"),
+          )
+    }
+  }
+
+  /**
+   * What a service answers to a recording: the text of it as `{"text": ...}`, or as plain text when
+   * `response_format` is `text`. The text says what the Fake received, so that a test can see it.
+   */
+  private fun transcribe(request: FakeRequest, response: FakeResponse) {
+    val file =
+        request.file("file")
+            ?: return response.json(
+                400,
+                error("'file' is a required property", "invalid_request_error", "missing_file"),
+            )
+    val text = "transcript of ${file.filename} (${file.bytes.size} bytes)"
+    if (request.field("response_format") == "text") {
+      response.complete(200, text.encodeToByteArray(), mapOf("Content-Type" to "text/plain"))
+    } else {
+      response.json(
+          200,
+          """{"text":${Json.encodeToString(kotlinx.serialization.json.JsonPrimitive.serializer(), kotlinx.serialization.json.JsonPrimitive(text))}}""",
+      )
+    }
+  }
+
+  /**
+   * What a service answers to an image to edit: one image, which here is the uploaded one again (as
+   * base64 or at a made-up address, as `response_format` says), so that a test can see that the
+   * bytes arrived whole.
+   */
+  private fun images(request: FakeRequest, response: FakeResponse) {
+    val image =
+        request.file("image")
+            ?: return response.json(
+                400,
+                error("'image' is a required property", "invalid_request_error", "missing_image"),
+            )
+    val entry =
+        if (request.field("response_format") == "url") """{"url":"${origin}/images/fake.png"}"""
+        else """{"b64_json":"${java.util.Base64.getEncoder().encodeToString(image.bytes)}"}"""
+    response.json(200, """{"created":1,"data":[$entry]}""")
   }
 
   private fun JsonObject.isStreamed() = this["stream"]?.jsonPrimitive?.content == "true"
@@ -277,6 +484,20 @@ class FakeOpenAiServer(
     response.endChunked()
   }
 
+  /**
+   * What a service answers to a speech request: audio as raw bytes in a chunked answer, as OpenAI
+   * streams it, [chunkDelayMillis] apart. The bytes are not text on purpose (every value of a byte
+   * occurs), so that a client that decodes them as text damages them.
+   */
+  private fun speak(response: FakeResponse) {
+    response.beginChunked(200, mapOf("Content-Type" to "audio/mpeg"))
+    for (i in 0 until SPEECH_CHUNKS) {
+      if (chunkDelayMillis > 0 && i > 0) response.pause(chunkDelayMillis)
+      response.chunk(speechChunk(i))
+    }
+    response.endChunked()
+  }
+
   private fun modelObject(id: String) =
       """{"id":"$id","object":"model","created":1,"owned_by":"fake"}"""
 
@@ -302,9 +523,20 @@ class FakeOpenAiServer(
     acceptor.join(2000)
   }
 
-  private companion object {
-    val MODELS = listOf("fake-model", "fake-embedding")
-    val STREAM_WORDS = listOf("Hello", " from", " the", " fake")
+  companion object {
+    private val MODELS = listOf("fake-model", "fake-embedding")
+    private val STREAM_WORDS = listOf("Hello", " from", " the", " fake")
+
+    /** How many chunks the speech answer comes in, and how long each is. */
+    const val SPEECH_CHUNKS = 4
+    const val SPEECH_CHUNK_BYTES = 1024
+
+    /** The [index]th chunk of the speech answer, always the same bytes. */
+    fun speechChunk(index: Int): ByteArray =
+        ByteArray(SPEECH_CHUNK_BYTES) { ((index * 31 + it * 7) % 256).toByte() }
+
+    /** The whole speech answer. */
+    val SPEECH: ByteArray = (0 until SPEECH_CHUNKS).map(::speechChunk).reduce(ByteArray::plus)
   }
 }
 

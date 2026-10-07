@@ -45,9 +45,12 @@ data class CheckDoc(val ok: Boolean, val failure: String? = null, val checkedAt:
 fun CheckResult.toDoc() = CheckDoc(ok, failure?.wire, checkedAt.toString())
 
 /**
- * What a type says about its use now: the requests an `openai-compatible` resource has in flight.
+ * What a type says about its use now: the requests an `openai-compatible` resource has in flight,
+ * or the connections a `jdbc-pool` resource has in use; the member that is not the type's is left
+ * out.
  */
-@Serializable data class UsageDoc(val inFlightRequests: Int)
+@Serializable
+data class UsageDoc(val inFlightRequests: Int? = null, val activeConnections: Int? = null)
 
 @Serializable
 data class HolderDoc(
@@ -168,7 +171,7 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
       secretAlias = resource.secretAlias,
       secretStatus = aliasState.wire,
       concurrencyLimit = concurrencyLimit,
-      usage = usage?.let { UsageDoc(it.inFlightRequests) },
+      usage = usage?.let { UsageDoc(it.inFlightRequests, it.activeConnections) },
       lastCheck = resource.lastCheck?.toDoc(),
       createdBy = resource.createdBy,
       createdAt = resource.createdAt.toString(),

@@ -64,6 +64,14 @@ class RunHarness(
         dev.lawlan.runline.accessors.openai.OpenAiObserver.NONE,
     /** What each of a run's two directories may hold. */
     maxBytesPerScope: Long = 1_000_000,
+    /** What the Engine does with what `jdbc-pool` statements report; nothing by default. */
+    jdbcObserver: dev.lawlan.runline.accessors.jdbc.JdbcObserver =
+        dev.lawlan.runline.accessors.jdbc.JdbcObserver.NONE,
+    /** The databases the Engine carries a profile for. */
+    jdbcProfiles: dev.lawlan.runline.accessors.jdbc.JdbcProfiles =
+        dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
+            listOf(dev.lawlan.runline.accessors.jdbc.PostgresProfile)
+        ),
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -75,11 +83,15 @@ class RunHarness(
   val resourceAvailability = ResourceAvailability(resourceStore)
   /** Where the files of `file` resources live; a directory of its own, apart from the others. */
   val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
+  val jdbcPools = dev.lawlan.runline.accessors.jdbc.JdbcPools(jdbcProfiles)
   val behaviors =
       ResourceBehaviors.forEngine(
           ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10), maxReadBytes),
           secrets,
           openAiObserver,
+          jdbcProfiles,
+          jdbcPools,
+          jdbcObserver,
       )
   val resourceAdmin =
       ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }
@@ -204,6 +216,19 @@ class RunHarness(
   }
 
   /**
+   * Defines a `jdbc-pool` resource with [settings] (JSON of its settings) and, if given, the alias
+   * of its password.
+   */
+  fun defineJdbc(name: String, settings: String, capacity: Int = 1, alias: String? = null) {
+    val root = ApiIdentity("root", Role.ADMIN)
+    val parsed =
+        kotlinx.serialization.json.Json.parseToJsonElement(settings)
+            as kotlinx.serialization.json.JsonObject
+    val created = resourceAdmin.create(name, capacity, root, "jdbc-pool", parsed, alias)
+    assertIs<CreateResourceResult.Created>(created, "$created")
+  }
+
+  /**
    * Uploads a pipeline written in Kotlin, given as the compiled classes of this test source set.
    */
   fun uploadKotlin(vararg classes: Class<*>, uploader: String = "alice"): String {
@@ -274,6 +299,7 @@ class RunHarness(
     scheduler.close()
     runner.close()
     coordinator?.close()
+    jdbcPools.close()
   }
 
   companion object {

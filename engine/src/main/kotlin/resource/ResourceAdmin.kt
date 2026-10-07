@@ -52,6 +52,12 @@ enum class InvalidResource(val problem: String) {
   /** Requests per run or a size limit outside what is allowed. */
   INVALID_LIMIT("invalid_limit"),
 
+  /** The kind of database of a `jdbc-pool` resource is not one this Engine has a profile for. */
+  UNSUPPORTED_DATABASE("unsupported_database"),
+
+  /** An extra connection property of a `jdbc-pool` resource that its database does not allow. */
+  PROPERTY_NOT_ALLOWED("property_not_allowed"),
+
   /** A change of name: a resource is identified by its name for good. */
   IMMUTABLE_NAME("immutable_name"),
 

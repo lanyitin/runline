@@ -66,6 +66,12 @@ interface AccessorRig : AutoCloseable {
   fun defineOpenAi(name: String, settings: String, key: RigKey = RigKey.None)
 
   /**
+   * Defines a `jdbc-pool` resource with [settings] (the JSON an administrator gives) and the
+   * password of its account as [key], which the host keeps where it keeps secrets.
+   */
+  fun defineJdbc(name: String, settings: String, key: RigKey = RigKey.None)
+
+  /**
    * Compiles the pipeline whose `run` executes [body], declaring [typed] (name to type) and [named]
    * (names only), runs it to its end and reports.
    */

@@ -1,5 +1,8 @@
 package dev.lawlan.runline.engine
 
+import dev.lawlan.runline.accessors.jdbc.JdbcPools
+import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
+import dev.lawlan.runline.accessors.jdbc.PostgresProfile
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.engine.allowlist.*
 import dev.lawlan.runline.engine.artifact.*
@@ -175,11 +178,18 @@ fun Application.configureDependencyInjection() {
       )
     }
     provide<OpenAiUsage> { OpenAiUsage() }
+    // The databases of `jdbc-pool` resources: the driver ships with the Engine, and the pools are
+    // closed when the Engine is, after the runs that use them (declared before the scheduler).
+    provide<JdbcProfiles> { JdbcProfiles(listOf(PostgresProfile)) }
+    provide<JdbcPools> { JdbcPools(resolve<JdbcProfiles>()) }
     provide<ResourceBehaviors> {
       ResourceBehaviors.forEngine(
           resolve<EngineConfig>().resources,
           resolve<SecretStore>(),
           OpenAiTelemetry(resolve<OpenTelemetry>(), resolve<OpenAiUsage>()),
+          resolve<JdbcProfiles>(),
+          resolve<JdbcPools>(),
+          JdbcTelemetry(resolve<OpenTelemetry>(), resolve<JdbcPools>()),
       )
     }
     provide<ResourceAdmin> {
@@ -200,6 +210,7 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceBehaviors>(),
           resolve<SecretStore>(),
           resolve<OpenAiUsage>(),
+          resolve<JdbcPools>(),
       )
     }
     provide<ResourceRemoval> {

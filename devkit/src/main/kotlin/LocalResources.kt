@@ -7,6 +7,12 @@ import dev.lawlan.runline.accessors.FileProbe
 import dev.lawlan.runline.accessors.Invalidation
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceObserver
+import dev.lawlan.runline.accessors.jdbc.JdbcCredential
+import dev.lawlan.runline.accessors.jdbc.JdbcPools
+import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
+import dev.lawlan.runline.accessors.jdbc.JdbcSettings
+import dev.lawlan.runline.accessors.jdbc.JdbcSettingsResult
+import dev.lawlan.runline.accessors.jdbc.PostgresProfile
 import dev.lawlan.runline.accessors.openai.OpenAiBinding
 import dev.lawlan.runline.accessors.openai.OpenAiCredential
 import dev.lawlan.runline.accessors.openai.OpenAiSettings
@@ -47,8 +53,23 @@ internal class LocalResources(
    */
   fun <T> holding(metadata: PipelineMetadata, run: (ResourceHost?) -> T): T {
     val declared = metadata.resources.toList()
-    val host = bind(metadata)
-    if (declared.isEmpty()) return run(host)
+    // The pools of this run's `jdbc-pool` resources: a development run is alone, so they are its
+    // own and are closed with it.
+    val pools = JdbcPools(JdbcProfiles(listOf(PostgresProfile)))
+    val host =
+        try {
+          bind(metadata, pools)
+        } catch (e: Throwable) {
+          pools.close()
+          throw e
+        }
+    if (declared.isEmpty()) {
+      try {
+        return run(host)
+      } finally {
+        pools.close()
+      }
+    }
     out.println(
         "[resources] acquired locally: ${declared.joinToString()} " +
             "(a development run does not compete and is not checked against the Engine's definitions)"
@@ -57,11 +78,12 @@ internal class LocalResources(
       return run(host)
     } finally {
       host?.invalidateAll(Invalidation.RUN_ENDED)
+      pools.close()
       out.println("[resources] released: ${declared.joinToString()}")
     }
   }
 
-  private fun bind(metadata: PipelineMetadata): BoundResources? {
+  private fun bind(metadata: PipelineMetadata, pools: JdbcPools): BoundResources? {
     val bindings = LinkedHashMap<String, ResourceBinding>()
     for ((name, type) in metadata.resourceTypes) {
       val local =
@@ -88,20 +110,18 @@ internal class LocalResources(
       if (type == ResourceTypes.OPENAI_COMPATIBLE) {
         bindings[name] = openAi(name, checkNotNull(local.path))
       }
+      if (type == ResourceTypes.JDBC_POOL) {
+        bindings[name] = jdbc(name, checkNotNull(local.path), pools)
+      }
     }
     return if (bindings.isEmpty()) null else BoundResources(bindings, ConsoleObserver(out))
   }
 
-  /**
-   * The accessor of an `openai-compatible` resource: its settings are in a JSON file of the project
-   * (the same settings an administrator gives the Engine, and the alias of the key as
-   * `secretAlias`), the key is in the environment. What is wrong with the file is said by category;
-   * a value is never said.
-   */
-  private fun openAi(name: String, file: String): ResourceBinding {
+  /** The JSON object of a settings file of the project, and the alias it names; by category. */
+  private fun settingsFile(type: String, name: String, file: String): Pair<JsonObject, String?> {
     fun problem(why: String): Nothing =
         throw LocalResourceProblem(
-            "The openai-compatible resource '$name' (RUNLINE_RESOURCES) cannot be set up: $why."
+            "The $type resource '$name' (RUNLINE_RESOURCES) cannot be set up: $why."
         )
     val text =
         try {
@@ -123,10 +143,24 @@ internal class LocalResources(
                   ?: problem("secretAlias is not a well formed alias (invalid_secret_alias)")
           else -> problem("secretAlias is not a well formed alias (invalid_secret_alias)")
         }
+    return JsonObject(json - "secretAlias") to alias
+  }
+
+  /**
+   * The accessor of an `openai-compatible` resource: its settings are in a JSON file of the project
+   * (the same settings an administrator gives the Engine, and the alias of the key as
+   * `secretAlias`), the key is in the environment. What is wrong with the file is said by category;
+   * a value is never said.
+   */
+  private fun openAi(name: String, file: String): ResourceBinding {
+    val (json, alias) = settingsFile("openai-compatible", name, file)
     val parsed =
-        when (val result = OpenAiSettings.parse(JsonObject(json - "secretAlias"))) {
+        when (val result = OpenAiSettings.parse(json)) {
           is SettingsResult.Invalid ->
-              problem("its settings are not valid (${result.problem.wire})")
+              throw LocalResourceProblem(
+                  "The openai-compatible resource '$name' (RUNLINE_RESOURCES) cannot be set up: " +
+                      "its settings are not valid (${result.problem.wire})."
+              )
           is SettingsResult.Valid -> result.settings
         }
     val credential =
@@ -135,6 +169,30 @@ internal class LocalResources(
             settings.secrets.lookup(alias)?.let { OpenAiCredential.Key(it) }
                 ?: OpenAiCredential.Unavailable
     return OpenAiBinding(name, parsed, credential)
+  }
+
+  /**
+   * The accessor of a `jdbc-pool` resource, on the same settings an administrator gives the Engine
+   * (and the alias of the password as `secretAlias`); the password is in the environment. The
+   * development run holds the whole resource alone, so the pool is the size of one run's share.
+   */
+  private fun jdbc(name: String, file: String, pools: JdbcPools): ResourceBinding {
+    val (json, alias) = settingsFile("jdbc-pool", name, file)
+    val parsed =
+        when (val result = JdbcSettings.parse(json, JdbcProfiles(listOf(PostgresProfile)))) {
+          is JdbcSettingsResult.Invalid ->
+              throw LocalResourceProblem(
+                  "The jdbc-pool resource '$name' (RUNLINE_RESOURCES) cannot be set up: " +
+                      "its settings are not valid (${result.problem.wire})."
+              )
+          is JdbcSettingsResult.Valid -> result.settings
+        }
+    val credential =
+        if (alias == null) JdbcCredential.None
+        else
+            settings.secrets.lookup(alias)?.let { JdbcCredential.Password(it) }
+                ?: JdbcCredential.Unavailable
+    return pools.bind(name, parsed, credential, capacity = 1)
   }
 
   private companion object {

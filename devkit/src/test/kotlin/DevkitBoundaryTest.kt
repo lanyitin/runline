@@ -29,8 +29,14 @@ class DevkitBoundaryTest {
   }
 
   @Test
-  fun `does not depend on a database driver`() {
-    assertFailsWith<ClassNotFoundException> { Class.forName("org.postgresql.Driver") }
+  fun `does not depend on the Engine's persistence, only on the driver a jdbc-pool resource needs`() {
+    // The local jdbc-pool resource (WI-48) talks to a database with the driver of the profile;
+    // nothing of the Engine's own use of a database (migrations, pools of its own) is here.
+    assertFailsWith<ClassNotFoundException> { Class.forName("org.flywaydb.core.Flyway") }
+    assertFailsWith<ClassNotFoundException> {
+      Class.forName("dev.lawlan.runline.engine.db.MigrateKt")
+    }
+    Class.forName("org.postgresql.Driver")
   }
 
   @Test

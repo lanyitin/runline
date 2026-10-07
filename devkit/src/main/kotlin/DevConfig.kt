@@ -18,8 +18,8 @@ data class RecordingConfig(
 
 /**
  * A shared resource as the development project defines it locally (no Engine to ask). [path] is a
- * `file`'s path below the resource root, or the settings file of an `openai-compatible` resource,
- * relative to the project.
+ * `file`'s path below the resource root, or the settings file of an `openai-compatible` or
+ * `jdbc-pool` resource, relative to the project.
  */
 data class LocalResource(val type: String, val path: String?)
 
@@ -144,13 +144,15 @@ data class DevConfig(
                 name !in definitions &&
                 when (type) {
                   "file",
+                  "jdbc-pool",
                   "openai-compatible" -> !path.isNullOrEmpty()
                   "counter" -> path == null
                   else -> false
                 }
         check(valid) {
           "Environment variable $RESOURCES entry '$text' must be name=file:<path>, " +
-              "name=openai-compatible:<settings file> or name=counter, with each name once"
+              "name=openai-compatible:<settings file>, name=jdbc-pool:<settings file> " +
+              "or name=counter, with each name once"
         }
         definitions[name] = LocalResource(type, path)
       }

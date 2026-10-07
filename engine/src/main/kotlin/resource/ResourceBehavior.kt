@@ -1,6 +1,10 @@
 package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.ResourceBinding
+import dev.lawlan.runline.accessors.jdbc.JdbcObserver
+import dev.lawlan.runline.accessors.jdbc.JdbcPools
+import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
+import dev.lawlan.runline.accessors.jdbc.PostgresProfile
 import dev.lawlan.runline.accessors.openai.OpenAiObserver
 import dev.lawlan.runline.engine.config.ResourceSettings
 import dev.lawlan.runline.engine.secret.NoSecretStore
@@ -88,11 +92,22 @@ class ResourceBehaviors(private val byType: Map<ResourceType, ResourceBehavior>)
         settings: ResourceSettings,
         secrets: SecretStore = NoSecretStore,
         openAiObserver: OpenAiObserver = OpenAiObserver.NONE,
+        jdbcProfiles: JdbcProfiles = JdbcProfiles(listOf(PostgresProfile)),
+        jdbcPools: JdbcPools = JdbcPools(jdbcProfiles),
+        jdbcObserver: JdbcObserver = JdbcObserver.NONE,
     ) =
         ResourceBehaviors(
             mapOf(
                 ResourceType.COUNTER to CounterBehavior,
                 ResourceType.FILE to FileBehavior(settings.root, settings.maxReadBytes),
+                ResourceType.JDBC_POOL to
+                    JdbcPoolBehavior(
+                        jdbcProfiles,
+                        jdbcPools,
+                        secrets,
+                        settings.checkTimeout,
+                        jdbcObserver,
+                    ),
                 ResourceType.OPENAI_COMPATIBLE to
                     OpenAiCompatibleBehavior(secrets, settings.checkTimeout, openAiObserver),
             )

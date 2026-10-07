@@ -3,8 +3,12 @@ package dev.lawlan.runline.engine.resource
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/** What an administrator sees of the use of an `openai-compatible` resource right now. */
-data class ResourceUsage(val inFlightRequests: Int)
+/**
+ * What an administrator sees of the use of a resource right now, by type: the requests an
+ * `openai-compatible` resource has in flight, the connections a `jdbc-pool` resource has in use.
+ * What does not belong to the type is null.
+ */
+data class ResourceUsage(val inFlightRequests: Int? = null, val activeConnections: Int? = null)
 
 /**
  * How many requests each `openai-compatible` resource has in flight at this moment, across all

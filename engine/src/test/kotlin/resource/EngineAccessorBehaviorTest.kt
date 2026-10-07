@@ -61,6 +61,15 @@ internal class EngineRig : AccessorRig {
     harness.defineOpenAi(name, settings, alias = alias)
   }
 
+  override fun defineJdbc(name: String, settings: String, key: RigKey) {
+    val alias = if (key is RigKey.None) null else "$name-key"
+    if (key is RigKey.Value) {
+      keystores.importSecret(keystore, alias!!, key.text, passwordFile)
+      secrets.reload()
+    }
+    harness.defineJdbc(name, settings, alias = alias)
+  }
+
   override fun run(body: String, typed: Map<String, String>, named: Set<String>): RigOutcome {
     val pipeline = "p${counter++}"
     var declaration = RunHarness.usingTyped(*typed.toList().toTypedArray())

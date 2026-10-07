@@ -240,7 +240,8 @@ private fun InvalidResource.message() =
       InvalidResource.CAPACITY -> "容量必須是 1 以上的整數。"
       InvalidResource.NOTHING_TO_CHANGE -> "請提供要修改的 capacity 或 enabled。"
       InvalidResource.UNKNOWN_TYPE -> "資源型別不明；型別只能是 counter、file、jdbc-pool、openai-compatible。"
-      InvalidResource.UNSUPPORTED_TYPE -> "這個資源型別尚未支援，目前只能建立 counter、file 與 openai-compatible。"
+      InvalidResource.UNSUPPORTED_TYPE ->
+          "這個資源型別尚未支援，目前只能建立 counter、file、jdbc-pool 與 openai-compatible。"
       InvalidResource.INVALID_SETTINGS -> "這個資源型別沒有這些設定欄位。"
       InvalidResource.INVALID_SECRET_ALIAS -> "這個資源型別沒有機密別名，或別名不合規。"
       InvalidResource.PATH_OUTSIDE_ROOT -> "路徑不在資源根目錄內：路徑必須是相對於資源根目錄的路徑，不能是絕對路徑，也不能跳出根目錄。"
@@ -253,6 +254,8 @@ private fun InvalidResource.message() =
           "請求參數的預設、鎖定、允許的模型或上限不合規：只有模型與取樣、長度相關的參數可以設定，預設不得違反自己的上限與模型清單。"
       InvalidResource.INVALID_TIMEOUT -> "逾時必須是正整數的毫秒數（總時間可不設）。"
       InvalidResource.INVALID_LIMIT -> "每 run 同時請求數或大小上限超出允許範圍。"
+      InvalidResource.UNSUPPORTED_DATABASE -> "資料庫種類不在這個 Engine 支援的清單內（目前只有 postgresql）。"
+      InvalidResource.PROPERTY_NOT_ALLOWED -> "額外連線屬性不在這個資料庫允許的清單內；載入類別、寫檔、機密與 TLS 相關的屬性都不接受。"
       InvalidResource.IMMUTABLE_NAME -> "資源名稱建立後不能修改。"
       InvalidResource.IMMUTABLE_TYPE -> "資源型別建立後不能修改；要換型別請刪除後重新建立。"
     }

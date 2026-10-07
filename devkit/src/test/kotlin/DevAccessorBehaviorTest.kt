@@ -51,6 +51,19 @@ internal class DevRig(private val record: Boolean) : AccessorRig {
     }
   }
 
+  override fun defineJdbc(name: String, settings: String, key: RigKey) {
+    val alias = if (key is RigKey.None) null else "$name-key"
+    val text =
+        if (alias == null) settings else settings.removeSuffix("}") + ",\"secretAlias\":\"$alias\"}"
+    val file = project.resolve("jdbc/$name.json")
+    Files.createDirectories(file.parent)
+    Files.writeString(file, text)
+    definitions[name] = "jdbc-pool:jdbc/$name.json"
+    if (key is RigKey.Value) {
+      secretEnv["RUNLINE_SECRET_" + alias!!.uppercase().replace(Regex("[^A-Z0-9]"), "_")] = key.text
+    }
+  }
+
   override fun run(body: String, typed: Map<String, String>, named: Set<String>): RigOutcome {
     val index = counter++
     val className = "P$index"

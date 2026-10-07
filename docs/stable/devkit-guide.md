@@ -54,7 +54,7 @@
 | `RUNLINE_SHARED_ROOT` | pipeline 共享目錄的根位置（多次執行間保留） | 專案內 `.runline/shared` |
 | `RUNLINE_RUN_ROOT` | run 私有目錄的根位置（每次執行全新） | 專案內 `.runline/runs` |
 | `RUNLINE_RESOURCE_ROOT` | `file` 型別共享資源的檔案所在的根位置（[ADR-019](pipeline-engine/adr/ADR-019-typed-shared-resources.md)） | 專案內 `.runline/resources` |
-| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，`file` 的路徑相對於根位置，`openai-compatible` 的路徑是專案內的設定檔（見「型別化共享資源（`openai-compatible`）」），`counter` 沒有路徑，例如 `audit=file:logs/out.txt,lemon=openai-compatible:openai/lemon.json,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動 | 無 |
+| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，`file` 的路徑相對於根位置，`openai-compatible` 與 `jdbc-pool` 的路徑是專案內的設定檔（見「型別化共享資源（`openai-compatible`）」），`counter` 沒有路徑，例如 `audit=file:logs/out.txt,lemon=openai-compatible:openai/lemon.json,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動 | 無 |
 | `RUNLINE_SECRET_<別名>` | `openai-compatible` 資源的金鑰（本機沒有 Engine 的金鑰庫，金鑰由環境提供）：別名轉大寫、非英數字元換成 `_`，例如別名 `lemon-key` 對應 `RUNLINE_SECRET_LEMON_KEY`；值限可列印 ASCII，與 Engine 的機密字元集一致，否則視為取不到。金鑰不寫進設定檔、不被任何輸出顯示 | 無 |
 | `RUNLINE_ALLOW_LIST` | 用逗號分隔的白名單條目，會完全取代預設白名單：套件（`kotlin`）、套件後加 `:exact` 表示「僅此套件」（`kotlin:exact`）、`class:` 開頭表示完整類別（`class:java.io.PrintStream`，只放行該類別與其巢狀類別）；格式與 Engine 的 `ALLOWLIST_PACKAGES` 相同（由 analyzer 的 `AllowListText` 共用）；名稱不合法時啟動即失敗，已不再接受的尾端 `!` 形式也會失敗並提示改用 `:exact`；設為空字串表示空清單 | 專案的預設白名單（analyzer 模組的 `DefaultAllowList`，Engine 首次啟動也用它） |
 | `RUNLINE_ALLOW_LIST_VERSION` | 設定了 `RUNLINE_ALLOW_LIST` 時，判定中顯示的白名單版本；預設清單有自己的版本，此變數對它無效 | `local`（清單為空時為 `local-empty`） |
@@ -98,6 +98,8 @@ println(answer.body)
   ```
   首位元組逾時涵蓋到第一個事件，之後 `idle` 涵蓋兩個事件之間，持續送出資料的串流不因整體時間逾時（`total` 選填）；斷線為 `CONNECTION_FAILED`，已拉到的事件在你手上，之後的拉取得到同一個類別。串流佔用額度直到結束或關閉。
 - 回應標頭已剝除憑證（名稱含 `auth`、`key`、`token`、`secret`、`cookie`），值中的金鑰以 `***` 取代；回應本文不被處理。
+
+**`jdbc-pool`（資料庫連線池，PostgreSQL，WI-48）**：`context.accessors.jdbcPool("db")` 取得 `JdbcAccessor`：`query(sql, 參數清單)` 回傳 `JdbcRows`（`columns`、`rows`、`maps()`）、`update(sql, 參數清單)` 回傳影響筆數、`begin()`／`commit()`／`rollback()`。SQL 原樣交給資料庫（權限就是資源帳號的權限），參數與結果只有 JDK 內建型別（資料庫特有的型別以文字呈現，型別對應見 08-api「`jdbc-pool` 型別」）。資料庫拒絕時得到 `ResourceAccessException`，`getFailure()` 是類別（例如 `SQL_ERROR`、`DENIED`、`CONNECTION_FAILED`），`getSqlState()` 是標準 SQLState，沒有資料庫或驅動的訊息、位址、帳號或你的語句與參數值。run 在結束前持有它用到的連線；結束（含取消與逾時）時未提交的交易回滾、連線清理後才歸還。本機設定同 `openai-compatible`：`RUNLINE_RESOURCES` 的 `db=jdbc-pool:jdbc/db.json` 指向專案內的 JSON 檔，內容是管理員給 Engine 的同一份 `settings`（`kind`、`host`、`database`、`username` 等，欄位見 08-api），另可加 `"secretAlias": "db-pw"`；密碼從環境變數 `RUNLINE_SECRET_DB_PW` 讀取；本機的 run 獨自持有資源，連線池大小就是 `connectionsPerRun`。錄製時只記錄資源名稱、型別與讀或寫，不記錄 SQL。
 
 本機設定（開發入口不連 Engine，也沒有金鑰庫）：`RUNLINE_RESOURCES` 的 `lemon=openai-compatible:openai/lemon.json` 指向專案內的 JSON 檔，內容是管理員給 Engine 的同一份 `settings`（欄位見 08-api），另可加 `"secretAlias": "lemon-key"`；金鑰從環境變數 `RUNLINE_SECRET_LEMON_KEY` 讀取。設定檔不合規、讀不到或別名不合規時啟動即失敗，只說類別，不顯示值；別名設定了但環境沒有金鑰時，呼叫得到 `SECRET_UNAVAILABLE`，不會送出請求。開發入口可以連真實服務。使用存取端不改變 safe 或 unsafe 的判定，也不需要在 `network` 宣告服務的主機。錄製時只記錄資源名稱、型別與動作類別，不記錄端點、本文或位址。
 

@@ -207,9 +207,9 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱，另可宣告期望的型別；規則見 [ADR-007](adr/ADR-007-shared-resources.md) 與 [ADR-019](adr/ADR-019-typed-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
-資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別是 `counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）與 `openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）；`jdbc-pool` 在其工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
+資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。封閉集合內的型別都可建立：`counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）、`jdbc-pool`（一個資料庫的連線池，首版為 PostgreSQL，見下方「`jdbc-pool` 型別」）與 `openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
 
-資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用；永遠不含機密值，金鑰庫重載後隨之變化）、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數，`openai-compatible` 才有，其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；其他型別為 `null`）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
+資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用；永遠不含機密值，金鑰庫重載後隨之變化）、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數（`openai-compatible`）或每 run 連線數（`jdbc-pool`，也就是連線池的大小），其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；`jdbc-pool` 為 `{"activeConnections": n}`，run 目前持有的連線數（run 在結束前持有它用到的連線，閒置也計入），含所有世代；其他型別為 `null`，型別沒有的成員不出現）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
 `invalid_resource`（422）的本文多一個 `problem`，說明原因類別：
 
@@ -219,14 +219,16 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `capacity` | 容量小於 1 |
 | `nothing_to_change` | 修改沒有要改的欄位 |
 | `unknown_type` | 型別不在封閉集合內 |
-| `unsupported_type` | 型別在集合內，但尚未實作，還不能建立（目前只有 `jdbc-pool`） |
-| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串；`openai-compatible` 必填 `baseUrl`，且不接受清單以外的欄位，包括任何形式的金鑰、路徑與標頭） |
+| `unsupported_type` | 型別在集合內，但尚未實作，還不能建立（保留給日後新增的型別；目前集合內的型別都已實作） |
+| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串；`openai-compatible` 必填 `baseUrl`，且不接受清單以外的欄位，包括任何形式的金鑰、路徑與標頭；`jdbc-pool` 必填 `kind`、`host`、`database`、`username`，不接受連線字串、密碼、驅動與清單以外的任何欄位，位址欄位含有可以多帶東西的字元，或額外屬性的值不合該屬性的規則） |
+| `unsupported_database` | `jdbc-pool` 的 `kind` 不是這個 Engine 內建資料庫設定檔的種類（首版只有 `postgresql`，大小寫須相符） |
+| `property_not_allowed` | `jdbc-pool` 的 `properties` 含有不在該資料庫允許清單內的連線屬性：載入類別（socket 與 SSL 工廠、認證外掛、密碼回呼）、寫檔（日誌）、機密（`user`、`password`、`passfile`）、改連到別處（`options`、多主機、目標伺服器種類）與一切 TLS 相關的屬性都不在清單內 |
 | `invalid_base_url` | `openai-compatible` 的 `baseUrl` 不是自成一格的 `http` 或 `https` 位址：含使用者資訊、查詢、片段、`.` 或 `..` 片段，或不可列印字元 |
 | `invalid_header` | `openai-compatible` 的額外標頭（`headers`）、`organization` 或 `project` 不合規：名稱含 `auth`、`key`、`token`、`secret`、`cookie`（不分大小寫），是 Engine 自己設定或決定請求框架的標頭（`Host`、`Content-Type`、`Content-Length`、`Accept`、`Connection`、`Transfer-Encoding`、`OpenAI-Organization`、`OpenAI-Project` 等），名稱不是標頭名稱，或值含換行與其他控制字元 |
 | `invalid_endpoint` | `endpoints` 含不在端點目錄內的名稱、這個版本尚未提供的條目（目前沒有：目錄的每個條目都已提供），或為空 |
 | `invalid_request_defaults` | `defaults`、`allowedModels`、`lockedParameters` 或 `maxValues` 不合規：只有模型與取樣、長度相關的參數可以設定，值須是該參數的型別，預設不得違反同一資源的模型清單與上限 |
-| `invalid_timeout` | `timeouts` 含不認得的項目，或值不是正整數毫秒（`totalMs` 可為 `null` 表示不設） |
-| `invalid_limit` | `requestsPerRun`、`maxRequestBytes`、`maxResponseBytes` 或 `maxDownloadBytes` 超出允許範圍 |
+| `invalid_timeout` | `timeouts` 含不認得的項目，或值不是正整數毫秒（`openai-compatible` 的 `totalMs` 可為 `null` 表示不設；`jdbc-pool` 只有 `connectMs`、`statementMs`、`quotaWaitMs`） |
+| `invalid_limit` | `requestsPerRun`、`maxRequestBytes`、`maxResponseBytes` 或 `maxDownloadBytes`（`openai-compatible`），`connectionsPerRun`、`maxRows` 或 `maxResponseBytes`（`jdbc-pool`）超出允許範圍 |
 | `path_outside_root` | `file` 的路徑不在資源根目錄內：絕對路徑、`..` 跳出根目錄，或路徑上的符號連結解析後跳出根目錄 |
 | `path_unusable` | `file` 的路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫 |
 | `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file` 沒有），或別名不合規（格式同資源名稱：1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭） |
@@ -271,11 +273,41 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 **整體並行上限**：容量是同時持有的 run 數，每個 run 同時進行的請求數受 `requestsPerRun` 限制，因此服務端的同時請求數不超過容量乘以 `requestsPerRun`；資源的 `concurrencyLimit` 回報這個乘積，每 run 上限維持 1 時，它就是容量（目標服務最高並行為 1 時，容量設 1）。限度：降低容量不從持有者手上收回資源，降低後到持有者結束之前，服務端的並行請求數可以暫時高於新的上限（`concurrencyLimit` 已是新值）；run 取消或被強制釋放時 Engine 立即關閉連線並歸還額度，但服務端是否隨連線中斷而停止生成取決於服務，不停止時服務端的真實並行可能短暫高於 Engine 的計數；容量 1 時整個服務同一時間只有一個 run 持有，其他 run 在初始化階段排隊，即使持有者暫時沒有請求。
 
+### `jdbc-pool` 型別
+
+一個資料庫的連線池（首版只有 PostgreSQL；資料庫的差異集中在 Engine 內建的「資料庫設定檔」，新增資料庫不改資源模型、API 欄位與 pipeline 的存取端，但需要發佈新版 Engine）（[ADR-019](adr/ADR-019-typed-shared-resources.md) 第 4 點、[WI-48](work-items/WI-48-jdbc-pool-resource.md)）。連線位址、帳號、密碼與驅動全由資源決定，pipeline 的呼叫只帶 SQL 文字與參數，不能選擇任何一項；密碼是機密，只以 `secretAlias` 指向金鑰庫的別名。驅動隨 Engine 發佈並由 Engine 的 class loader 載入，不經 `DriverManager`，所以 pipeline 的 jar 帶了同名驅動也不影響存取端使用的驅動，run 的執行期目錄不含驅動。
+
+`settings` 的欄位（只有這些；其他欄位為 `invalid_settings`，沒有連線字串、密碼、驅動或 URL 欄位）：
+
+| 欄位 | 意義 | 預設 |
+|---|---|---|
+| `kind` | 必填。資料庫種類，首版 `postgresql`（`unsupported_database`） | 無 |
+| `host` | 必填。主機名稱、IPv4 或方括號的 IPv6 數字；不接受含 `/`、`?`、`@`、`:`、`,`、空白的字串（`invalid_settings`） | 無 |
+| `port` | 埠 | 該資料庫的預設（PostgreSQL 5432） |
+| `database` | 必填。資料庫名稱（字母、數字、`_`、`.`、`$`、`-`，最長 63 個字元） | 無 |
+| `username` | 必填。資料庫帳號。建議使用最小權限的獨立帳號，不使用 Engine 自己的帳號 | 無 |
+| `connectionsPerRun` | 每個 run 同時可用的連線數（1 至 64）；連線池大小是容量乘以它，不能獨立設定 | 1 |
+| `timeouts` | `connectMs`（建立連線）、`statementMs`（單一語句的上限，超過即在資料庫端取消，得到 `TOTAL_TIMEOUT`）、`quotaWaitMs`（等待 run 自己的連線額度的上限，得到 `QUOTA_WAIT_TIMEOUT`） | 10000、300000、60000 |
+| `maxRows`、`maxResponseBytes` | 一次查詢最多回傳的列數、答案（文字與位元組）的大小上限；超過整個答案被拒絕（`RESPONSE_TOO_LARGE`），不回傳一部分 | 10000、8 MiB |
+| `properties` | 額外連線屬性（名稱到文字值，最多 16 個）；只接受資料庫設定檔的允許清單：PostgreSQL 為 `ApplicationName`（最長 64 字元）、`currentSchema`（以逗號分隔的結構名稱）、`tcpKeepAlive`（`true` 或 `false`）；其他名稱為 `property_not_allowed`。沒有任何屬性可以關閉主機名稱或憑證驗證；TLS 信任與 mTLS 由 [WI-52](work-items/WI-52-tls-trust-and-mtls.md) 加入。`readOnly` 不在清單內：語句可以自己改回，唯一的保護是資料庫帳號的權限 | 無 |
+
+連線位址由資料庫設定檔依結構化欄位組成，`user`、`password` 與逾時等由 Engine 設定。寫入的是正規化形式（省略的項目以有效的預設值寫出）。
+
+**存取端**（pipeline 以 `context.accessors.jdbcPool(名稱)` 取得，需宣告型別 `jdbc-pool`；不影響 safe 或 unsafe 的判定）：`query(sql[, parameters])` 回傳 `JdbcRows`（`columns` 與 `rows`，每列依欄位順序；`maps()` 把每列轉成欄位名稱到值）、`update(sql[, parameters])` 回傳影響筆數、`begin()`、`commit()`、`rollback()`。SQL 文字原樣交給資料庫，Engine 不解析或限制，JDBC 的跳脫語法（`{d ...}`、`{fn ...}`）也不處理；沒有參數時用單純語句，文字內的 `?` 就是 `?`，有參數時 `?` 是參數位置（PostgreSQL 的 `?` 運算子要寫成 `??`）。權限由帳號決定：pipeline 能做的就是該帳號能做的。參數與結果只用 JDK 內建型別：參數為 `null`、文字、布林、整數（以 `Long` 傳遞）、浮點數（`Double`）、`BigDecimal`、`byte[]`，其他一律 `INVALID_ARGUMENT`；文字參數以「未指定型別」交給資料庫，所以可以填入 UUID、時間、數字等欄位。**型別對應（PostgreSQL 設定檔）**：`boolean` 為 `Boolean`；`smallint`、`integer`、`bigint` 為 `Long`；`real`、`double precision` 為 `Double`；`numeric` 為 `BigDecimal`；文字類為 `String`；`bytea` 為 `byte[]`；`money` 與其他一切（日期與時間、UUID、JSON、陣列、區間……）為資料庫給的文字形式（連線的時區固定為 UTC，所以時間不隨 Engine 主機的時區而變）。
+
+**交易與連線**：run 在第一次需要時取得連線，並持有到自己結束（強制釋放、取消與逾時亦同），所以同一個 run 的語句在同一個連線（每 run 連線數為 1 時就是同一個 session，`SET`、暫存表等在 run 內持續有效）。`begin` 到 `commit` 或 `rollback` 之間的語句都在這個交易的連線上，一次一個語句；開著交易時其他執行緒的語句也在交易內。已有交易時再 `begin`、沒有交易時 `commit` 或 `rollback` 為 `TRANSACTION_STATE`。run 結束、被取消或被強制釋放時，未完成的交易回滾，進行中的語句在資料庫端被取消並切斷連線，其餘連線**經過清理才歸還連線池**：回滾、`DISCARD ALL`（關閉游標、取消監聽、釋放 advisory lock、丟棄計畫與暫存表、`RESET ALL`，也就是還原 `SET ROLE` 與 `SET SESSION AUTHORIZATION`）、再套用 Engine 與資源的設定；清理失敗或無法證明乾淨的連線被關閉而不再使用。因此下一個取得連線的 run 看不到前者的交易、設定、角色、暫存表、預處理語句、鎖或監聽。
+
+**連線池與世代**：連線池在第一次需要時建立，實體連不上時取得容量不受影響，使用存取端的操作得到 `CONNECTION_FAILED`、`CONNECT_TIMEOUT` 或 `DENIED`。連線池大小是容量乘以 `connectionsPerRun`，連線池內沒有等待：容量 N 的資源，N 個 run 同時持有且各用滿額度時全部成功。資源的設定、容量或密碼（金鑰庫重載）改變後，已持有的 run 繼續用其世代的連線池，之後取得的 run 用新世代；舊世代在持有者全部結束後關閉。Engine 關閉時關閉所有連線池。密碼別名的狀態、`GET /api/v1/secrets` 與重載回應中的引用者與其他型別相同；密碼值不出現在任何輸出。
+
+**錯誤類別**（pipeline 看到的：類別、標準 SQLState 與 `errorId`，不含連線字串、位址、帳號、語句、參數值或驅動與資料庫的訊息原文）：`SQL_ERROR`（資料庫拒絕語句，附 `sqlState`，例如 `23505`、`42601`、`42501`）、`CONNECTION_FAILED`、`CONNECT_TIMEOUT`、`DENIED`（帳號或密碼不被接受，`28P01`）、`TOTAL_TIMEOUT`（語句超過 `statementMs`）、`QUOTA_WAIT_TIMEOUT`、`RESPONSE_TOO_LARGE`、`TRANSACTION_STATE`、`INVALID_ARGUMENT`（呼叫的形狀不對、參數型別不在清單內、帶了語句與參數以外的成員）、`SECRET_UNAVAILABLE`（金鑰庫給不出密碼，不連線）、`CANCELLED`、`ENDED`、`FORCE_RELEASED`。原文寫在 Engine 的 log，以 `errorId` 對應：連線、登入與逾時類的失敗記錄驅動的訊息（已去除密碼）；`SQL_ERROR` 只記錄 SQLState 與例外種類，因為資料庫的訊息可能含語句片段、名稱與值。Log 與 trace 不含 SQL 與參數；run 的 log 只有「哪個資源的哪個操作失敗、類別、errorId」。
+
+**可觀測**：metric `runline.resources.jdbc.connections.active`（run 持有的連線數）、`runline.resources.jdbc.acquire.failures`（取不到連線的次數，標籤 `kind` 為類別）、`runline.resources.jdbc.statement.duration`（語句耗時，標籤 `operation`、`outcome`）；標籤只有資源名稱、型別與這些固定值。run 的 trace 每個語句一個 span（`runline.resource.jdbc.query` 等），只帶資源名稱、型別與操作類別，不記錄 SQL。上傳時 `network` 宣告了資源的主機，與其他型別一樣產生 `network_host_has_resource` 警告。
+
 ### `POST /api/v1/resources`
 
 認證：Bearer（admin）
 
-定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。`type` 為 `openai-compatible` 時 `settings` 見下方「`openai-compatible` 型別」，`secretAlias` 選填（本機服務可能不需要金鑰）；回傳的 `settings` 是寫出每個有效值的正規化形式（省略的項目以預設值寫出），`secretAlias` 是小寫的正規化形式。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
+定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。`type` 為 `openai-compatible` 時 `settings` 見下方「`openai-compatible` 型別」，`secretAlias` 選填（本機服務可能不需要金鑰）；`type` 為 `jdbc-pool` 時 `settings` 見下方「`jdbc-pool` 型別」，`secretAlias` 是資料庫帳號密碼在金鑰庫的別名，選填（帳號不需要密碼時）；回傳的 `settings` 是寫出每個有效值的正規化形式（省略的項目以預設值寫出），`secretAlias` 是小寫的正規化形式。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `GET /api/v1/resources`
 
@@ -293,7 +325,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-修改容量、啟用狀態、型別專屬的設定或機密別名。本文 `{"capacity": 2, "enabled": false, "settings": {...}, "secretAlias": "..."}`，至少一項；`settings` 整份取代（`file` 為 `{"path": "..."}`，`openai-compatible` 見下方，規則同建立，且同樣寫成正規化形式），`secretAlias` 換成另一個別名（規則同建立；沒有清除別名的修改，要去掉金鑰須刪除後重建）；修改的設定或別名使最近一次檢查結果（`lastCheck`）清除，只改容量或啟用狀態不影響它。只改容量或啟用時不重新檢查設定。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗，不影響持有者；修改設定不影響已持有者：持有者的存取端綁定取得當下的設定與機密，之後取得的 run 才用新設定。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
+修改容量、啟用狀態、型別專屬的設定或機密別名。本文 `{"capacity": 2, "enabled": false, "settings": {...}, "secretAlias": "..."}`，至少一項；`settings` 整份取代（`file` 為 `{"path": "..."}`，`openai-compatible` 與 `jdbc-pool` 見下方，規則同建立，且同樣寫成正規化形式），`secretAlias` 換成另一個別名（規則同建立；沒有清除別名的修改，要去掉金鑰須刪除後重建）；修改的設定或別名使最近一次檢查結果（`lastCheck`）清除，只改容量或啟用狀態不影響它。只改容量或啟用時不重新檢查設定。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗，不影響持有者；修改設定不影響已持有者：持有者的存取端綁定取得當下的設定與機密，之後取得的 run 才用新設定。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `DELETE /api/v1/resources/{name}`
 
@@ -317,13 +349,13 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 主動檢查資源的實體是否可用，不取得容量，不影響進行中的 run、持有者與等待者；停用的資源也可檢查。檢查內容由型別決定：`counter` 沒有實體，一律通過；`file` 驗證根目錄可用、路徑沒有跳出根目錄、檔案所在的目錄存在或可建立、既有的檔案可讀寫（會真的開啟它，不建立也不截斷任何東西）。檢查有整體時間上限（`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，預設 10 秒），逾時是一種失敗類別。同一資源同時被檢查時共用同一次檢查與同一個答案；逾時而仍卡住的檢查未結束前，再次檢查立即回 `timeout`，不會再開新的檢查。
 
-200 回傳 `{ok, failure, checkedAt}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`connection_failed`（`openai-compatible`：服務連不上）、`rejected`（服務拒絕了金鑰，401 或 403）、`server_error`（服務回 5xx）、`unexpected_response`（服務有回應，但不是檢查要的：模型列表回了 2xx 以外的狀態，或回應過大）、`redirect_blocked`（服務把檢查導向根位址之外）、`alias_missing`（資源的金鑰別名不在金鑰庫，或 Engine 沒有組態金鑰庫；此時不送出任何請求，與 `secretStatus` 為 `missing` 一致）、`alias_invalid`（別名在金鑰庫，但機密不可使用，即 `secretStatus` 為 `invalid_secret`）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。`openai-compatible` 的檢查只做連線與一個輕量讀取：啟用了模型列表（`models.list`）時讀取它，否則只對根位址發一個 GET，任何不是拒絕或失敗的回應都算通過；它用自己的短逾時（上述 `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，連線、首位元組與閒置都以它為限），不用資源自己的逾時，不取得容量與每 run 的請求額度，也不產生任何內容。服務正在生成而來不及回應時結果是 `timeout`，不一定代表服務故障（目標服務並行為 1 時尤其如此）。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，同上）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
+200 回傳 `{ok, failure, checkedAt}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`connection_failed`（`openai-compatible`：服務連不上）、`rejected`（服務拒絕了金鑰，401 或 403）、`server_error`（服務回 5xx）、`unexpected_response`（服務有回應，但不是檢查要的：模型列表回了 2xx 以外的狀態，或回應過大）、`redirect_blocked`（服務把檢查導向根位址之外）、`alias_missing`（資源的金鑰別名不在金鑰庫，或 Engine 沒有組態金鑰庫；此時不送出任何請求，與 `secretStatus` 為 `missing` 一致）、`alias_invalid`（別名在金鑰庫，但機密不可使用，即 `secretStatus` 為 `invalid_secret`）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。`jdbc-pool` 的檢查以資源的帳號與密碼另開一條連線（不經連線池，不佔容量與任何 run 的連線額度）執行資料庫設定檔的健康查詢（PostgreSQL 為 `SELECT 1`）後關閉；失敗類別：`connection_failed`（連不上，含連線數已滿與伺服器關閉中）、`rejected`（帳號或密碼不被接受，也包括需要密碼而資源沒有設密碼別名）、`timeout`（連線逾時，或超過上述檢查整體上限）、`unexpected_response`（連上了但健康查詢被資料庫拒絕）、`alias_missing`／`alias_invalid`（別名問題，此時不連線）；回應不含位址、帳號或驅動訊息。`openai-compatible` 的檢查只做連線與一個輕量讀取：啟用了模型列表（`models.list`）時讀取它，否則只對根位址發一個 GET，任何不是拒絕或失敗的回應都算通過；它用自己的短逾時（上述 `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，連線、首位元組與閒置都以它為限），不用資源自己的逾時，不取得容量與每 run 的請求額度，也不產生任何內容。服務正在生成而來不及回應時結果是 `timeout`，不一定代表服務故障（目標服務並行為 1 時尤其如此）。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，同上）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
 
 ### `POST /api/v1/resources/{name}/holders/{runId}/release`
 
 認證：Bearer（admin）
 
-強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`、`openai-compatible`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案；`openai-compatible` 進行中的請求同時被取消（連線關閉，請求額度歸還，該呼叫得到 `CANCELLED`），但服務端是否隨連線中斷而停止生成取決於服務。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
+強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`、`jdbc-pool`、`openai-compatible`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案；`openai-compatible` 進行中的請求同時被取消（連線關閉，請求額度歸還，該呼叫得到 `CANCELLED`），但服務端是否隨連線中斷而停止生成取決於服務；`jdbc-pool` 進行中的語句同時在資料庫端被取消並切斷其連線（該呼叫得到 `CANCELLED`），未提交的交易回滾，連線經清理才歸還連池（見「`jdbc-pool` 型別」）。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
 
 ## 機密（管理員）
 

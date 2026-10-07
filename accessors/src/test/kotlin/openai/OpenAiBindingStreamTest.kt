@@ -529,4 +529,42 @@ class OpenAiBindingStreamTest {
               Json.parseToJsonElement("""{"baseUrl":"${server.baseUrl}"}""").jsonObject
           ) as SettingsResult.Valid)
           .settings
+
+  @Test
+  fun `opening a stream fails with the category and the status of the answer, and a redirect out of the base address is not followed`() {
+    val elsewhere = FakeOpenAiServer()
+    try {
+      val b = binding()
+      val categories = LinkedHashMap<Int, String>()
+      for (status in listOf(401, 429, 500, 400)) {
+        server.script = { _, response ->
+          response.json(status, """{"error":{"message":"no"}}""")
+          true
+        }
+        val e = failure { open(b) }
+        categories[status] = "${e.failure}|${e.status}"
+      }
+      server.script = { _, response ->
+        response.redirect(307, "${elsewhere.baseUrl}/chat/completions")
+        true
+      }
+      val blocked = failure { open(b) }
+
+      assertEquals(
+          mapOf(
+              401 to "DENIED|401",
+              429 to "RATE_LIMITED|429",
+              500 to "SERVER_ERROR|500",
+              400 to "REQUEST_REJECTED|400",
+          ),
+          categories,
+      )
+      assertEquals(ResourceFailure.REDIRECT_BLOCKED, blocked.failure)
+      assertEquals(0, elsewhere.requests.size)
+      server.script = null
+      assertEquals(200, open(b)["status"], "none of the failures kept the share")
+    } finally {
+      elsewhere.close()
+    }
+  }
 }

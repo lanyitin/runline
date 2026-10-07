@@ -17,6 +17,8 @@ data class OpenAiOutcome(
     val sent: Boolean,
     /** From the call to the moment it had its share of requests. */
     val quotaWaitMillis: Long,
+    /** From having the share to the end of the call; 0 when no request went out. */
+    val latencyMillis: Long,
     /** From sending the request to the first byte of the answer, when there was one. */
     val firstByteMillis: Long?,
     /** From the first byte to the last, when the whole answer came. */

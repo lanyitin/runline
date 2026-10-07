@@ -30,12 +30,16 @@ internal class EngineResourceObserver(
       telemetry.fileOperation(ResourceLabel(resource, type))
     }
     val span = traces.resourceOperation(runId, resource, type, operation)
+    // Current for as long as the operation runs, so that what the type reports about it (the time
+    // a request waited, the time to its first byte) lands on this span.
+    val scope = span?.makeCurrent()
     try {
       return body()
     } catch (e: Throwable) {
       span?.setStatus(StatusCode.ERROR)
       throw e
     } finally {
+      scope?.close()
       span?.end()
     }
   }

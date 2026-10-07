@@ -174,10 +174,14 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceTelemetry>(),
       )
     }
-    provide<ResourceBehaviors> {
-      ResourceBehaviors.forEngine(resolve<EngineConfig>().resources, resolve<SecretStore>())
-    }
     provide<OpenAiUsage> { OpenAiUsage() }
+    provide<ResourceBehaviors> {
+      ResourceBehaviors.forEngine(
+          resolve<EngineConfig>().resources,
+          resolve<SecretStore>(),
+          OpenAiTelemetry(resolve<OpenTelemetry>(), resolve<OpenAiUsage>()),
+      )
+    }
     provide<ResourceAdmin> {
       val coordinator = resolve<ResourceCoordinator>()
       ResourceAdmin(

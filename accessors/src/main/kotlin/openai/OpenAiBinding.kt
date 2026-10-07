@@ -102,6 +102,7 @@ class OpenAiBinding(
   private inner class Report {
     var sent = false
     var quotaWaitMillis = 0L
+    var acquiredAt = 0L
     var firstByteMillis: Long? = null
     var generationMillis: Long? = null
     var usage: OpenAiTokenUsage? = null
@@ -114,6 +115,7 @@ class OpenAiBinding(
               failedStatus ?: status,
               sent,
               quotaWaitMillis,
+              if (sent) millisSince(acquiredAt) else 0,
               firstByteMillis,
               generationMillis,
               usage,
@@ -157,6 +159,7 @@ class OpenAiBinding(
           throw ResourceOperationFailure(ResourceFailure.CANCELLED, e)
         }
     report.quotaWaitMillis = millisSince(waitStart)
+    report.acquiredAt = System.nanoTime()
     if (!got) throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
     try {
       val call = Call(plan.limits)

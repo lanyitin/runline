@@ -35,6 +35,10 @@
 
 `runline.env.example` 設定 `RUNLINE_RESOURCE_ROOT=/var/lib/runline-resources`，單元的 `StateDirectory=runline runline-resources` 在啟動時建立並交給服務帳號。三個目錄（共享、資源、run 私有）不得互為上下層；注意 `/var/lib/runline-resources` 與 `/var/lib/runline` 是並列的兩個目錄，不是父子。備份、容量與還原由營運者負責。這份單元檔的 `StateDirectory` 與目錄所有權**沒有**在 systemd 上實測過（開發環境沒有 systemd），Docker 版本以真實 Docker 驗證。
 
+## 金鑰庫（機密與憑證）
+
+金鑰庫內容與維運規則（機密限可列印 ASCII、以密碼檔參數操作、更新為先刪後建加原子替換、憑證項目不受 ASCII 限制）見 [04](04-deployment.md)「組態與密鑰」與 [ADR-019](adr/ADR-019-typed-shared-resources.md)；掛載與維運步驟由 [WI-42](work-items/WI-42-keystore-deployment.md) 落入本文。
+
 ## 已接受的限度
 
 - 沒有選用的存活檢查時，systemd 的重啟只來自行程結束，與單機 Docker 相同；行程卡死由監控告警處理。

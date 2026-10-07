@@ -40,6 +40,8 @@
 - 自動測試使用真實 PostgreSQL（Testcontainers），密碼別名使用真實 PKCS12 金鑰庫。
 - 08-api 同步更新（`type=jdbc-pool` 的設定欄位、`invalid_resource` 的新增 `problem`、使用量欄位）；`ApiDocumentationTest` 通過。
 
+- 資料庫的 TLS 信任與 mTLS 用戶端憑證不在本項範圍，由 [WI-52](WI-52-tls-trust-and-mtls.md) 加入；本項的額外連線屬性允許清單不含 TLS 相關項目，且不得提供任何關閉主機名稱或憑證驗證的途徑。
+
 ## 架構約束
 
 - 容量是 run 級持有（ADR-007），連線池內沒有等待，保留無死結性質；不引入請求級或交易級的取得與釋放。

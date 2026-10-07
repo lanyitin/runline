@@ -19,6 +19,8 @@ WI-49 提供型別感知的資源頁與 `counter` 表單。本項在後端型別
 **驗收方式**
 - 沿用 WI-49：真實的打包後 Engine、真實 PostgreSQL、真實 PKCS12 金鑰庫與真實瀏覽器引擎，管理員與開發人員兩種 token，本機手動腳本；`openai-compatible` 使用自製的 OpenAI 相容 Fake 服務端、`jdbc-pool` 使用真實 PostgreSQL；前端單元測試納入 `check`。涵蓋建立、修改、檢查成功與失敗、刪除預覽與確認，並驗證機密值不出現在 DOM、瀏覽器儲存與網路回應。不使用 Stub 或 Mock。
 
+- 信任別名與用戶端憑證別名欄位由 [WI-52](WI-52-tls-trust-and-mtls.md) 加入，本項不實作。
+
 ## 架構約束
 
 - 只使用既有 API，不新增或修改端點；不新增 CI。

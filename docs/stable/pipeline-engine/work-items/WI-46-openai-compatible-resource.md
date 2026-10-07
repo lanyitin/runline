@@ -50,6 +50,8 @@
 - 對 lemonade 與另一個 OpenAI 相容服務的實測是本機手動執行的腳本（不接進 Gradle `check`），回報執行結果；服務不可用時回報未執行，不得宣稱已驗證。
 - 08-api 同步更新（`type=openai-compatible` 的設定欄位、`invalid_resource` 的新增 `problem`、使用量欄位）；`ApiDocumentationTest` 通過。
 
+- TLS 信任與 mTLS 用戶端憑證（`trustAliases`、`clientCertAlias`）不在本項範圍，由 [WI-52](WI-52-tls-trust-and-mtls.md) 加入；本項連線 `https` 時使用 JVM 預設信任，且不得提供任何關閉主機名稱或憑證驗證的途徑。
+
 ## 架構約束
 
 - 容量是 run 級持有（ADR-007）；不引入請求級限流。

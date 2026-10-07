@@ -1,6 +1,6 @@
 # 工作項總覽
 
-本文回答：要交給 tdd-coder 的工作有哪些、先後順序為何。tdd-coder 只需讀本頁加被派到的那一項。狀態：已核可（2026-10-03；WI-40 至 WI-51 為 2026-10-06）。
+本文回答：要交給 tdd-coder 的工作有哪些、先後順序為何。tdd-coder 只需讀本頁加被派到的那一項。狀態：已核可（2026-10-03；WI-40 至 WI-51 為 2026-10-06；WI-52 為 2026-10-07 納入、待使用者確認）。
 
 | 項目 | 目標 | 相依 |
 |---|---|---|
@@ -45,7 +45,7 @@
 | [WI-38](WI-38-deployment-entry-points.md) | 部署入口：從 jar 執行遷移、結束代碼、健康檢查工具評估 | WI-18、WI-29 |
 | [WI-39](WI-39-deployment-files.md) | `deploy/` 的 Dockerfile、Compose 與 systemd 單元 | WI-31、WI-38 |
 | [WI-40](WI-40-typed-resources-and-deletion.md) | 資源型別化基礎：型別欄位與遷移、metadata 型別宣告、`type_mismatch`、宣告者查詢、刪除與預覽 | WI-09、WI-19 |
-| [WI-41](WI-41-keystore-secrets.md) | 金鑰庫機密機制：JDK 25 工具前置驗證、唯讀載入、別名查找、機密端點與重載、不外洩（別名到資源的解析由 WI-46、WI-48 驗證） | WI-40、WI-43 |
+| [WI-41](WI-41-keystore-secrets.md) | 金鑰庫機密機制（前置驗證已完成）：唯讀載入、格式與開啟失敗檢查、別名查找、機密端點與重載、不外洩（別名到資源的解析由 WI-46、WI-48 驗證） | WI-40、WI-43 |
 | [WI-42](WI-42-keystore-deployment.md) | 金鑰庫的 Docker 與 systemd 掛載與維運手冊 | WI-39、WI-41 |
 | [WI-43](WI-43-resource-accessor-boundary.md) | 資源存取端、檢查端點與 `file` 型別（合併原 WI-43、WI-44、WI-45）：存取端邊界與回收失效、`check` 端點與檢查結果、`file` 的資源根目錄與路徑限定與互斥與部署；通用機制以真實 `file` 驗證 | WI-39、WI-40 |
 | [WI-44](WI-44-resource-check-endpoint.md) | 已併入 WI-43，不單獨派工 | 不適用 |
@@ -55,15 +55,16 @@
 | [WI-48](WI-48-jdbc-pool-resource.md) | `jdbc-pool` 型別（PostgreSQL）：連線池世代、窄 SQL 存取、資料庫設定檔機制 | WI-41、WI-43、WI-46 |
 | [WI-49](WI-49-console-resources-page-rework.md) | Console 資源頁改造：型別、檢查、刪除、機密檢視、宣告者 | WI-36、WI-40、WI-41、WI-43、WI-46 |
 | [WI-50](WI-50-console-typed-resource-forms.md) | Console 各型別資源表單與使用量 | WI-43、WI-46、WI-48、WI-49 |
-| [WI-51](WI-51-secret-non-leak-verification.md) | 機密不外洩與型別化資源的整體驗證、文件一致性核對 | WI-42、WI-47、WI-48、WI-50 |
+| [WI-51](WI-51-secret-non-leak-verification.md) | 機密不外洩與型別化資源的整體驗證、文件一致性核對 | WI-42、WI-47、WI-48、WI-50、WI-52 |
+| [WI-52](WI-52-tls-trust-and-mtls.md) | TLS 信任與 mTLS：金鑰庫的受信任憑證與私鑰項目、`trustAliases` 與 `clientCertAlias`、到期監看、輪替、Console 顯示與欄位 | WI-41、WI-46、WI-48、WI-50 |
 
 建議順序：WI-00 → WI-13 → WI-01（WI-12 與 WI-01 無相依，可並行）→ (WI-02、WI-05、WI-11 並行) → WI-16 → WI-03 → WI-04（WI-03 的 IDE 實測需要 WI-17 提供外部測試專案，WI-17 在 WI-03 實作完成後進行）；WI-06 → WI-19 → WI-08 → (WI-07、WI-09 並行)；WI-10 與 WI-18 在 WI-06 之後即可進行，與其他項無先後要求。WI-02 的初始化階段需要 WI-11 提供目錄位置，WI-02 與 WI-11 需一併驗收。WI-15 與其他項無相依，在尚未完成的項目之前先做，使後續項目都使用新的套件名稱。
 
 Console 與部署相關項目（WI-28 至 WI-39，決策見 [ADR-015](../adr/ADR-015-console-frontend.md) 至 [ADR-018](../adr/ADR-018-liveness-readiness-probes.md)）的建議順序：WI-28 → WI-29 → WI-30 → WI-31 → WI-32（WI-28 與 WI-30 無相依，可並行；WI-29 與前端項目無相依，可在任何時間點進行）；WI-31 之後 WI-33 → WI-34 → WI-35 → WI-36 → WI-37；WI-29 之後 WI-38 → WI-39（WI-39 同時需要 WI-31 完成；WI-38 內的健康檢查工具選項須先經架構決定）。WI-32 與 Console 畫面項目無先後要求。WI-28 與 WI-29 完成之前，`ApiDocumentationTest` 會因 08-api 已記載尚未實作的端點而失敗，屬預期，完成後轉為通過。
 
-型別化共享資源項目（WI-40 至 WI-51，決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md)）的建議順序：WI-40 → WI-43 → WI-41 → WI-46 → WI-47 → WI-48 → WI-49 → WI-50 → WI-51。WI-42（部署掛載與維運手冊）在 WI-41 之後即可進行，與型別項目無先後要求，須在 WI-51 之前完成；WI-49（Console 資源頁改造）在 WI-46 之後即可，可與 WI-47、WI-48 並行，須在 WI-50 之前完成。
+型別化共享資源項目（WI-40 至 WI-51，決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md)）的建議順序：WI-40 → WI-43 → WI-41 → WI-46 → WI-47 → WI-48 → WI-49 → WI-50 → WI-52 → WI-51。WI-42（部署掛載與維運手冊）在 WI-41 之後即可進行，與型別項目無先後要求，須在 WI-51 之前完成；WI-49（Console 資源頁改造）在 WI-46 之後即可，可與 WI-47、WI-48 並行，須在 WI-50 之前完成。
 
-WI-44 與 WI-45 已併入 WI-43，編號保留為指向 WI-43 的說明檔，不單獨派工。WI-43 一次派給 tdd-coder，內部依序 TDD：存取端邊界與回收失效 → `check` 端點與檢查結果 → `file` 型別完整行為與部署；驗收全部以真實 `file` 型別與真實檔案系統進行，型別集合封閉，不引入測試專用型別或擴充點。WI-43 排在 WI-41 之前：WI-43 不需要機密，且 WI-41 需要 WI-43 的資源根目錄組態來檢查金鑰庫位置。WI-41 的前置驗證（JDK 25 金鑰庫工具）須先完成並通過，結果不如預期時停下來由架構決定；它只影響 WI-41、WI-42、WI-46、WI-48，不影響 WI-43。
+WI-44 與 WI-45 已併入 WI-43，編號保留為指向 WI-43 的說明檔，不單獨派工。WI-43 一次派給 tdd-coder，內部依序 TDD：存取端邊界與回收失效 → `check` 端點與檢查結果 → `file` 型別完整行為與部署；驗收全部以真實 `file` 型別與真實檔案系統進行，型別集合封閉，不引入測試專用型別或擴充點。WI-43 排在 WI-41 之前：WI-43 不需要機密，且 WI-41 需要 WI-43 的資源根目錄組態來檢查金鑰庫位置。WI-41 的前置驗證（JDK 25 金鑰庫工具）已於 2026-10-07 完成，結果與決定見 ADR-019（機密限可列印 ASCII 等），不影響 WI-43。WI-52（TLS 信任與 mTLS）在 WI-50 之後、WI-51 之前；其待實測項目結果不如預期時停下來由架構決定。
 
 金鑰庫機制與別名解析分兩段驗證：WI-41 以真實金鑰庫檔與端點驗證機制本身（載入、查找、列出、重載、不外洩），此時沒有任何型別接受別名；別名格式、狀態、引用者、檢查的別名缺失類別與重載後的世代切換，由第一個接受別名的型別 WI-46 驗證，WI-48 以 `jdbc-pool` 再驗證一次。WI-43 的「進行中的長時間操作被取消」由 WI-46（進行中請求）與 WI-48（進行中查詢）驗證。WI-46 實作前須向使用者確認目標服務的端點與並行上限。每個新增或變更 API 的項目在實作時同步更新 08-api，`ApiDocumentationTest` 在各項完成時保持通過；08 在對應項目完成前不列尚未實作的路由。
 
@@ -95,6 +96,11 @@ flowchart LR
   WI42 --> WI51[WI-51 整體驗證]
   WI47 --> WI51
   WI48 --> WI51
+  WI50 --> WI52[WI-52 TLS 信任與 mTLS]
+  WI41 --> WI52
+  WI46 --> WI52
+  WI48 --> WI52
+  WI52 --> WI51
   WI50 --> WI51
 ```
 

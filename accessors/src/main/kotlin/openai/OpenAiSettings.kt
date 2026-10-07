@@ -365,6 +365,24 @@ internal constructor(
     }
   }
 
+  /** The same settings with other limits on time, for what looks at the service on its own. */
+  fun withTimeouts(limits: OpenAiLimits) =
+      OpenAiSettings(
+          baseUrl,
+          organization,
+          project,
+          headers,
+          endpoints,
+          limits,
+          requestsPerRun,
+          maxRequestBytes,
+          maxResponseBytes,
+          defaults,
+          allowedModels,
+          lockedParameters,
+          maxValues,
+      )
+
   /** Every effective value, in a fixed order, so that equal settings are written equally. */
   private fun normalized(): JsonObject {
     val result = LinkedHashMap<String, JsonElement>()

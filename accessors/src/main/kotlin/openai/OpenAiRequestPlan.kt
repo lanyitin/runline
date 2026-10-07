@@ -29,6 +29,10 @@ private constructor(
     get() = endpoint.method
 
   companion object {
+    /** A request for the base address itself, with [settings]' limits; for checks only. */
+    internal fun root(settings: OpenAiSettings): OpenAiRequestPlan =
+        OpenAiRequestPlan(OpenAiEndpoints.ROOT, settings.baseUrl, null, settings.timeouts)
+
     private val TIMEOUT_NAMES = setOf("connect", "firstByte", "idle", "total", "quotaWait")
 
     /**

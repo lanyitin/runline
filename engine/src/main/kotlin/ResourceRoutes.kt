@@ -240,11 +240,19 @@ private fun InvalidResource.message() =
       InvalidResource.CAPACITY -> "容量必須是 1 以上的整數。"
       InvalidResource.NOTHING_TO_CHANGE -> "請提供要修改的 capacity 或 enabled。"
       InvalidResource.UNKNOWN_TYPE -> "資源型別不明；型別只能是 counter、file、jdbc-pool、openai-compatible。"
-      InvalidResource.UNSUPPORTED_TYPE -> "這個資源型別尚未支援，目前只能建立 counter。"
+      InvalidResource.UNSUPPORTED_TYPE -> "這個資源型別尚未支援，目前只能建立 counter、file 與 openai-compatible。"
       InvalidResource.INVALID_SETTINGS -> "這個資源型別沒有這些設定欄位。"
       InvalidResource.INVALID_SECRET_ALIAS -> "這個資源型別沒有機密別名，或別名不合規。"
       InvalidResource.PATH_OUTSIDE_ROOT -> "路徑不在資源根目錄內：路徑必須是相對於資源根目錄的路徑，不能是絕對路徑，也不能跳出根目錄。"
       InvalidResource.PATH_UNUSABLE -> "路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫。"
+      InvalidResource.INVALID_BASE_URL -> "根位址必須是 http 或 https 位址，不含使用者資訊、查詢與片段。"
+      InvalidResource.INVALID_HEADER ->
+          "額外標頭不合規：名稱不得含 auth、key、token、secret、cookie，不得是 Engine 自己設定的標頭，值不得含換行或控制字元。"
+      InvalidResource.INVALID_ENDPOINT -> "啟用的端點必須是端點目錄內、且這個版本已提供的條目，且至少一個。"
+      InvalidResource.INVALID_REQUEST_DEFAULTS ->
+          "請求參數的預設、鎖定、允許的模型或上限不合規：只有模型與取樣、長度相關的參數可以設定，預設不得違反自己的上限與模型清單。"
+      InvalidResource.INVALID_TIMEOUT -> "逾時必須是正整數的毫秒數（總時間可不設）。"
+      InvalidResource.INVALID_LIMIT -> "每 run 同時請求數或大小上限超出允許範圍。"
       InvalidResource.IMMUTABLE_NAME -> "資源名稱建立後不能修改。"
       InvalidResource.IMMUTABLE_TYPE -> "資源型別建立後不能修改；要換型別請刪除後重新建立。"
     }

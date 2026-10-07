@@ -122,9 +122,27 @@ class OpenAiBinding(
     }
   }
 
+  /** Sends a plan that did not come from a pipeline; used by [OpenAiProbe]. */
+  internal fun send(plan: OpenAiRequestPlan): Any? {
+    val report = Report()
+    var failure: ResourceFailure? = null
+    try {
+      return run(plan, plan.endpoint.id, report)
+    } catch (e: ResourceOperationFailure) {
+      failure = e.failure
+      throw e
+    } finally {
+      report.finish(plan.endpoint.id, failure, null)
+    }
+  }
+
   private fun run(arguments: Map<String, Any?>, endpoint: String, report: Report): Any? {
     if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
-    val plan = OpenAiRequestPlan.of(settings, arguments)
+    return run(OpenAiRequestPlan.of(settings, arguments), endpoint, report)
+  }
+
+  private fun run(plan: OpenAiRequestPlan, endpoint: String, report: Report): Any? {
+    if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
     if (credential is OpenAiCredential.Unavailable) {
       throw ResourceOperationFailure(ResourceFailure.SECRET_UNAVAILABLE)
     }

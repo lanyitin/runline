@@ -44,6 +44,11 @@ data class CheckDoc(val ok: Boolean, val failure: String? = null, val checkedAt:
 
 fun CheckResult.toDoc() = CheckDoc(ok, failure?.wire, checkedAt.toString())
 
+/**
+ * What a type says about its use now: the requests an `openai-compatible` resource has in flight.
+ */
+@Serializable data class UsageDoc(val inFlightRequests: Int)
+
 @Serializable
 data class HolderDoc(
     val runId: String,
@@ -89,6 +94,18 @@ data class ResourceResponse(
     val enabled: Boolean,
     val settings: JsonObject,
     val secretAlias: String?,
+    /**
+     * What the alias comes to against the keystore: `not_set`, `found`, `missing` or
+     * `invalid_secret`. Never the secret.
+     */
+    val secretStatus: String,
+    /**
+     * The most requests the entity can have at once (capacity times what each holder may do at
+     * once), for the types that can say; null for the others.
+     */
+    val concurrencyLimit: Int?,
+    /** The use of the entity now, for the types that can say; null for the others. */
+    val usage: UsageDoc?,
     /** The last check of the entity; null when never checked or when the settings changed since. */
     val lastCheck: CheckDoc?,
     val createdBy: String,
@@ -149,6 +166,9 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
       enabled = resource.enabled,
       settings = resource.settings,
       secretAlias = resource.secretAlias,
+      secretStatus = aliasState.wire,
+      concurrencyLimit = concurrencyLimit,
+      usage = usage?.let { UsageDoc(it.inFlightRequests) },
       lastCheck = resource.lastCheck?.toDoc(),
       createdBy = resource.createdBy,
       createdAt = resource.createdAt.toString(),

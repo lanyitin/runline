@@ -59,30 +59,33 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
       by: String,
       at: Instant,
       settings: JsonObject?,
+      secretAlias: String?,
   ): SharedResource? =
       dataSource.connection.use { connection ->
         connection
             .prepareStatement(
-                "UPDATE shared_resource SET capacity = COALESCE(?, capacity), " +
-                    "enabled = COALESCE(?, enabled), settings = COALESCE(?::jsonb, settings), " +
-                    "check_ok = CASE WHEN $CHANGED THEN NULL ELSE check_ok END, " +
-                    "check_failure = CASE WHEN $CHANGED THEN NULL ELSE check_failure END, " +
-                    "checked_at = CASE WHEN $CHANGED THEN NULL ELSE checked_at END, " +
+                "UPDATE shared_resource AS r SET capacity = COALESCE(?, r.capacity), " +
+                    "enabled = COALESCE(?, r.enabled), " +
+                    "settings = COALESCE(p.new_settings, r.settings), " +
+                    "secret_alias = COALESCE(p.new_alias, r.secret_alias), " +
+                    "check_ok = CASE WHEN $CHANGED THEN NULL ELSE r.check_ok END, " +
+                    "check_failure = CASE WHEN $CHANGED THEN NULL ELSE r.check_failure END, " +
+                    "checked_at = CASE WHEN $CHANGED THEN NULL ELSE r.checked_at END, " +
                     "updated_by = ?, updated_at = ? " +
-                    "WHERE name = ? RETURNING $COLUMNS"
+                    "FROM (SELECT ?::jsonb AS new_settings, ?::text AS new_alias) AS p " +
+                    "WHERE r.name = ? RETURNING $QUALIFIED_COLUMNS"
             )
             .use {
               it.setObject(1, capacity)
               it.setObject(2, enabled)
+              it.setString(3, by)
+              it.setObject(4, at.atOffset(ZoneOffset.UTC))
               it.setString(
-                  3,
+                  5,
                   settings?.let { s -> Json.encodeToString(JsonObject.serializer(), s) },
               )
-              val encoded = settings?.let { s -> Json.encodeToString(JsonObject.serializer(), s) }
-              for (index in 4..9) it.setString(index, encoded)
-              it.setString(10, by)
-              it.setObject(11, at.atOffset(ZoneOffset.UTC))
-              it.setString(12, name)
+              it.setString(6, secretAlias)
+              it.setString(7, name)
               it.executeQuery().use { rows -> rows.all().singleOrNull() }
             }
       }
@@ -149,8 +152,18 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
     const val COLUMNS =
         "name, capacity, enabled, created_by, created_at, updated_by, updated_at, type, " +
             "settings::text AS settings, secret_alias, check_ok, check_failure, checked_at"
-    /** The settings given differ from the stored ones: what a check was made of no longer holds. */
-    const val CHANGED = "(?::jsonb IS NOT NULL AND ?::jsonb IS DISTINCT FROM settings)"
+    const val QUALIFIED_COLUMNS =
+        "r.name, r.capacity, r.enabled, r.created_by, r.created_at, r.updated_by, r.updated_at, " +
+            "r.type, r.settings::text AS settings, r.secret_alias, r.check_ok, r.check_failure, " +
+            "r.checked_at"
+
+    /**
+     * The settings or the alias given differ from the stored ones: what a check was made of no
+     * longer holds.
+     */
+    const val CHANGED =
+        "((p.new_settings IS NOT NULL AND p.new_settings IS DISTINCT FROM r.settings) OR " +
+            "(p.new_alias IS NOT NULL AND p.new_alias IS DISTINCT FROM r.secret_alias))"
     const val SELECT = "SELECT $COLUMNS FROM shared_resource"
   }
 }

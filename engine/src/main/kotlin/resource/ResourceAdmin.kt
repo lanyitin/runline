@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.engine.auth.ApiIdentity
+import dev.lawlan.runline.engine.secret.normalizeAlias
 import kotlinx.serialization.json.JsonObject
 import org.slf4j.LoggerFactory
 
@@ -32,6 +33,24 @@ enum class InvalidResource(val problem: String) {
 
   /** The path of a `file` resource cannot be used now: no root, no directory, or no access. */
   PATH_UNUSABLE("path_unusable"),
+
+  /** The base address of an `openai-compatible` resource is not an http(s) address of its own. */
+  INVALID_BASE_URL("invalid_base_url"),
+
+  /** An extra header that is a credential by its name, is the Engine's own, or is malformed. */
+  INVALID_HEADER("invalid_header"),
+
+  /** An enabled endpoint that is not in the catalog, or that this Engine does not carry out yet. */
+  INVALID_ENDPOINT("invalid_endpoint"),
+
+  /** Request parameter defaults, locks, allowed models or ceilings that do not fit. */
+  INVALID_REQUEST_DEFAULTS("invalid_request_defaults"),
+
+  /** A limit on time that is not a positive number of milliseconds. */
+  INVALID_TIMEOUT("invalid_timeout"),
+
+  /** Requests per run or a size limit outside what is allowed. */
+  INVALID_LIMIT("invalid_limit"),
 
   /** A change of name: a resource is identified by its name for good. */
   IMMUTABLE_NAME("immutable_name"),
@@ -102,8 +121,8 @@ class ResourceAdmin(
             by.name,
             now,
             resourceType,
-            settings ?: JsonObject(emptyMap()),
-            secretAlias,
+            settings?.let(behavior::normalized) ?: JsonObject(emptyMap()),
+            secretAlias?.let(::normalizeAlias),
         )
     if (!store.insert(resource)) return CreateResourceResult.AlreadyExists
     log.info(
@@ -135,12 +154,20 @@ class ResourceAdmin(
       return UpdateResourceResult.Invalid(InvalidResource.CAPACITY)
     }
     val existing = store.find(name) ?: return UpdateResourceResult.NotFound
-    behaviors.of(existing.type)?.problemWith(settings, secretAlias)?.let {
+    val behavior = behaviors.of(existing.type)
+    behavior?.problemWithChange(existing, settings, secretAlias)?.let {
       return UpdateResourceResult.Invalid(it)
     }
     val updated =
-        store.update(name, capacity, enabled, by.name, clock.instant(), settings)
-            ?: return UpdateResourceResult.NotFound
+        store.update(
+            name,
+            capacity,
+            enabled,
+            by.name,
+            clock.instant(),
+            settings?.let { behavior?.normalized(it) ?: it },
+            secretAlias?.let(::normalizeAlias),
+        ) ?: return UpdateResourceResult.NotFound
     log.info(
         "Shared resource {} changed by {}: capacity {}, enabled {}",
         name,

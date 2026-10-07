@@ -16,6 +16,27 @@ enum class CheckFailure(val wire: String) {
   /** The path leads out of the resource root. */
   PATH_OUTSIDE_ROOT("path_outside_root"),
 
+  /** The service could not be reached. */
+  CONNECTION_FAILED("connection_failed"),
+
+  /** The service refused the credentials. */
+  REJECTED("rejected"),
+
+  /** The service answered with a failure of its own (5xx). */
+  SERVER_ERROR("server_error"),
+
+  /**
+   * The service answered, but not with what a check looks for, or redirected out of its address.
+   */
+  UNEXPECTED_RESPONSE("unexpected_response"),
+  REDIRECT_BLOCKED("redirect_blocked"),
+
+  /** The resource names a key that the keystore does not have (or has no keystore). */
+  ALIAS_MISSING("alias_missing"),
+
+  /** The resource names a key that the keystore has but that cannot be used. */
+  ALIAS_INVALID("alias_invalid"),
+
   /** The check did not finish within the limit. */
   TIMEOUT("timeout"),
 

@@ -199,6 +199,12 @@ object OpenAiEndpoints {
           plain("batches.cancel", "POST", "/batches/{id}/cancel"),
       )
 
+  /**
+   * The base address itself, which is not an entry of the catalog and cannot be called by a
+   * pipeline: it is what a check looks at when the models are not enabled.
+   */
+  internal val ROOT = OpenAiEndpoint("root", "GET", "", BodyKind.NONE, ResponseKind.JSON)
+
   private val byId = all.associateBy { it.id }
 
   fun find(id: String): OpenAiEndpoint? = byId[id]

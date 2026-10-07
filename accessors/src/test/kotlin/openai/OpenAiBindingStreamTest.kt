@@ -5,6 +5,7 @@ import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
 import dev.lawlan.runline.core.ResourceFailure
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -180,6 +181,31 @@ class OpenAiBindingStreamTest {
       await("the service to see the connection go") { server.clientsGone == 1 }
       assertEquals(0, server.inFlight)
       assertEquals(ResourceFailure.CANCELLED, failure { next(b, opened) }.failure)
+    } finally {
+      pulling.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `a run that is cancelled while it pulls ends the stream as cancelled, and stays interrupted`() {
+    endless()
+    val b = binding()
+    val opened = open(b)
+    next(b, opened)
+    val pulling = Executors.newSingleThreadExecutor()
+    try {
+      val seen = AtomicReference<Pair<ResourceFailure, Boolean>>()
+      val pull = pulling.submit {
+        val e = failure { next(b, opened) }
+        seen.set(e.failure to Thread.currentThread().isInterrupted)
+      }
+      Thread.sleep(200)
+
+      pulling.shutdownNow()
+
+      pull.get(5, TimeUnit.SECONDS)
+      assertEquals(ResourceFailure.CANCELLED to true, seen.get())
+      await("the service to see the connection go") { server.clientsGone == 1 }
     } finally {
       pulling.shutdownNow()
     }

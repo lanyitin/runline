@@ -354,7 +354,12 @@ class OpenAiBinding(
           try {
             input.read(it)
           } catch (e: IOException) {
-            throw stopped(call) ?: e
+            throw stopped(call)
+                ?: if (Thread.currentThread().isInterrupted || e.cause is InterruptedException) {
+                  interrupted(call, e)
+                } else {
+                  e
+                }
           }
       stopped(call)?.let { stop -> throw stop }
       read

@@ -319,6 +319,13 @@ enum class ResourceFailure {
   /** The service redirected somewhere outside the resource's address, which is never followed. */
   REDIRECT_BLOCKED,
 
+  /**
+   * A binary answer holds the resource's API key, which a service echoed back. The answer is
+   * refused whole rather than altered (bytes of audio or of a file cannot be rewritten without
+   * damage): nothing of it reaches the pipeline, and a file being written for it is deleted.
+   */
+  SECRET_IN_RESPONSE,
+
   /** A file written into a scope's directory would take it over the limit on what it may hold. */
   SCOPE_FULL,
 

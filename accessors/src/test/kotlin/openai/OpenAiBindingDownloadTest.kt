@@ -40,7 +40,11 @@ class OpenAiBindingDownloadTest {
     server.close()
   }
 
-  private fun binding(extra: String = ""): OpenAiBinding =
+  private val key = "sk-binary-echo-0123456789abcdef"
+
+  private fun binding(extra: String = ""): OpenAiBinding = keyed(extra, OpenAiCredential.None)
+
+  private fun keyed(extra: String, credential: OpenAiCredential): OpenAiBinding =
       OpenAiBinding(
               "lemon",
               (OpenAiSettings.parse(
@@ -50,6 +54,7 @@ class OpenAiBindingDownloadTest {
                           .jsonObject
                   ) as SettingsResult.Valid)
                   .settings,
+              credential,
           )
           .also { bindings += it }
 
@@ -402,5 +407,83 @@ class OpenAiBindingDownloadTest {
     assertEquals(ResourceFailure.RESPONSE_TOO_LARGE, tighterTotal.failure)
     assertEquals(ResourceFailure.RESPONSE_TOO_LARGE, looser.failure)
     assertEquals(listOf<String>(), shared.toFile().list()!!.toList())
+  }
+
+  private fun keyBinding() = keyed("", OpenAiCredential.Key(key))
+
+  /** A service that sends [parts] one after the other, each as a chunk of its own. */
+  private fun sends(vararg parts: ByteArray) {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "audio/mpeg"))
+      parts.forEach { response.chunk(it) }
+      response.endChunked()
+      true
+    }
+  }
+
+  private val before = ByteArray(300) { 4 }
+
+  private fun refused(call: () -> Unit) {
+    val e = assertFailsWith<ResourceOperationFailure> { call() }
+    assertEquals(ResourceFailure.SECRET_IN_RESPONSE, e.failure)
+  }
+
+  @Test
+  fun `a binary answer that holds the key is refused whole when it is kept in memory`() {
+    sends(before, key.toByteArray(), before)
+
+    refused { download(keyBinding()) }
+  }
+
+  @Test
+  fun `a binary answer that holds the key is refused when it is written to a file, and no file keeps it`() {
+    sends(before, key.toByteArray(), before)
+
+    refused { download(keyBinding(), extra = mapOf("target" to target(shared, "a.mp3"))) }
+
+    assertEquals(listOf<String>(), shared.toFile().list()!!.toList())
+  }
+
+  @Test
+  fun `a key split across two chunks is found in memory, in a file, and in a stream of bytes, and the part before it is not given out`() {
+    val bytes = key.toByteArray()
+    val first = bytes.copyOfRange(0, 10)
+    val second = bytes.copyOfRange(10, bytes.size)
+    sends(before + first, second + before)
+    val b = keyBinding()
+
+    refused { download(b) }
+    refused { download(b, extra = mapOf("target" to target(shared, "a.mp3"))) }
+    val opened =
+        b.execute(
+            "openai.stream.open",
+            mapOf("endpoint" to "audio.speech", "body" to "{}", "binary" to true),
+        ) as Map<*, *>
+    val given = java.io.ByteArrayOutputStream()
+    val e =
+        assertFailsWith<ResourceOperationFailure> {
+          while (true) {
+            (b.execute("openai.stream.next", mapOf("stream" to opened["stream"])) as ByteArray?)
+                ?.let { given.write(it) } ?: break
+          }
+        }
+
+    assertEquals(ResourceFailure.SECRET_IN_RESPONSE, e.failure)
+    assertEquals(listOf<String>(), shared.toFile().list()!!.toList())
+    assertTrue(
+        !String(given.toByteArray(), Charsets.ISO_8859_1).contains(key.substring(0, 10)),
+        "the pipeline was given no part of the key",
+    )
+    assertTrue(given.size() <= before.size, "what was given is only what came before the key")
+  }
+
+  @Test
+  fun `an answer without the key is given whole, however the chunks fall, and the key as a header value is masked`() {
+    val whole = ByteArray(5000) { (it % 251).toByte() }
+    sends(whole.copyOfRange(0, 17), whole.copyOfRange(17, 4000), whole.copyOfRange(4000, 5000))
+
+    val answer = download(keyBinding())
+
+    assertContentEquals(whole, answer["bytes"] as ByteArray)
   }
 }

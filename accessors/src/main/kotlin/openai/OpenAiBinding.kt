@@ -148,10 +148,27 @@ class OpenAiBinding(
      * The next bytes of the answer, as many as are there (some, at most a chunk); null at its end.
      */
     private fun chunk(wire: Wire): ByteArray? {
-      val buffer = ByteArray(BUFFER)
-      val count = wire.read(buffer)
-      return if (count < 0) null else buffer.copyOf(count)
+      while (true) {
+        val buffer = ByteArray(BUFFER)
+        val count = wire.read(buffer)
+        if (count < 0) {
+          val rest = held
+          held = ByteArray(0)
+          return if (rest.isEmpty()) null else rest
+        }
+        if (scan == null) return buffer.copyOf(count)
+        if (scan.finds(buffer, count)) throw echoed()
+        // The last bytes that could begin a key wait for the next piece before they are given out.
+        val data = held + buffer.copyOf(count)
+        val keep = minOf(scan.holdBack, data.size)
+        held = data.copyOfRange(data.size - keep, data.size)
+        val out = data.copyOfRange(0, data.size - keep)
+        if (out.isNotEmpty()) return out
+      }
     }
+
+    private val scan = scanForKey()
+    private var held = ByteArray(0)
 
     /** The stream is over, whichever way: the connection goes, the share is given back. */
     fun end(reason: ResourceFailure?) {
@@ -589,6 +606,7 @@ class OpenAiBinding(
       limit: Long,
   ): Long {
     val buffer = ByteArray(BUFFER)
+    val scan = scanForKey()
     target.directory.openForWrite(target.relative, target.maxBytes).use { file ->
       while (true) {
         val idle =
@@ -611,6 +629,8 @@ class OpenAiBinding(
           runCatching { stream.close() }
           throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
         }
+        // Refused whole: the file being written is deleted with the exception, key and all.
+        if (scan?.finds(buffer, read) == true) throw echoed()
         file.write(buffer, 0, read)
       }
       file.commit()
@@ -619,11 +639,19 @@ class OpenAiBinding(
   }
 
   private fun readBody(call: Call, stream: InputStream, status: Int, limit: Long): String =
-      readBytes(call, stream, status, limit).toString(StandardCharsets.UTF_8)
+      readBytes(call, stream, status, limit, binary = false).toString(StandardCharsets.UTF_8)
 
-  private fun readBytes(call: Call, stream: InputStream, status: Int, limit: Long): ByteArray {
+  private fun readBytes(
+      call: Call,
+      stream: InputStream,
+      status: Int,
+      limit: Long,
+      binary: Boolean = true,
+  ): ByteArray {
     val out = ByteArrayOutputStream()
     val buffer = ByteArray(BUFFER)
+    // JSON text is the pipeline's to use, as in WI-46; bytes are checked for the key.
+    val scan = if (binary) scanForKey() else null
     while (true) {
       val idle =
           TIMERS.schedule(
@@ -645,6 +673,8 @@ class OpenAiBinding(
         runCatching { stream.close() }
         throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
       }
+      // A key that a service echoes into an answer does not reach the pipeline, whole or in part.
+      if (scan?.finds(buffer, read) == true) throw echoed()
       out.write(buffer, 0, read)
     }
     return out.toByteArray()
@@ -741,6 +771,12 @@ class OpenAiBinding(
     val path = target.rawPath.orEmpty()
     return if (path == root || path.startsWith("$root/")) target else null
   }
+
+  /** A scan for the key in a binary answer; none when the resource has no key. */
+  private fun scanForKey(): KeyScan? =
+      (credential as? OpenAiCredential.Key)?.let { KeyScan(it.value.encodeToByteArray()) }
+
+  private fun echoed() = ResourceOperationFailure(ResourceFailure.SECRET_IN_RESPONSE)
 
   private fun millisSince(start: Long): Long = (System.nanoTime() - start) / 1_000_000
 

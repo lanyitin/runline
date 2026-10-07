@@ -305,4 +305,43 @@ class OpenAiKeyLeakTest {
     assertFalse(everything().contains(key), "the key is in something the Engine said")
     assertEquals(4, server.requests.size)
   }
+
+  @Test
+  fun `a service that echoes the key into the bytes of an answer, so the pipeline gets nothing of it and no file keeps it`() {
+    server.script = { request, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "audio/mpeg"))
+      response.chunk(
+          ByteArray(100) { 1 } +
+              request.header("authorization")!!.removePrefix("Bearer ").toByteArray()
+      )
+      response.endChunked()
+      true
+    }
+
+    val ended =
+        run(
+            "bytes",
+            """
+            OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+            StringBuilder seen = new StringBuilder();
+            try { lemon.download(new OpenAiRequest("audio.speech", "{}")); seen.append("no error;"); }
+            catch (ResourceAccessException e) { seen.append(e.getFailure().name()).append(";"); }
+            try { lemon.downloadTo(new OpenAiRequest("audio.speech", "{}"), new OpenAiFile(FileScope.PIPELINE_SHARED, "a.mp3")); seen.append("no error;"); }
+            catch (ResourceAccessException e) { seen.append(e.getFailure().name()).append(";"); }
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "seen", seen.toString());
+            """
+                .trimIndent(),
+        )
+
+    assertEquals(RunState.SUCCEEDED, ended.state, ended.failure?.message)
+    assertEquals(
+        "SECRET_IN_RESPONSE;SECRET_IN_RESPONSE;",
+        Files.readString(h.shared("bytes", "seen")),
+    )
+    assertFalse(Files.exists(h.shared("bytes", "a.mp3")))
+    Files.list(h.shared("bytes", "seen").parent).use { files ->
+      files.forEach { assertFalse(Files.readString(it).contains(key), "$it holds the key") }
+    }
+    assertFalse(everything().contains(key), "the key is in something the Engine said")
+  }
 }

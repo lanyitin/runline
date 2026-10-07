@@ -89,6 +89,7 @@ println(answer.body)
 - 錯誤只含類別與（服務有回應時的）HTTP 狀態碼 `e.status`，沒有服務回的訊息或本文：`DENIED`（401、403）、`RATE_LIMITED`（429）、`SERVER_ERROR`（5xx）、`REQUEST_REJECTED`（其他 4xx）、`CONNECTION_FAILED`、`REDIRECT_BLOCKED`、`RESPONSE_TOO_LARGE`、`CANCELLED`、`SECRET_UNAVAILABLE`，以及五種逾時各自的類別（`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT`、`QUOTA_WAIT_TIMEOUT`）。**不會自動重試**，要不要重試由你決定。
 - `OpenAiTimeouts(connect, firstByte, idle, total, quotaWait)` 可以縮短任何一種逾時，不能放寬。預設的首位元組逾時很長（15 分鐘）：非串流呼叫在生成結束前收不到任何位元組，它實質上就是整體生成上限。
 - 同一個 run 同時進行的請求數受資源的 `requestsPerRun`（預設 1）限制；用盡時 `call` 等待額度（受 `quotaWait` 與 run 的取消約束）。用多條 thread 呼叫時，超過額度的呼叫會排隊，不會同時送出。串流進行中時，同一條 thread 在拉取串流時再發請求會等不到額度，須先結束或關閉串流。
+- 檔案與位元組（[WI-53](pipeline-engine/work-items/WI-53-openai-compatible-multipart-and-binary.md)）：多部分條目以 `OpenAiRequest(..., fields, files)` 上傳（`OpenAiUpload.bytes(...)` 或 `OpenAiUpload.file(field, OpenAiFile(scope, path))`，檔案在 Engine 側串流讀取）；二進位回應以 `download(request)` 取位元組、`downloadTo(request, OpenAiFile(scope, path))` 寫入共享或私有目錄（目錄須在 metadata 宣告，寫入須宣告可寫）、`streamBytes(request)` 逐塊拉語音。路徑只能在這兩個目錄內，否則 `PATH_REJECTED`；寫入使目錄超過用量上限為 `SCOPE_FULL`。
 - 串流（[WI-47](pipeline-engine/work-items/WI-47-openai-compatible-streaming.md)）：`stream(OpenAiRequest(...))` 對可串流的條目（`chat.completions`、`completions`、`responses.create`）回傳 `OpenAiStream`，以 `next()` 逐個事件拉取（每次是一個事件的 `data` 文字，結束時為 `null`），用完以 `close()` 或 `use` 關閉。你不設 `stream`，由資源設定；要用量就在本文帶 `"stream_options":{"include_usage":true}`。
   ```kotlin
   lemon.stream(OpenAiRequest("chat.completions", """{"messages":[{"role":"user","content":"hi"}]}""")).use { s ->

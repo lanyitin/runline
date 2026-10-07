@@ -147,6 +147,143 @@ class RealServiceVerificationTest {
     assertTrue(report.size == results.size)
   }
 
+  /** The entries of WI-53, which have their own list: images, audio, files and batches. */
+  private val binaryEntries =
+      """"endpoints":["images.edits","images.variations","audio.speech","audio.transcriptions","audio.translations","files.create","files.list","files.retrieve","files.content","files.delete","batches.create","batches.list","batches.retrieve","batches.cancel"]"""
+
+  private fun uploadBinding() =
+      OpenAiBinding(
+              "verify",
+              (OpenAiSettings.parse(
+                      Json.parseToJsonElement("""{"baseUrl":"$base",$binaryEntries}""").jsonObject
+                  ) as SettingsResult.Valid)
+                  .settings,
+              key?.let { OpenAiCredential.Key(it) } ?: OpenAiCredential.None,
+          )
+          .also { bindings += it }
+
+  private fun outcome(block: () -> Any?): String =
+      try {
+        val answer = block() as Map<*, *>
+        val size = (answer["bytes"] as? ByteArray)?.size ?: answer["body"]?.toString()?.length
+        "ok|${answer["status"]}|$size bytes"
+      } catch (e: ResourceOperationFailure) {
+        "${e.failure}|${e.status}"
+      }
+
+  private fun form(
+      b: OpenAiBinding,
+      endpoint: String,
+      fields: Map<String, String>,
+      field: String,
+      name: String,
+      content: ByteArray,
+  ) = outcome {
+    b.execute(
+        "openai.call",
+        mapOf(
+            "endpoint" to endpoint,
+            "fields" to fields,
+            "files" to listOf(mapOf("field" to field, "filename" to name, "bytes" to content)),
+        ),
+    )
+  }
+
+  @Test
+  fun `which of the upload, the binary and the batch entries the service offers`() {
+    val b = uploadBinding()
+    // A 1x1 PNG and a tiny silent WAV: what the service does with them is what is measured.
+    val png =
+        java.util.Base64.getDecoder()
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            )
+    val wav =
+        ByteArray(44 + 1600).also {
+          "RIFF".toByteArray().copyInto(it)
+          "WAVEfmt ".toByteArray().copyInto(it, 8)
+          it[16] = 16
+          it[20] = 1
+          it[22] = 1
+          it[24] = 0x40
+          it[25] = 0x1f
+        }
+    say(
+        "entry images.edits: ${form(b, "images.edits", mapOf("model" to model, "prompt" to "a dot"), "image", "a.png", png)}"
+    )
+    say(
+        "entry images.variations: ${form(b, "images.variations", mapOf("model" to model), "image", "a.png", png)}"
+    )
+    say(
+        "entry audio.transcriptions: ${form(b, "audio.transcriptions", mapOf("model" to model), "file", "a.wav", wav)}"
+    )
+    say(
+        "entry audio.translations: ${form(b, "audio.translations", mapOf("model" to model), "file", "a.wav", wav)}"
+    )
+    say(
+        "entry audio.speech: " +
+            outcome {
+              b.execute(
+                  "openai.download",
+                  mapOf(
+                      "endpoint" to "audio.speech",
+                      "body" to """{"model":"$model","input":"Hello","voice":"alloy"}""",
+                  ),
+              )
+            }
+    )
+    var fileId: String? = null
+    val created = outcome {
+      (b.execute(
+              "openai.call",
+              mapOf(
+                  "endpoint" to "files.create",
+                  "fields" to mapOf("purpose" to "batch"),
+                  "files" to
+                      listOf(
+                          mapOf(
+                              "field" to "file",
+                              "filename" to "verify.jsonl",
+                              "bytes" to "{}\n".toByteArray(),
+                          )
+                      ),
+              ),
+          ) as Map<*, *>)
+          .also {
+            fileId =
+                Regex("\"id\"\\s*:\\s*\"([^\"]+)\"")
+                    .find(it["body"].toString())
+                    ?.groupValues
+                    ?.get(1)
+          }
+    }
+    say("entry files.create: $created")
+    say("entry files.list: ${call(b, "files.list", null)}")
+    fileId?.let { id ->
+      say("entry files.retrieve: ${call(b, "files.retrieve", null, mapOf("id" to id))}")
+      say(
+          "entry files.content: " +
+              outcome {
+                b.execute(
+                    "openai.download",
+                    mapOf("endpoint" to "files.content", "pathParameters" to mapOf("id" to id)),
+                )
+              }
+      )
+      say(
+          "entry batches.create: ${call(b, "batches.create", """{"input_file_id":"$id","endpoint":"/v1/chat/completions","completion_window":"24h"}""")}"
+      )
+      say(
+          "entry files.delete (of the file this run made): ${call(b, "files.delete", null, mapOf("id" to id))}"
+      )
+    }
+        ?: say(
+            "entry files.retrieve, files.content, batches.create, files.delete: not tried, no file was made"
+        )
+    say("entry batches.list: ${call(b, "batches.list", null)}")
+    assertTrue(report.isNotEmpty())
+  }
+
   @Test
   fun `whether the service serves one request at a time`() {
     val pool = Executors.newFixedThreadPool(2)

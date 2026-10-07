@@ -3,6 +3,8 @@ package dev.lawlan.runline.accessors.openai
 import dev.lawlan.runline.accessors.ResourceOperationFailure
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
 import dev.lawlan.runline.core.ResourceFailure
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -159,5 +161,27 @@ class OpenAiBindingStreamTest {
     assertEquals(200, callWithQuotaWait(b, 200)["status"])
     assertNull(next(b, opened), "a closed stream has nothing more")
     close(b, opened)
+  }
+
+  @Test
+  fun `an abort cuts a stream that is being pulled, the service sees the connection go, and the pull fails as cancelled`() {
+    endless()
+    val b = binding()
+    val opened = open(b)
+    next(b, opened)
+    val pulling = Executors.newSingleThreadExecutor()
+    try {
+      val pull = pulling.submit<ResourceFailure?> { failure { next(b, opened) }.failure }
+      Thread.sleep(200)
+
+      b.abort()
+
+      assertEquals(ResourceFailure.CANCELLED, pull.get(5, TimeUnit.SECONDS))
+      await("the service to see the connection go") { server.clientsGone == 1 }
+      assertEquals(0, server.inFlight)
+      assertEquals(ResourceFailure.CANCELLED, failure { next(b, opened) }.failure)
+    } finally {
+      pulling.shutdownNow()
+    }
   }
 }

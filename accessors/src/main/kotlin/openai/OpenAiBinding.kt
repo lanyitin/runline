@@ -108,9 +108,20 @@ class OpenAiBinding(
   ) {
     private val ended = AtomicBoolean()
 
+    /** Why the stream ended, when it did not end well: what every later pull fails with. */
+    @Volatile private var failure: ResourceFailure? = null
+
     fun next(): String? {
+      failure?.let { throw ResourceOperationFailure(it) }
       if (ended.get()) return null
-      val data = events.next()
+      val data =
+          try {
+            stopped(call)?.let { throw it }
+            events.next()
+          } catch (e: ResourceOperationFailure) {
+            end(e.failure)
+            throw e
+          }
       if (data == null || data == "[DONE]") {
         end(null)
         return null
@@ -119,11 +130,12 @@ class OpenAiBinding(
     }
 
     /** The stream is over, whichever way: the connection goes, the share is given back. */
-    fun end(failure: ResourceFailure?) {
+    fun end(reason: ResourceFailure?) {
       if (!ended.compareAndSet(false, true)) return
+      failure = reason
       runCatching { call.stream?.close() }
       call.release()
-      report.finish(endpoint, failure, null)
+      report.finish(endpoint, reason, null)
     }
   }
 
@@ -239,6 +251,7 @@ class OpenAiBinding(
     aborted = true
     quota.abort()
     live.forEach { it.stop(ResourceFailure.CANCELLED) }
+    streams.values.forEach { it.end(ResourceFailure.CANCELLED) }
   }
 
   override fun close() {
@@ -336,7 +349,17 @@ class OpenAiBinding(
   ): Map<String, Any?> {
     val input = response.body()
     val id = streamIds.incrementAndGet()
-    streams[id] = OpenStream(call, report, endpoint, ServerSentEvents { input.read(it) })
+    val events = ServerSentEvents {
+      val read =
+          try {
+            input.read(it)
+          } catch (e: IOException) {
+            throw stopped(call) ?: e
+          }
+      stopped(call)?.let { stop -> throw stop }
+      read
+    }
+    streams[id] = OpenStream(call, report, endpoint, events)
     call.keptOpen = true
     report.handedOver = true
     return mapOf(

@@ -183,4 +183,44 @@ class BoundResourcesTest {
 
     assertEquals(1, binding.closed.get())
   }
+
+  /** A binding whose abort takes its time, as the cutting of a connection can. */
+  private class SlowAbortBinding : ResourceBinding {
+    override val type = "openai-compatible"
+    val aborting = CountDownLatch(1)
+    val finishAbort = CountDownLatch(1)
+    val reached = AtomicInteger()
+
+    override fun execute(operation: String, arguments: Map<String, Any?>): Any? {
+      reached.incrementAndGet()
+      return null
+    }
+
+    override fun abort() {
+      aborting.countDown()
+      finishAbort.await()
+    }
+  }
+
+  @Test
+  fun `a call that comes while an invalidation is still aborting is refused with the reason and never reaches the binding`() {
+    val slow = SlowAbortBinding()
+    val host = BoundResources(mapOf("a" to slow))
+    val pool = Executors.newFixedThreadPool(2)
+    try {
+      val invalidating = pool.submit { host.invalidate("a", Invalidation.RUN_ENDED) }
+      assertTrue(slow.aborting.await(10, TimeUnit.SECONDS))
+
+      val late = pool.submit<Map<String, Any?>> { write(host, "a", "x") }
+      val answer = late.get(2, TimeUnit.SECONDS)
+      slow.finishAbort.countDown()
+      invalidating.get(10, TimeUnit.SECONDS)
+
+      assertEquals("ENDED", failure(answer))
+      assertEquals(0, slow.reached.get())
+    } finally {
+      slow.finishAbort.countDown()
+      pool.shutdownNow()
+    }
+  }
 }

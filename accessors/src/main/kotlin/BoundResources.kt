@@ -3,6 +3,7 @@ package dev.lawlan.runline.accessors
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.runner.ResourceHost
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -24,7 +25,11 @@ class BoundResources(
   private class State {
     val lock = ReentrantReadWriteLock()
 
-    @Volatile var invalidation: Invalidation? = null
+    /** Set once, before anything is aborted, so that no call that comes later gets through. */
+    val claimed = AtomicReference<Invalidation?>()
+
+    val invalidation: Invalidation?
+      get() = claimed.get()
   }
 
   private val states = bindings.keys.associateWith { State() }
@@ -85,17 +90,14 @@ class BoundResources(
   fun invalidate(resource: String, reason: Invalidation) {
     val binding = bindings[resource] ?: return
     val state = states.getValue(resource)
+    // The reason is claimed first: a call that comes while the binding is being aborted is refused
+    // with it, and the first reason stays.
+    val first = state.claimed.compareAndSet(null, reason)
     binding.abort()
-    val first =
-        state.lock.write {
-          (state.invalidation == null).also {
-            if (it) {
-              state.invalidation = reason
-              // Nothing is running on the binding now and nothing can start: let it go.
-              runCatching { binding.close() }
-            }
-          }
-        }
+    state.lock.write {
+      // Nothing is running on the binding now and nothing can start: let it go.
+      if (first) runCatching { binding.close() }
+    }
     if (first) observer.invalidated(resource, binding.type, reason)
   }
 

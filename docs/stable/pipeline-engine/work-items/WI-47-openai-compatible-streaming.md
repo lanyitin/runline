@@ -1,6 +1,6 @@
 # WI-47 `openai-compatible` 的串流回應
 
-本文回答：pipeline 如何逐塊消費串流回應，以及串流與額度、逾時、取消、失效的關係。狀態：已核可（2026-10-06）；串流列為必要與逾時語意為 2026-10-07 修訂，待使用者確認。相依：WI-46。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「串流回應」與決定 8、14。
+本文回答：pipeline 如何逐塊消費串流回應，以及串流與額度、逾時、取消、失效的關係。狀態：已核可（2026-10-06）；串流列為必要與逾時語意為 2026-10-07 修訂，待使用者確認；已實作（2026-10-07，見「實作結果」；對真實服務的手動實測尚未執行）。相依：WI-46。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「串流回應」與決定 8、14。
 
 ## 背景
 
@@ -26,3 +26,21 @@ Pipeline 是循序阻塞的平台 thread（[ADR-008](../adr/ADR-008-execution-mo
 - 串流不改變容量語意（run 級持有，ADR-007）；回傳的每一塊與錯誤只含 JDK 內建型別。
 - Log 與 trace 不記錄串流內容。
 - Fake 服務端須能分塊送出、延遲、中途斷線與永不結束；測試使用真實 HTTP 與 Fake，不使用 Stub 或 Mock；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。
+
+## 實作結果（2026-10-07）
+
+程式：契約在 `core`（`OpenAiAccessor.stream(request)` 回傳 `OpenAiStream`：`status`、`headers`、`next()`、`close()`）；主機側在 `accessors/src/main/kotlin/openai/`（`OpenAiBinding` 新增 `openai.stream.open`、`openai.stream.next`、`openai.stream.close` 三個操作，`ServerSentEvents` 解析事件，`OpenAiRequestPlan` 加上 `streaming`，`OpenAiObserver` 新增 `streamStarted`/`streamFinished` 與 `OpenAiOutcome.maxChunkGapMillis`）；`BoundResources` 的失效順序修正；Engine 側 `OpenAiTelemetry` 與 `EngineResourceObserver`。測試：Fake 服務端新增 `beginChunked`、`chunk`、`event`、`endChunked` 與對 `stream: true` 的預設串流路由（`chunkDelayMillis`），契約測試新增兩項（SSE 形狀、`include_usage`）；`OpenAiBindingStreamTest`、`ServerSentEventsTest`、`OpenAiAccessorTest`（core）、共用行為套件 `OpenAiBehaviorSuite`（Engine 與開發入口各跑一次）、`OpenAiResourceRunTest`、`OpenAiResourceObservabilityTest`、`OpenAiKeyLeakTest`、`BoundResourcesTest`。
+
+實作時的決定（超出條文之處，供審閱）：
+
+- **事件與結束訊號**：一塊是一個伺服器推送事件的 `data` 文字（多行 `data` 以換行相接；註解、`event:`、`id:`、`retry:` 被忽略；`event:` 的名稱不傳給 pipeline，`responses` 的事件類型在其 JSON 的 `type` 欄位）。服務送出 `[DONE]` 或乾淨地關閉連線時 `next()` 回傳 `null`；結尾沒有完整的事件被丟棄；只認 `\n` 與 `\r\n` 換行。
+- **`stream` 與 `stream_options`**：`stream()` 的本文帶 `stream`（無論值）為 `INVALID_ARGUMENT`；`stream_options` 原樣送出，這是 pipeline 取得用量的方式（Engine 不替它加，因為不是每個服務都接受）。對不能串流的條目呼叫 `stream()` 為 `STREAM_NOT_SUPPORTED`；`call` 的行為不變。串流請求的 `Accept` 為 `text/event-stream`。
+- **逾時**：首位元組逾時從送出請求起算，涵蓋到回應本文的第一個位元組（服務若先送標頭、prefill 後才送第一個事件，也包含在內）；之後每一次讀取受閒置逾時約束；總時間上限涵蓋整個串流。逾時發生時串流立即結束（連線關閉、額度歸還），即使 pipeline 沒有在拉取；之後的拉取得到同一個類別。
+- **額度與結束**：串流在讀完、被關閉、失敗、逾時、失效或 run 終止時結束，額度恰好歸還一次（`Call.release` 冪等）；結束後 `next()` 回傳 `null`（或重複同一個失敗類別），重複 `close()` 無作用，`close()` 在 run 已終止時也不失敗。已結束的串流編號在主機側保留到 run 結束（僅一個小物件）。
+- **事件大小**：單一事件大於 `maxResponseBytes` 為 `RESPONSE_TOO_LARGE`；串流總量沒有上限（它是串流）。
+- **金鑰**：事件文字中出現金鑰處以 `***` 取代（比 `call` 的本文處理更嚴，`call` 維持 WI-46 的限度；串流的事件是增量資料，遮蔽的成本低）。
+- **可觀測**：新增 metric `runline.resources.openai.stream.first_chunk.duration` 與 `runline.resources.openai.stream.max_gap.duration`；生成時間與 token 沿用；進行中請求數在串流結束才減少。每個串流一個 span `runline.resource.openai.stream`（屬於 run 的 trace，在開啟的操作內建立，結束時才結束），拉取不產生 span。塊間最長間隔是在 `next()` 內等待事件的時間（不含 pipeline 自己處理的時間，也包含第一個事件）。
+- **失效順序（審查項目）**：`BoundResources.invalidate` 原本先 `abort()` 再取得寫鎖並設定原因，兩者之間到達的呼叫會通過檢查、進到已中止的綁定而得到 `CANCELLED`（不是原因的類別，造成 WI-46 的一個測試偶發失敗）；現在先以 CAS 認領原因再 `abort()`。另外：串流開啟完成時若同時被中止則不交出串流；串流的結束與原因以單一原子狀態設定，避免拉取把「正在被取消」誤認為正常結束；計時器停止的串流立即結束並歸還額度。
+- **未做**：`audio.speech` 的串流（二進位事件）隨 WI-53，因該條目本版不能啟用；使用量欄位沒有區分串流中的請求（`inFlightRequests` 含串流）；Console 無新增錯誤碼（只有 `problem` 值與欄位），`consoleApiDocCheck` 不需要新的翻譯。
+
+**尚未驗證（需要真實的 lemonade 與另一個 OpenAI 相容服務，本機手動；服務不可用時回報未執行，不得宣稱已驗證）**：以 `RUNLINE_OPENAI_VERIFY_URL=<根位址> RUNLINE_OPENAI_VERIFY_MODEL=<模型> ./gradlew :accessors:verifyOpenAiService` 執行，新增兩項（位址設為 `fake` 時量測 Fake，已用來試跑這兩項）：(1) 長 context 或 thinking 下串流的首個事件時間與事件間最長間隔（據此調整 `firstByteMs` 與 `idleMs` 的預設；服務若不串流輸出 thinking 內容，間隔會很長）；(2) 關閉串流後服務端是否停止生成。`RealOpenAiServerContractTest`（`RUNLINE_OPENAI_CONTRACT_URL`）也涵蓋串流的契約，未對真實服務跑過。

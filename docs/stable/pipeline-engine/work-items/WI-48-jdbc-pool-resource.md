@@ -1,6 +1,6 @@
 # WI-48 `jdbc-pool` 型別資源（PostgreSQL）
 
-本文回答：管理員如何把一個資料庫定義為共享的連線池資源，pipeline 如何以窄 SQL 存取使用它，以及如何在不改契約的前提下擴充到其他 JDBC 資料庫。狀態：已核可（2026-10-06）。相依：WI-41、WI-43（含檢查端點）、WI-46（別名解析機制已於該項驗證）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「`jdbc-pool`」。
+本文回答：管理員如何把一個資料庫定義為共享的連線池資源，pipeline 如何以窄 SQL 存取使用它，以及如何在不改契約的前提下擴充到其他 JDBC 資料庫。狀態：已核可（2026-10-06）；已實作（2026-10-07，見「實作結果」；只對真實 PostgreSQL 驗證，沒有對其他資料庫驗證）。相依：WI-41、WI-43（含檢查端點）、WI-46（別名解析機制已於該項驗證）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「`jdbc-pool`」。
 
 ## 背景
 
@@ -48,3 +48,23 @@
 - JDBC 型別暴露、放置驅動 jar 載入、其他資料庫的設定檔都不在本項範圍；新增資料庫需發佈新版 Engine。
 - 營運上建議資源使用最小權限的獨立資料庫帳號，不使用 Engine 自己的帳號；此建議寫入部署文件。
 - 測試使用真實 PostgreSQL（Testcontainers），不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。
+
+## 實作結果（2026-10-07）
+
+程式：契約在 `core`（`Accessors.jdbcPool(name)` 回傳 `JdbcAccessor`：`query`、`update`、`begin`、`commit`、`rollback`；`JdbcRows`；`ResourceFailure` 新增 `SQL_ERROR` 與 `TRANSACTION_STATE`；`ResourceAccessException.sqlState`）；主機側在 `accessors/src/main/kotlin/jdbc/`（`JdbcProfile` 與 `PostgresProfile`、`JdbcSettings`、`JdbcConnectionPool`、`JdbcPools`（世代）、`JdbcBinding`、`JdbcProbe`、`JdbcConnector`）；Engine 在 `engine/.../resource/`（`JdbcPoolBehavior`、`JdbcTelemetry`）；開發入口在 `LocalResources`。驅動 `org.postgresql:postgresql` 是 `accessors` 的 `implementation` 相依（版本在 version catalog），由 Engine 的 class loader 以 `Driver().connect` 直接載入，不經 `DriverManager`。
+
+實作時的決定（超出條文之處，供審閱）：
+
+- **run 持有連線到結束**：run 在第一次需要時從連線池取得連線（最多 `connectionsPerRun` 條），持有到 run 結束、被取消或被強制釋放，才經清理歸還；因此一個 run 的 session 狀態（`SET`、暫存表）在 run 內持續，且與 WI 所說「run 終止時連線歸還」一致。連線池大小是容量乘以每 run 連線數，沒有等待。
+- **歸還前清理，無法證明乾淨就關閉**（安全審查項目）：回滾、`DISCARD ALL`（PostgreSQL 設定檔的 `resetStatements`）、再套用啟動語句（時區 UTC、`ApplicationName`、`currentSchema`，因為 `DISCARD ALL` 把它們還原成伺服器的值），並驗證連線開著、在 autocommit、答得出來；任一步失敗、被取消中途的連線與被切斷的連線都關閉。`JdbcProfiles` 拒絕沒有重設語句又沒有明說 `resetNotNeeded` 的設定檔。
+- **取消**：run 的取消是中斷其執行緒，而驅動的 socket 讀取不理會中斷，所以語句在存取端的工作執行緒上執行，run 的執行緒等它；被中斷時在資料庫端取消語句並切斷連線（取消請求有 2 秒上限，`cancelSignalTimeout` 也是 2 秒，網路斷掉時強制釋放也在有限時間內返回）。
+- **呼叫只讀 `sql` 與 `parameters`**：帶其他成員、其他型別的參數、不認得的操作都是 `INVALID_ARGUMENT`（host 側檢查，不依賴 run 內的存取端）；`BoundResources.call` 對形狀不對的請求回答失敗而不是丟例外。
+- **`readOnly` 不在允許清單**：語句可以自己改回，會變成只是看起來有保護；唯一的保護是資料庫帳號的權限。允許清單：`ApplicationName`、`currentSchema`、`tcpKeepAlive`。
+- **錯誤文字**：`ResourceOperationFailure` 新增 `sqlState` 與 `withErrorId`（jdbc 的每個失敗都有 errorId）；給 log 的 cause 是新的 `JdbcFailureCause`，`SQL_ERROR` 只含類別、SQLState 與例外種類（資料庫訊息可能含語句片段、名稱與值，WI 說「log 不記錄 SQL 與參數」），連線、登入與逾時類含驅動訊息並去除密碼。這與條文「原文寫入 log」有取捨：`SQL_ERROR` 的原文不寫。
+- **用量**：`usage` 為 `{"activeConnections": n}`（`UsageDoc` 改為只含型別有的成員）；`concurrencyLimit` 對 `jdbc-pool` 是連線池大小。
+- **本機實作**：開發入口以 `jdbc-pool` 設定檔與環境變數密碼提供同契約；`DevkitBoundaryTest` 原本禁止任何資料庫驅動，改為只禁止 Engine 自己的持久化（Flyway 等），因為本機實作需要設定檔的驅動。
+- **Console**：沒有新增錯誤碼，`consoleApiDocCheck` 不需要新的翻譯（新增的是 `problem` 值 `unsupported_database`、`property_not_allowed`，Console 目前不翻譯 `problem`）。
+
+驗證：真實 PostgreSQL（Testcontainers）涵蓋型別對應、方言語法、交易、錯誤類別、逾時、列數與大小上限、連線額度與併發、世代、強制釋放與取消、清理、不外洩、檢查與可觀測；Engine 與開發入口跑同一組 `JdbcBehaviorSuite`；「第二份設定檔」在測試原始碼中是以 `PostgresProfile` 為底、規則不同的設定檔（`JdbcSettingsTest`），機制以資料庫種類選用。
+
+**尚未驗證**：真實的非 PostgreSQL 資料庫（沒有第二個真實資料庫的設定檔）；TLS 到資料庫（WI-52；PostgreSQL 驅動預設的 `sslmode=prefer` 不驗證憑證，管理員無法改，也無法關閉）；相依漏洞檢查（專案目前沒有這項檢查）；可重現建置只因驅動在既有的 Engine 相依之內而沿用（未另行量測）；對遠端網路中斷的語意只以會凍結的 TCP 轉送器模擬。

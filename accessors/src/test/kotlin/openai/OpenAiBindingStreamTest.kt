@@ -299,4 +299,19 @@ class OpenAiBindingStreamTest {
     await("the service to see the connection go") { server.clientsGone == 1 }
     assertEquals(0, server.inFlight)
   }
+
+  @Test
+  fun `a stream that its total limit has cut gives the share back although nobody pulls it`() {
+    endless()
+    val b = binding("\"timeouts\":{\"totalMs\":300}")
+    val opened = open(b)
+    next(b, opened)
+
+    Thread.sleep(700)
+
+    assertEquals(0, server.inFlight, "the service saw the connection go")
+    server.script = null
+    assertEquals(200, callWithQuotaWait(b, 200)["status"], "the share is free again")
+    assertEquals(ResourceFailure.TOTAL_TIMEOUT, failure { next(b, opened) }.failure)
+  }
 }

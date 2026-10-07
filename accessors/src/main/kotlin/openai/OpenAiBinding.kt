@@ -266,6 +266,9 @@ class OpenAiBinding(
     @Volatile var stream: InputStream? = null
     @Volatile var total: ScheduledFuture<*>? = null
 
+    /** The stream this call has become, which is over as soon as the call is stopped. */
+    @Volatile var owner: OpenStream? = null
+
     /** A stream took the call over: it ends the call, not the exchange that opened it. */
     @Volatile var keptOpen = false
     private val released = AtomicBoolean()
@@ -283,6 +286,7 @@ class OpenAiBinding(
       if (stoppedFor == null) stoppedFor = reason
       future?.cancel(true)
       runCatching { stream?.close() }
+      owner?.end(reason)
     }
   }
 
@@ -394,7 +398,9 @@ class OpenAiBinding(
     val wire = Wire(call, response.body(), sentAt)
     val id = streamIds.incrementAndGet()
     val events = ServerSentEvents { wire.read(it) }
-    streams[id] = OpenStream(call, report, endpoint, events)
+    val opened = OpenStream(call, report, endpoint, events)
+    call.owner = opened
+    streams[id] = opened
     call.keptOpen = true
     report.handedOver = true
     return mapOf(

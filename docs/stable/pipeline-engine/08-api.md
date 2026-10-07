@@ -6,7 +6,7 @@
 
 ## 通則
 
-**認證。** 標示「Bearer」的端點需要請求標頭 `Authorization: Bearer <token>`。Token 與其名稱、角色由部署的環境變數 `API_TOKENS` 提供（`名稱:角色:token`，逗號分隔）。角色有兩種：`developer`（開發人員）與 `admin`（管理員）；管理員包含開發人員的所有權限。
+**認證。** 標示「Bearer」的端點需要請求標頭 `Authorization: Bearer <token>`。Token 與其名稱、角色由部署的環境變數 `API_TOKENS` 提供（`名稱:角色:token`，逗號分隔）。角色有兩種：`developer`（開發人員）與 `admin`（管理員）；管理員包含開發人員的所有權限。名稱是擁有權的身分（上傳者以名稱記錄與比對），所以 `API_TOKENS` 中兩個 token 不可用同一個名稱（不論角色是否相同）：Engine 啟動時發現重複的名稱即拒絕啟動，訊息只指出重複的名稱，不含 token。
 
 | 情況 | 回應 |
 |---|---|
@@ -83,12 +83,12 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 
 認證：Bearer（developer）
 
-上傳一個 jar，本文是 jar 的原始位元組（`Content-Type: application/octet-stream`）。Engine 不執行 pipeline 即探索其中的 pipeline、判定 safe 或 unsafe、讀出 metadata，並將 artifact 與其 definition 於同一交易儲存；任何拒絕都不留下資料。上傳者記錄為 token 對應的名稱。新版本的 unsafe 執行設定一律為不允許。相同內容重複上傳回傳同一版本。
+上傳一個 jar，本文是 jar 的原始位元組（`Content-Type: application/octet-stream`）。Engine 不執行 pipeline 即探索其中的 pipeline、判定 safe 或 unsafe、讀出 metadata，並將 artifact 與其 definition 於同一交易儲存；任何拒絕都不留下資料。上傳者記錄為 token 對應的名稱。新版本的 unsafe 執行設定一律為不允許。版本以（內容雜湊，上傳者）識別（[ADR-020](adr/ADR-020-per-uploader-artifact-versions.md)）：不同上傳者上傳位元組完全相同的 jar，各自得到屬於自己的版本，Engine 對每個版本獨立分析與判定（以目前的白名單，不複製他人版本的判定），jar 位元組在資料庫只存一份；同一上傳者重複上傳相同內容回傳他自己既有的版本。回應只含呼叫者自己的版本，不透露別人是否上傳過相同內容。
 
 | 狀態 | 意義 |
 |---|---|
-| 201 | 新版本。本文為 artifact |
-| 200 | 相同內容先前已上傳，回傳既有版本，不產生新紀錄 |
+| 201 | 呼叫者的新版本（相同內容即使別人上傳過也是 201，與全新內容的回應無法區分）。本文為 artifact |
+| 200 | 呼叫者自己先前已上傳相同內容，回傳他既有的版本，不產生新紀錄 |
 | 413 `too_large` | 上傳的檔案超過 `UPLOAD_MAX_BYTES`（預設 50 MiB） |
 | 422 | 拒絕上傳，`error` 為下列之一 |
 
@@ -112,8 +112,9 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 
 | 欄位 | 說明 |
 |---|---|
-| `contentHash` | 內容的 SHA-256（十六進位），版本的識別 |
-| `sizeBytes`、`uploadedBy`、`uploadedAt` | 大小、上傳者名稱、上傳時間 |
+| `contentHash` | 內容的 SHA-256（十六進位）；與上傳者一起識別版本 |
+| `uploader`、`uploadedBy` | 版本的上傳者名稱（兩者相同；`uploader` 是管理員用來指定版本的 `uploader` 參數的來源，`uploadedBy` 維持既有名稱） |
+| `sizeBytes`、`uploadedAt` | 大小（內容的屬性）、這個版本的上傳時間 |
 | `pipelines[]` | 找到的 pipeline：`className`、`name`、`metadata`（`parameters[]`、`files[]`、`network`、`processes`、`resources[]`、`resourceTypes`）、`verdict`（`SAFE` 或 `UNSAFE`）、`reasons[]`（`kind`、`category`、`className`、`member`、`path[]`、`detail`）、`allowListVersion`（判定所用的白名單版本，見「白名單」）、`allowUnsafeExecution`、`warnings[]`（例如宣告了尚未定義的共享資源；見下） |
 | `limitations` | 判定未涵蓋的範圍 |
 
@@ -127,19 +128,19 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 
 認證：Bearer（developer）
 
-查詢一個版本；本文同上傳的回傳。開發人員只能查自己上傳的，管理員可查全部。404 `not_found`：不存在，或呼叫者不得查看。
+查詢一個版本；本文同上傳的回傳。開發人員只能查自己上傳的，管理員可查全部。選填的查詢參數 `uploader`：版本的上傳者名稱。呼叫者可見的版本恰好一個時可省略；管理員可見同一內容的多個版本而未給 `uploader`，回 409 `ambiguous_version`，本文 `{error, message, uploaders[]}`，什麼都沒有改變；管理員的解析不偏好自己的版本。404 `not_found`：不存在、給了 `uploader` 但沒有該版本，或呼叫者不得查看（開發人員給別人的名稱也是 404，與不存在的回應位元組相同）。開發人員永遠不會收到 `ambiguous_version`。
 
 ### `GET /api/v1/definitions`
 
 認證：Bearer（developer）
 
-列出 pipeline 定義。開發人員只看到自己上傳的，管理員看到全部。本文 `{"definitions": [...], "limitations": "..."}`，每筆含所屬版本的 `contentHash`、`uploadedBy`、`uploadedAt`，以及與上傳回傳相同的 pipeline 欄位。
+列出 pipeline 定義。開發人員只看到自己上傳的，管理員看到全部。本文 `{"definitions": [...], "limitations": "..."}`，同一內容有多個版本時（管理員）各列一筆。每筆含所屬版本的 `contentHash`、`uploader`、`uploadedBy`、`uploadedAt`，以及與上傳回傳相同的 pipeline 欄位。
 
 ### `DELETE /api/v1/artifacts/{contentHash}`
 
 認證：Bearer（admin）
 
-刪除一個版本。204 成功；404 `not_found`；409 `in_use`：仍被 trigger 或 run 引用，不能刪除。
+刪除一個版本（只刪這位上傳者的版本；同一內容其他上傳者的版本與其 definition、trigger、run 不受影響）。選填的查詢參數 `uploader` 同 `GET /api/v1/artifacts/{contentHash}`。jar 位元組在最後一個參照它的版本被刪除時，於同一交易移除。204 成功；404 `not_found`；409 `in_use`：這個版本的 definition 仍被 trigger 或 run 引用，不能刪除（別人的版本被引用不阻擋這個版本被刪除）；409 `ambiguous_version`：同一內容有多位上傳者的版本而未給 `uploader`，什麼都沒有刪除。
 
 ## Run
 
@@ -147,18 +148,19 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 
 認證：Bearer（developer）
 
-建立一個 run。本文 `{"contentHash": "...", "pipeline": "...", "parameters": {"名稱": "值"}}`，`parameters` 選填。Engine 檢查參數、unsafe 設定與 pipeline 宣告的共享資源，通過才建立；被拒絕時不留下任何 run。開發人員只能對自己上傳的版本建立 run。
+建立一個 run。本文 `{"contentHash": "...", "uploader": "...", "pipeline": "...", "parameters": {"名稱": "值"}}`，`parameters` 與 `uploader` 選填。`uploader` 是版本的上傳者名稱：開發人員只有等於自己的名稱才被接受，其他值與不存在的版本回應相同；管理員可見同一內容的多個版本時必須給（不偏好自己的版本）。Engine 檢查參數、unsafe 設定與 pipeline 宣告的共享資源，通過才建立；被拒絕時不留下任何 run。開發人員只能對自己上傳的版本建立 run。
 
 | 狀態 | 意義 |
 |---|---|
 | 201 | 已建立（排入佇列），`Location` 為 `/api/v1/runs/{runId}`，本文為 run |
 | 400 `bad_request` | 本文不是預期的 JSON |
-| 404 `definition_not_found` | 沒有這個版本與 pipeline，或呼叫者不得使用 |
+| 404 `definition_not_found` | 沒有這個版本與 pipeline，或呼叫者不得使用（含開發人員給了別人的 `uploader`） |
+| 409 `ambiguous_version` | 管理員可見同一內容的多個版本而未給 `uploader`；本文 `{error, message, uploaders[]}`，不建立 run |
 | 409 `unsafe_not_allowed` | pipeline 被判為 unsafe，且管理員尚未允許它以 unsafe 執行 |
 | 409 `resources_unavailable` | pipeline 宣告的共享資源無法使用；本文多一個 `problems[]`，每項 `{resource, problem}`，`problem` 為 `unknown`（未定義，含已被刪除）、`disabled`（已停用）或 `type_mismatch`（pipeline 宣告了型別，而資源的型別不同，或宣告的型別不在封閉集合內）；多個問題一併回報，每個資源只報一項（`unknown`、`disabled` 優先於 `type_mismatch`） |
 | 422 `invalid_parameters` | 參數與宣告不符；本文多一個 `problems[]`，每項 `{name, problem}`，`problem` 為 `missing`（缺必填）或 `undeclared`（未宣告） |
 
-Run 的欄位：`runId`、`state`、`contentHash`、`pipeline`、`className`、`source`（`{kind: "MANUAL"|"TRIGGER", name}`）、`parameters`（含套用預設值後的結果）、`createdAt`、`startedAt`、`finishedAt`、`failure`（`{type, message, trace}`，失敗時）、`unsafeExecution`（`{setBy, setAt}`，以 unsafe 執行時）。`state` 的值：`QUEUED`、`WAITING_FOR_RESOURCES`、`INITIALIZING`、`RUNNING`、`TIMED_OUT_UNFINISHED`，終止狀態 `SUCCEEDED`、`FAILED`、`CANCELLED`、`INTERRUPTED`（Engine 停止或重啟時仍在進行的 run）、`TIMED_OUT`。
+Run 的欄位：`runId`、`state`、`contentHash`、`uploader`（run 所屬版本的上傳者）、`pipeline`、`className`、`source`（`{kind: "MANUAL"|"TRIGGER", name}`）、`parameters`（含套用預設值後的結果）、`createdAt`、`startedAt`、`finishedAt`、`failure`（`{type, message, trace}`，失敗時）、`unsafeExecution`（`{setBy, setAt}`，以 unsafe 執行時）。`state` 的值：`QUEUED`、`WAITING_FOR_RESOURCES`、`INITIALIZING`、`RUNNING`、`TIMED_OUT_UNFINISHED`，終止狀態 `SUCCEEDED`、`FAILED`、`CANCELLED`、`INTERRUPTED`（Engine 停止或重啟時仍在進行的 run）、`TIMED_OUT`。
 
 ### `GET /api/v1/runs`
 
@@ -201,7 +203,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-設定某個版本中某個 pipeline 是否允許以 unsafe 執行（每個版本各自設定，預設不允許，不繼承）。本文 `{"allow": true}`。200 回傳 `{contentHash, pipeline, allow, setBy, setAt}`（`setBy` 為管理員的 token 名稱）；404 `definition_not_found`；400 `bad_request`。
+設定某個版本中某個 pipeline 是否允許以 unsafe 執行（每個版本各自設定，預設不允許，不繼承；核准甲上傳的版本不改變乙上傳的同一內容的版本）。選填的查詢參數 `uploader`：版本的上傳者名稱，同一內容有多個版本時必須給。本文 `{"allow": true}`。200 回傳 `{contentHash, uploader, pipeline, allow, setBy, setAt}`（`setBy` 為管理員的 token 名稱）；404 `definition_not_found`；409 `ambiguous_version`（未給 `uploader`，什麼都沒有改變）；400 `bad_request`。
 
 ## 共享資源（管理員）
 
@@ -209,7 +211,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。封閉集合內的型別都可建立：`counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）、`jdbc-pool`（一個資料庫的連線池，首版為 PostgreSQL，見下方「`jdbc-pool` 型別」）與 `openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
 
-資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用；永遠不含機密值，金鑰庫重載後隨之變化）、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數（`openai-compatible`）或每 run 連線數（`jdbc-pool`，也就是連線池的大小），其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；`jdbc-pool` 為 `{"activeConnections": n}`，run 目前持有的連線數（run 在結束前持有它用到的連線，閒置也計入），含所有世代；其他型別為 `null`，型別沒有的成員不出現）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
+資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用；永遠不含機密值，金鑰庫重載後隨之變化）、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數（`openai-compatible`）或每 run 連線數（`jdbc-pool`，也就是連線池的大小），其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；`jdbc-pool` 為 `{"activeConnections": n}`，run 目前持有的連線數（run 在結束前持有它用到的連線，閒置也計入），含所有世代；其他型別為 `null`，型別沒有的成員不出現）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`uploader`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
 `invalid_resource`（422）的本文多一個 `problem`，說明原因類別：
 
@@ -440,7 +442,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | 409 `entry_covered` | 現有的某個條目已涵蓋它（例如要加的類別已被其套件條目涵蓋）；本文多一個 `coveredBy`（該條目） |
 | 422 `invalid_entry` | 名稱不合規或組合不合理；本文多一個 `problem`：`name`、`exact_only_on_class`、`nothing_to_change` |
 
-變更結果：`preview`（布林）、`version`（操作之後生效的版本；預覽時為目前版本）、`entry`（變更後的條目；刪除與預覽時為 `null`）、`impact`、`redundantEntries[]`（新條目使它們變得不必要的其他條目；不阻擋，仍保留）、`limitations`。`impact`：`examinedArtifacts`、`examinedDefinitions`、`becameUnsafe`、`becameSafe`、`unreadable`，以及只含判定有變動的定義 `changes[]`：`contentHash`、`pipeline`、`className`、`from`、`to`（`SAFE` 或 `UNSAFE`）、`allowUnsafeExecution`（變動前的設定）、`unsafeExecutionRevoked`（因這次變動而收回「允許以 unsafe 執行」）。
+變更結果：`preview`（布林）、`version`（操作之後生效的版本；預覽時為目前版本）、`entry`（變更後的條目；刪除與預覽時為 `null`）、`impact`、`redundantEntries[]`（新條目使它們變得不必要的其他條目；不阻擋，仍保留）、`limitations`。`impact`（以版本與其 definition 計）：`examinedArtifacts`、`examinedDefinitions`、`becameUnsafe`、`becameSafe`、`unreadable`，以及只含判定有變動的定義 `changes[]`（每個受影響的版本各一筆，同一內容的不同上傳者各列）：`contentHash`、`uploader`、`pipeline`、`className`、`from`、`to`（`SAFE` 或 `UNSAFE`）、`allowUnsafeExecution`（變動前的設定）、`unsafeExecutionRevoked`（因這次變動而收回「允許以 unsafe 執行」）。
 
 ### `GET /api/v1/allowlist/entries/{kind}/{name}`
 
@@ -474,11 +476,11 @@ Trigger 將 cron 排程或 webhook 綁定到某個版本的某個 pipeline，規
 
 認證：Bearer（admin）
 
-建立 trigger。本文 `{"name", "kind": "cron"|"webhook", "contentHash", "pipeline", "parameters"?, "cron"?, "timeZone"?, "enabled"?}`。`cron` 是標準五欄表達式（cron trigger 必填），`timeZone` 是 IANA 時區（預設 UTC），`enabled` 預設 true；webhook trigger 不可設定 `cron` 與 `timeZone`。
+建立 trigger。本文 `{"name", "kind": "cron"|"webhook", "contentHash", "uploader"?, "pipeline", "parameters"?, "cron"?, "timeZone"?, "enabled"?}`。`cron` 是標準五欄表達式（cron trigger 必填），`timeZone` 是 IANA 時區（預設 UTC），`enabled` 預設 true；webhook trigger 不可設定 `cron` 與 `timeZone`。`uploader` 指定綁定哪位上傳者的版本；同一內容有多個版本時必須給，否則 409 `ambiguous_version`（本文 `{error, message, uploaders[]}`，不建立 trigger）。綁定永不隨新版本或同一內容的其他版本移動。
 
-201（帶 `Location`）回傳 `{"trigger": {...}, "secret": "..."}`，`secret` 只有 webhook trigger 有，且只在這個回應出現這一次。錯誤：400 `bad_request`；404 `definition_not_found`；409 `trigger_exists`；422 `invalid_parameters`（同建立 run，`problems[]`）；422 `invalid_trigger`，`problem` 指出哪一部分：`name`、`cron_required`、`cron_expression`、`time_zone`、`schedule_not_allowed`、`nothing_to_change`。
+201（帶 `Location`）回傳 `{"trigger": {...}, "secret": "..."}`，`secret` 只有 webhook trigger 有，且只在這個回應出現這一次。錯誤：400 `bad_request`；404 `definition_not_found`；409 `trigger_exists`、409 `ambiguous_version`；422 `invalid_parameters`（同建立 run，`problems[]`）；422 `invalid_trigger`，`problem` 指出哪一部分：`name`、`cron_required`、`cron_expression`、`time_zone`、`schedule_not_allowed`、`nothing_to_change`。
 
-Trigger 的欄位：`name`、`kind`、`contentHash`、`pipeline`、`parameters`（管理員給的）、`effectiveParameters`（套用預設值後每個 run 實際得到的）、`enabled`、`cron`、`timeZone`、`webhookPath`、`secretConfigured`、`secretRotatedAt`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`。任何回應都不含 webhook 密鑰或其雜湊。
+Trigger 的欄位：`name`、`kind`、`contentHash`、`uploader`（綁定的版本的上傳者）、`pipeline`、`parameters`（管理員給的）、`effectiveParameters`（套用預設值後每個 run 實際得到的）、`enabled`、`cron`、`timeZone`、`webhookPath`、`secretConfigured`、`secretRotatedAt`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`。任何回應都不含 webhook 密鑰或其雜湊。
 
 ### `GET /api/v1/triggers`
 
@@ -496,7 +498,7 @@ Trigger 的欄位：`name`、`kind`、`contentHash`、`pipeline`、`parameters`�
 
 認證：Bearer（admin）
 
-修改綁定、參數、排程、啟用狀態。本文可含 `contentHash`、`pipeline`、`parameters`、`enabled`、`cron`、`timeZone`，至少一項。不通過驗證的修改不改變任何東西。200 回傳 trigger；錯誤同建立（400、404 `trigger_not_found` 或 `definition_not_found`、422）。
+修改綁定、參數、排程、啟用狀態。本文可含 `contentHash`、`uploader`、`pipeline`、`parameters`、`enabled`、`cron`、`timeZone`，至少一項。給了 `contentHash` 或 `uploader` 即表示移動綁定的版本，須明確到某位上傳者的版本（同一內容有多個版本而未給 `uploader`：409 `ambiguous_version`）；兩者都沒給時綁定留在原版本，不受同一內容其他版本影響。不通過驗證的修改不改變任何東西。200 回傳 trigger；錯誤同建立（400、404 `trigger_not_found` 或 `definition_not_found`、409 `ambiguous_version`、422）。
 
 ### `DELETE /api/v1/triggers/{name}`
 

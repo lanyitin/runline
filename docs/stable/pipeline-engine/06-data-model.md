@@ -6,6 +6,7 @@
 
 ```mermaid
 erDiagram
+  ARTIFACT_CONTENT ||--o{ PIPELINE_ARTIFACT : "is the jar of"
   PIPELINE_ARTIFACT ||--o{ PIPELINE_DEFINITION : contains
   PIPELINE_DEFINITION ||--o{ TRIGGER : "is bound by"
   PIPELINE_DEFINITION ||--o{ RUN : "has"
@@ -23,8 +24,9 @@ Pipeline 定義與共享資源之間以名稱鬆散關聯（虛線）：定義�
 
 | 實體 | 內容 | 備註 |
 |---|---|---|
-| Pipeline Artifact | jar 本體、內容雜湊、上傳者、上傳時間 | 不可變；雜湊唯一 |
-| Pipeline Definition | 名稱、所屬 artifact、宣告的 metadata（含宣告的資源名稱）、safe／unsafe 判定、原因與依賴路徑、判定時使用的白名單版本（文字；白名單由資料庫管理之前儲存的判定為 `config`）、是否允許以 unsafe 執行及設定者與設定時間 | 同名 pipeline 隨 artifact 版本並存；同一 artifact 內，pipeline 名稱與類別名稱各自唯一；unsafe 設定不繼承，預設不允許 |
+| Artifact Content | jar 位元組、內容雜湊、大小 | 以內容雜湊為鍵，同一內容只存一份；不可變；最後一個參照它的版本被刪除時，在同一交易內移除（[ADR-020](adr/ADR-020-per-uploader-artifact-versions.md)） |
+| Pipeline Artifact（版本） | 內容雜湊（參照 Artifact Content）、上傳者、上傳時間 | 不可變；（內容雜湊，上傳者）唯一，同一內容可有多個版本、每位上傳者最多一個；definition、trigger、run 仍以版本的代理鍵參照 |
+| Pipeline Definition | 名稱、所屬 artifact、宣告的 metadata（含宣告的資源名稱）、safe／unsafe 判定、原因與依賴路徑、判定時使用的白名單版本（文字；白名單由資料庫管理之前儲存的判定為 `config`）、是否允許以 unsafe 執行及設定者與設定時間 | 同名 pipeline 隨 artifact 版本並存；同一 artifact 內，pipeline 名稱與類別名稱各自唯一；判定與 unsafe 設定逐版本獨立保存，不繼承、不共享（同一內容的不同上傳者各有一份），預設不允許 |
 | Trigger | 管理員指定的唯一名稱、類型（cron／webhook）、目標 pipeline 定義、固定參數（原樣保存）、啟用旗標、建立者與修改者及時間；cron：五欄表達式與時區；webhook：密鑰雜湊與最近輪替時間 | 由管理員維護；名稱用於網址與 run 的來源名稱；只存密鑰的雜湊，不存明文；cron 與 webhook 欄位互斥 |
 | Trigger Firing | 所屬 trigger、觸發時間、cron 的排程時間或 webhook 的 delivery 識別碼、結果（待處理、已建立 run、被拒絕、失敗、中斷）、原因與說明、所建立的 run | 同一 trigger 內 delivery 識別碼唯一、排程時間唯一，由資料庫保證；只記錄 cron 觸發與已通過驗證的 webhook 呼叫；run 被清理時此紀錄保留並清除其 run 參照 |
 | Run | 狀態、觸發來源（手動時為呼叫者名稱，trigger 時為該 trigger）、參數、起訖時間、結果與失敗原因、是否為 unsafe 執行及當時的設定、設定者與時間 | 狀態含：排隊、等待資源、初始化、執行中、逾時未結束、成功、失敗、取消、中斷、逾時。「逾時」是 run 本體逾時後以失敗結束的終態；等待資源逾時屬於「失敗」，失敗原因註明等待資源逾時 |
@@ -34,7 +36,8 @@ Pipeline 定義與共享資源之間以名稱鬆散關聯（虛線）：定義�
 
 ## 一致性與交易邊界
 
-- 上傳：artifact 與其下所有 definition 在同一交易內寫入，要嘛全成功要嘛全失敗。
+- 上傳：內容（若尚未存在）、上傳者的版本與其下所有 definition 在同一交易內寫入，要嘛全成功要嘛全失敗。同一上傳者重複上傳相同內容由（內容雜湊，上傳者）的唯一性保證冪等，並行下仍只有一個版本。
+- 內容的寫入與版本的刪除以內容雜湊為鍵取同一把交易層級 advisory lock：刪除最後一個版本時移除內容，與並行的上傳互斥，不會出現版本指向已不存在的內容（外鍵以「拒絕刪除」參照內容，作為第二道保證）。
 - Run 建立與狀態轉換各為獨立交易，狀態只能單向前進。
 - Webhook 去重：同一 trigger 內 delivery 識別碼唯一，由資料庫的唯一性保證，並行重送下仍只建立一個 run。
 - Cron 去重：同一 trigger 內同一排程時間唯一，同樣由資料庫保證。
@@ -46,7 +49,8 @@ Pipeline 定義與共享資源之間以名稱鬆散關聯（虛線）：定義�
 
 - Run 與 log 依保留期限清理，期限由組態決定（[WI-20](work-items/WI-20-run-retention.md)）；run 被清理時其 log 一併移除。
 - 觸發紀錄依保留期限清理（[WI-20](work-items/WI-20-run-retention.md)）。webhook 的觸發紀錄同時是去重視窗，其保留期限不得短於去重視窗；刪除 trigger 時其觸發紀錄一併刪除。
-- 被任何 trigger 或進行中 run 引用的 artifact 不得刪除。實作上，artifact 刪除會連帶刪除其 definition；因此所有參照 definition 的資料表（trigger、run 等）必須以「拒絕刪除」的方式參照，被引用的 artifact 才無法刪除。共享資源以名稱參照，不屬於此類。
+- 被任何 trigger 或進行中 run 引用的版本不得刪除（他人的同內容版本被引用不阻擋這個版本被刪除）。實作上，版本刪除會連帶刪除其 definition；因此所有參照 definition 的資料表（trigger、run 等）必須以「拒絕刪除」的方式參照，被引用的 artifact 才無法刪除。共享資源以名稱參照，不屬於此類。
+- 既有 artifact 於遷移時各自成為其內容雜湊的唯一版本，jar 位元組移到以內容雜湊為鍵的單一儲存（版本的代理鍵不變，definition、trigger、run 的參照不變）。
 - 既有資源於遷移時全部成為 `counter` 型別；金鑰庫檔案不在資料庫，是部署的組態產物，備份與資料庫分開（[ADR-019](adr/ADR-019-typed-shared-resources.md)）。
 - Artifact 儲存先放資料庫，以交易一致性與 12-Factor 無狀態為優先；體積成為問題時再評估改放物件儲存。
 

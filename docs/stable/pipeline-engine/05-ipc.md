@@ -6,7 +6,7 @@
 
 | 呼叫者 | 介面 | 語意 |
 |---|---|---|
-| 開發人員 | 上傳 jar | 回傳探索到的 pipeline 清單、metadata、safe／unsafe 判定與原因（含依賴路徑）。同一內容重複上傳視為同一版本（以內容雜湊辨識），冪等 |
+| 開發人員 | 上傳 jar | 回傳探索到的 pipeline 清單、metadata、safe／unsafe 判定與原因（含依賴路徑）。版本以（內容雜湊，上傳者）辨識（[ADR-020](adr/ADR-020-per-uploader-artifact-versions.md)）：同一上傳者重複上傳相同內容冪等；不同上傳者上傳相同內容各得自己的版本 |
 | 管理員 | trigger 管理 | 建立／停用 cron 或 webhook 綁定 |
 | 管理員 | 白名單管理 | 新增／修改／刪除條目；變更前可預覽影響；變更與重判為單一原子操作 |
 | 管理員 | pipeline 的 unsafe 執行設定 | 逐 pipeline 開關 |

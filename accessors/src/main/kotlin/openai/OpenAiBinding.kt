@@ -85,6 +85,7 @@ class OpenAiBinding(
   override fun execute(operation: String, arguments: Map<String, Any?>): Any? =
       when (operation) {
         OPERATION -> call(arguments, streaming = false)
+        DOWNLOAD -> call(arguments, streaming = false, binary = true)
         STREAM_OPEN -> call(arguments, streaming = true)
         STREAM_NEXT -> streamOf(arguments).next()
         STREAM_CLOSE -> streamOf(arguments).end(null).let { null }
@@ -151,13 +152,17 @@ class OpenAiBinding(
     }
   }
 
-  private fun call(arguments: Map<String, Any?>, streaming: Boolean): Any? {
+  private fun call(
+      arguments: Map<String, Any?>,
+      streaming: Boolean,
+      binary: Boolean = false,
+  ): Any? {
     val endpoint =
         (arguments["endpoint"] as? String)?.let { OpenAiEndpoints.find(it)?.id } ?: "unknown"
     val report = Report()
     var result: Throwable? = null
     try {
-      return run(arguments, endpoint, report, streaming)
+      return run(arguments, endpoint, report, streaming, binary)
     } catch (e: Throwable) {
       result = e
       throw e
@@ -234,9 +239,10 @@ class OpenAiBinding(
       endpoint: String,
       report: Report,
       streaming: Boolean,
+      binary: Boolean,
   ): Any? {
     if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
-    return run(OpenAiRequestPlan.of(settings, arguments, streaming), endpoint, report)
+    return run(OpenAiRequestPlan.of(settings, arguments, streaming, binary), endpoint, report)
   }
 
   private fun run(plan: OpenAiRequestPlan, endpoint: String, report: Report): Any? {
@@ -244,6 +250,8 @@ class OpenAiBinding(
     if (credential is OpenAiCredential.Unavailable) {
       throw ResourceOperationFailure(ResourceFailure.SECRET_UNAVAILABLE)
     }
+    // A place the answer may not be written to is found out before the service is asked.
+    plan.output?.let { it.directory.checkTarget(it.relative) }
     val waitStart = System.nanoTime()
     val got =
         try {
@@ -310,6 +318,8 @@ class OpenAiBinding(
       if (!released.compareAndSet(false, true)) return
       total?.cancel(false)
       holdings.forEach { runCatching { it.close() } }
+      // Whatever ended the call, the connection goes with it.
+      runCatching { stream?.close() }
       live -= this
       quota.release()
     }
@@ -342,7 +352,7 @@ class OpenAiBinding(
       val client = clientFor(call.limits.connectMillis)
       val content =
           upload
-              ?.open(settings.maxRequestBytes)
+              ?.open(plan.sizes.request)
               ?.also {
                 call.holding(it)
                 // The idle limit also covers the sending: a form that stops going out is idle.
@@ -354,7 +364,7 @@ class OpenAiBinding(
           awaitHeaders(
               call,
               client,
-              request(uri, method, body, content, call.limits, plan.streaming),
+              request(uri, method, body, content, call.limits, plan.streaming, plan.binary),
           )
       val status = response.statusCode()
       call.stream = response.body()
@@ -377,14 +387,42 @@ class OpenAiBinding(
         throw ResourceOperationFailure(categoryOf(status), null, status)
       }
       val declared = response.headers().firstValueAsLong("content-length")
-      if (declared.isPresent && declared.asLong > settings.maxResponseBytes) {
+      val limit = if (plan.output != null) plan.sizes.download else plan.sizes.response
+      if (declared.isPresent && declared.asLong > limit) {
         response.body().close()
         throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
       }
       if (plan.streaming)
-          return startStream(call, response, status, report, plan.endpoint.id, sentAt)
+          return startStream(
+              call,
+              response,
+              status,
+              report,
+              plan.endpoint.id,
+              sentAt,
+              plan.sizes.response,
+          )
       val readStart = System.nanoTime()
-      val text = readBody(call, response.body(), status)
+      if (plan.output != null) {
+        val written = writeFile(call, response.body(), status, plan.output, limit)
+        report.generationMillis = millisSince(readStart)
+        return mapOf(
+            "status" to status,
+            "headers" to answerHeaders(response.headers().map()),
+            "path" to plan.output.directory.relativeName(plan.output.relative),
+            "size" to written,
+        )
+      }
+      if (plan.binary) {
+        val bytes = readBytes(call, response.body(), status, limit)
+        report.generationMillis = millisSince(readStart)
+        return mapOf(
+            "status" to status,
+            "headers" to answerHeaders(response.headers().map()),
+            "bytes" to bytes,
+        )
+      }
+      val text = readBody(call, response.body(), status, limit)
       report.generationMillis = millisSince(readStart)
       report.usage = usageOf(text)
       return mapOf(
@@ -488,10 +526,11 @@ class OpenAiBinding(
       report: Report,
       endpoint: String,
       sentAt: Long,
+      maxEventBytes: Long,
   ): Map<String, Any?> {
     val wire = Wire(call, response.body(), sentAt, report)
     val id = streamIds.incrementAndGet()
-    val events = ServerSentEvents(settings.maxResponseBytes.toInt()) { wire.read(it) }
+    val events = ServerSentEvents(maxEventBytes.toInt()) { wire.read(it) }
     val headers = answerHeaders(response.headers().map())
     val opened = OpenStream(call, report, endpoint, events)
     call.owner = opened
@@ -526,7 +565,48 @@ class OpenAiBinding(
   }
 
   /** The answer, read in pieces; the idle limit is on each wait for the next piece. */
-  private fun readBody(call: Call, stream: InputStream, status: Int): String {
+  /** The answer, read in pieces and written into the file of a scope, which it replaces whole. */
+  private fun writeFile(
+      call: Call,
+      stream: InputStream,
+      status: Int,
+      target: DownloadTarget,
+      limit: Long,
+  ): Long {
+    val buffer = ByteArray(BUFFER)
+    target.directory.openForWrite(target.relative, target.maxBytes).use { file ->
+      while (true) {
+        val idle =
+            TIMERS.schedule(
+                { call.stop(ResourceFailure.IDLE_TIMEOUT) },
+                call.limits.idleMillis,
+                TimeUnit.MILLISECONDS,
+            )
+        val read =
+            try {
+              stream.read(buffer)
+            } catch (e: IOException) {
+              throw stopped(call) ?: classify(call, e)
+            } finally {
+              idle.cancel(false)
+            }
+        stopped(call)?.let { throw it }
+        if (read < 0) break
+        if (file.size + read > limit) {
+          runCatching { stream.close() }
+          throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
+        }
+        file.write(buffer, 0, read)
+      }
+      file.commit()
+      return file.size
+    }
+  }
+
+  private fun readBody(call: Call, stream: InputStream, status: Int, limit: Long): String =
+      readBytes(call, stream, status, limit).toString(StandardCharsets.UTF_8)
+
+  private fun readBytes(call: Call, stream: InputStream, status: Int, limit: Long): ByteArray {
     val out = ByteArrayOutputStream()
     val buffer = ByteArray(BUFFER)
     while (true) {
@@ -546,13 +626,13 @@ class OpenAiBinding(
           }
       stopped(call)?.let { throw it }
       if (read < 0) break
-      if (out.size() + read > settings.maxResponseBytes) {
+      if (out.size() + read > limit) {
         runCatching { stream.close() }
         throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
       }
       out.write(buffer, 0, read)
     }
-    return out.toString(StandardCharsets.UTF_8)
+    return out.toByteArray()
   }
 
   /** The failure for a call that was stopped from outside, or null when it was not. */
@@ -591,9 +671,17 @@ class OpenAiBinding(
       upload: OpenedUpload?,
       limits: OpenAiLimits,
       streaming: Boolean,
+      binary: Boolean,
   ): HttpRequest {
     val builder = HttpRequest.newBuilder(uri).timeout(Duration.ofMillis(limits.firstByteMillis))
-    builder.header("Accept", if (streaming) "text/event-stream" else "application/json")
+    builder.header(
+        "Accept",
+        when {
+          binary -> "*/*"
+          streaming -> "text/event-stream"
+          else -> "application/json"
+        },
+    )
     if (body != null) builder.header("Content-Type", "application/json")
     if (upload != null) builder.header("Content-Type", upload.contentType)
     (credential as? OpenAiCredential.Key)?.let {
@@ -684,6 +772,7 @@ class OpenAiBinding(
 
   companion object {
     const val OPERATION = "openai.call"
+    const val DOWNLOAD = "openai.download"
     const val STREAM_OPEN = "openai.stream.open"
     const val STREAM_NEXT = "openai.stream.next"
     const val STREAM_CLOSE = "openai.stream.close"

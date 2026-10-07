@@ -71,17 +71,9 @@ class OpenAiEndpointsTest {
   }
 
   @Test
-  fun `an entry the catalog names but this version cannot carry out yet is not delivered`() {
-    val undelivered = OpenAiEndpoints.all.filterNot { it.delivered }.map { it.id }.toSet()
-
-    // Entries come in as they are carried out (WI-53): what is left here cannot be enabled.
-    assertEquals(
-        setOf(
-            "audio.speech",
-            "files.content",
-        ),
-        undelivered,
-    )
+  fun `this version carries out every entry of the catalog`() {
+    // An entry a later version adds before it works is not delivered, and cannot be enabled.
+    assertEquals(emptySet(), OpenAiEndpoints.all.filterNot { it.delivered }.map { it.id }.toSet())
   }
 
   @Test

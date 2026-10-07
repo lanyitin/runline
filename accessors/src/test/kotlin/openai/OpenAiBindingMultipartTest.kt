@@ -604,4 +604,38 @@ class OpenAiBindingMultipartTest {
     repeat(3) { System.gc() }
     return Runtime.getRuntime().let { it.totalMemory() - it.freeMemory() }
   }
+
+  @Test
+  fun `a pipeline can tighten the request limit for a call, and cannot loosen the administrator's`() {
+    val settings = "\"endpoints\":[\"files.create\"],\"maxRequestBytes\":1500"
+    val big = listOf(bytesPart("file", "a.txt", ByteArray(1000)))
+
+    val tighter =
+        assertFailsWith<ResourceOperationFailure> {
+          upload(
+              binding("\"endpoints\":[\"files.create\"]"),
+              files = big,
+              extra = mapOf("sizesBytes" to mapOf("request" to 900L)),
+          )
+        }
+    val looser =
+        assertFailsWith<ResourceOperationFailure> {
+          upload(
+              binding(settings),
+              files = listOf(bytesPart("file", "a.txt", ByteArray(2000))),
+              extra = mapOf("sizesBytes" to mapOf("request" to 1_000_000L)),
+          )
+        }
+    val fine =
+        upload(
+            binding(settings),
+            files = big,
+            extra = mapOf("sizesBytes" to mapOf("request" to 1400L)),
+        )
+
+    assertEquals(ResourceFailure.REQUEST_TOO_LARGE, tighter.failure)
+    assertEquals(ResourceFailure.REQUEST_TOO_LARGE, looser.failure)
+    assertEquals(200, fine["status"])
+    assertEquals(1, server.requests.size)
+  }
 }

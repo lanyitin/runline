@@ -210,6 +210,9 @@ enum class ResourceFailure {
   /** The service redirected somewhere outside the resource's address, which is never followed. */
   REDIRECT_BLOCKED,
 
+  /** A file written into a scope's directory would take it over the limit on what it may hold. */
+  SCOPE_FULL,
+
   /** The call was stopped: the run was cancelled or ended, or the holder was released by force. */
   CANCELLED,
 }

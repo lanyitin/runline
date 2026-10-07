@@ -43,6 +43,9 @@ data class OpenAiLimits(
     val quotaWaitMillis: Long,
 )
 
+/** The three limits on size that apply to one call, in bytes. */
+data class OpenAiSizes(val request: Long, val response: Long, val download: Long)
+
 /**
  * The settings an administrator fixes for an `openai-compatible` resource (ADR-019): where the
  * service is, what goes out with every request, which catalog entries are open, how long each stage
@@ -64,6 +67,8 @@ internal constructor(
     val maxRequestBytes: Long,
     /** The most of an answer that is kept in memory. */
     val maxResponseBytes: Long,
+    /** The most of a binary answer that is written to a file. */
+    val maxDownloadBytes: Long,
     val defaults: JsonObject,
     /** Empty: any model. */
     val allowedModels: Set<String>,
@@ -83,6 +88,7 @@ internal constructor(
             "requestsPerRun",
             "maxRequestBytes",
             "maxResponseBytes",
+            "maxDownloadBytes",
             "defaults",
             "allowedModels",
             "lockedParameters",
@@ -97,10 +103,12 @@ internal constructor(
     const val DEFAULT_QUOTA_WAIT_MS = 60_000L
     const val DEFAULT_MAX_REQUEST_BYTES = 32L * 1024 * 1024
     const val DEFAULT_MAX_RESPONSE_BYTES = 8L * 1024 * 1024
+    const val DEFAULT_MAX_DOWNLOAD_BYTES = 256L * 1024 * 1024
     private const val LONGEST_TIMEOUT_MS = 24L * 3600 * 1000
     private const val MOST_REQUESTS_PER_RUN = 256
     private const val MOST_REQUEST_BYTES = 1L shl 30
     private const val MOST_RESPONSE_BYTES = 256L * 1024 * 1024
+    private const val MOST_DOWNLOAD_BYTES = 16L * 1024 * 1024 * 1024
 
     /** Parameters whose value is a number. */
     private val NUMERIC =
@@ -165,6 +173,13 @@ internal constructor(
               MOST_RESPONSE_BYTES,
               DEFAULT_MAX_RESPONSE_BYTES,
           ) ?: return invalid(OpenAiSettingsProblem.INVALID_LIMIT)
+      val maxDownloadBytes =
+          boundedLong(
+              settings["maxDownloadBytes"],
+              1,
+              MOST_DOWNLOAD_BYTES,
+              DEFAULT_MAX_DOWNLOAD_BYTES,
+          ) ?: return invalid(OpenAiSettingsProblem.INVALID_LIMIT)
       val defaults =
           defaultsOf(settings["defaults"])
               ?: return invalid(OpenAiSettingsProblem.INVALID_REQUEST_DEFAULTS)
@@ -194,6 +209,7 @@ internal constructor(
               requestsPerRun.toInt(),
               maxRequestBytes,
               maxResponseBytes,
+              maxDownloadBytes,
               defaults,
               allowedModels,
               locked,
@@ -365,6 +381,10 @@ internal constructor(
     }
   }
 
+  /** The limits on size of a call, in bytes. */
+  val sizes: OpenAiSizes
+    get() = OpenAiSizes(maxRequestBytes, maxResponseBytes, maxDownloadBytes)
+
   /** The same settings with other limits on time, for what looks at the service on its own. */
   fun withTimeouts(limits: OpenAiLimits) =
       OpenAiSettings(
@@ -377,6 +397,7 @@ internal constructor(
           requestsPerRun,
           maxRequestBytes,
           maxResponseBytes,
+          maxDownloadBytes,
           defaults,
           allowedModels,
           lockedParameters,
@@ -403,6 +424,7 @@ internal constructor(
     result["requestsPerRun"] = JsonPrimitive(requestsPerRun)
     result["maxRequestBytes"] = JsonPrimitive(maxRequestBytes)
     result["maxResponseBytes"] = JsonPrimitive(maxResponseBytes)
+    result["maxDownloadBytes"] = JsonPrimitive(maxDownloadBytes)
     if (defaults.isNotEmpty()) result["defaults"] = defaults
     if (allowedModels.isNotEmpty())
         result["allowedModels"] = JsonArray(allowedModels.map { JsonPrimitive(it) })

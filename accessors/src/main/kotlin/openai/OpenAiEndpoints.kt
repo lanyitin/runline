@@ -227,6 +227,7 @@ object OpenAiEndpoints {
               ResponseKind.BINARY,
               true,
               takesModel = true,
+              delivered = true,
           ),
           upload(
               "audio.transcriptions",
@@ -260,6 +261,7 @@ object OpenAiEndpoints {
               "/files/{id}/content",
               BodyKind.NONE,
               ResponseKind.BINARY,
+              delivered = true,
           ),
           json("batches.create", "POST", "/batches"),
           plain("batches.list", "GET", "/batches", setOf("after", "limit")),

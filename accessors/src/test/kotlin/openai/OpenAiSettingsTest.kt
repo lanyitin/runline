@@ -50,6 +50,7 @@ class OpenAiSettingsTest {
     assertEquals(1, s.requestsPerRun)
     assertEquals(32L * 1024 * 1024, s.maxRequestBytes)
     assertEquals(8L * 1024 * 1024, s.maxResponseBytes)
+    assertEquals(256L * 1024 * 1024, s.maxDownloadBytes)
     assertEquals(emptySet(), s.allowedModels)
   }
 
@@ -206,7 +207,7 @@ class OpenAiSettingsTest {
   }
 
   @Test
-  fun `the endpoints enabled must be in the catalog and delivered`() {
+  fun `the endpoints enabled must be in the catalog`() {
     assertEquals(
         listOf("models.list", "files.list"),
         valid("""{"baseUrl":"http://h","endpoints":["files.list","models.list"]}""")
@@ -219,8 +220,6 @@ class OpenAiSettingsTest {
             """["no.such.endpoint"]""",
             """["chat/completions"]""",
             """[]""",
-            """["files.content"]""",
-            """["audio.speech"]""",
             """"chat.completions"""",
             """[5]""",
         )) {
@@ -280,11 +279,12 @@ class OpenAiSettingsTest {
   fun `the requests per run and the size limits are bounded`() {
     val s =
         valid(
-            """{"baseUrl":"http://h","requestsPerRun":4,"maxRequestBytes":1000,"maxResponseBytes":2000}"""
+            """{"baseUrl":"http://h","requestsPerRun":4,"maxRequestBytes":1000,"maxResponseBytes":2000,"maxDownloadBytes":3000}"""
         )
     assertEquals(4, s.requestsPerRun)
     assertEquals(1000L, s.maxRequestBytes)
     assertEquals(2000L, s.maxResponseBytes)
+    assertEquals(3000L, s.maxDownloadBytes)
 
     for (bad in
         listOf(
@@ -295,6 +295,9 @@ class OpenAiSettingsTest {
             """"maxRequestBytes":0""",
             """"maxResponseBytes":-5""",
             """"maxResponseBytes":99999999999999""",
+            """"maxDownloadBytes":0""",
+            """"maxDownloadBytes":99999999999999""",
+            """"maxDownloadBytes":"1"""",
         )) {
       assertEquals(
           OpenAiSettingsProblem.INVALID_LIMIT,

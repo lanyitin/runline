@@ -10,7 +10,9 @@ import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.util.UUID
 
 /**
  * One of the two directories of ADR-009 (the pipeline's shared directory, the run's private one) as
@@ -37,6 +39,81 @@ internal class ScopeDirectory private constructor(private val root: Path) {
       throw ResourceOperationFailure(ResourceFailure.FAILED)
     }
     OpenedFile(Files.newByteChannel(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS))
+  }
+
+  /**
+   * A file being written into the directory: its bytes go to a file of a random name beside the
+   * place it is for, and only [commit] puts it there (replacing what was there), so a file that was
+   * there is never left half written, and one that fails leaves nothing behind.
+   */
+  class PendingFile
+  internal constructor(
+      private val final: Path,
+      private val temp: Path,
+      /** What the directory may still take besides this file; null: no limit. */
+      private val room: Long?,
+  ) : Closeable {
+    private val out = Files.newOutputStream(temp, StandardOpenOption.WRITE)
+
+    /** How many bytes have been written. */
+    var size: Long = 0
+      private set
+
+    fun write(buffer: ByteArray, offset: Int, length: Int) {
+      if (room != null && size + length > room) {
+        throw ResourceOperationFailure(ResourceFailure.SCOPE_FULL)
+      }
+      out.write(buffer, offset, length)
+      size += length
+    }
+
+    /** The file is whole: it takes the place it is for. */
+    fun commit() {
+      out.close()
+      Files.move(temp, final, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    }
+
+    /** Whatever happened, nothing of this file stays. */
+    override fun close() {
+      runCatching { out.close() }
+      Files.deleteIfExists(temp)
+    }
+  }
+
+  /** That [relative] is a place a file may be written to, as far as can be told without writing. */
+  fun checkTarget(relative: String) {
+    Confinement.io { Confinement.locate(root, relative, createParents = false) }
+  }
+
+  /** Begins writing the file at [relative], making the directories on the way. */
+  fun openForWrite(relative: String, maxBytes: Long?): PendingFile = Confinement.io {
+    val file = Confinement.locate(root, relative, createParents = true)
+    if (Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS)) {
+      throw ResourceOperationFailure(ResourceFailure.FAILED)
+    }
+    val temp = file.resolveSibling(".runline-" + UUID.randomUUID() + ".part")
+    // What the directory holds besides the file this one replaces: that is what counts.
+    val room = maxBytes?.let {
+      it - usage() + (if (Files.isRegularFile(file)) Files.size(file) else 0)
+    }
+    Files.createFile(temp)
+    PendingFile(file, temp, room)
+  }
+
+  /** The bytes of the regular files in the directory, links not followed. */
+  private fun usage(): Long =
+      Files.walk(root.toRealPath()).use { all ->
+        all.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }
+            .mapToLong { Files.size(it) }
+            .sum()
+      }
+
+  /** The path of [file] below the directory, as a relative path with `/`. */
+  fun relativeName(relative: String): String = Confinement.io {
+    root
+        .toRealPath()
+        .relativize(Confinement.locate(root, relative, createParents = false))
+        .joinToString("/")
   }
 
   private class Exactly(private val inner: InputStream, private var left: Long) : InputStream() {

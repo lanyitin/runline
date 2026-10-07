@@ -30,6 +30,12 @@ private constructor(
     val streaming: Boolean = false,
     /** The multipart form to send instead of a JSON body, for the entries that take one. */
     internal val upload: UploadForm? = null,
+    /** Whether the answer is bytes, which a pipeline asks for with a download. */
+    val binary: Boolean = false,
+    /** Where to write the bytes of the answer instead of giving them back, if anywhere. */
+    internal val output: DownloadTarget? = null,
+    /** The limits on size of this call: the resource's, shortened by what the pipeline asked. */
+    val sizes: OpenAiSizes,
 ) {
   val method: String
     get() = endpoint.method
@@ -37,9 +43,17 @@ private constructor(
   companion object {
     /** A request for the base address itself, with [settings]' limits; for checks only. */
     internal fun root(settings: OpenAiSettings): OpenAiRequestPlan =
-        OpenAiRequestPlan(OpenAiEndpoints.ROOT, settings.baseUrl, null, settings.timeouts)
+        OpenAiRequestPlan(
+            OpenAiEndpoints.ROOT,
+            settings.baseUrl,
+            null,
+            settings.timeouts,
+            sizes = settings.sizes,
+        )
 
     private val FILE_NAME = Regex("[A-Za-z0-9._ -]{1,128}")
+
+    private val SIZE_NAMES = setOf("request", "response", "download")
 
     private val TIMEOUT_NAMES = setOf("connect", "firstByte", "idle", "total", "quotaWait")
 
@@ -50,6 +64,7 @@ private constructor(
         settings: OpenAiSettings,
         arguments: Map<String, Any?>,
         streaming: Boolean = false,
+        binary: Boolean = false,
     ): OpenAiRequestPlan {
       val name = arguments["endpoint"] as? String ?: throw invalid()
       val endpoint =
@@ -58,12 +73,15 @@ private constructor(
       if (endpoint.id !in settings.endpoints) {
         throw ResourceOperationFailure(ResourceFailure.ENDPOINT_NOT_ENABLED)
       }
+      // The answer of an entry is JSON or bytes, and a pipeline asks for the one it is.
+      if (binary != (endpoint.response == ResponseKind.BINARY)) throw invalid()
       if (streaming && !endpoint.streams) {
         throw ResourceOperationFailure(ResourceFailure.STREAM_NOT_SUPPORTED)
       }
       val path = endpoint.pathFor(stringMap(arguments["pathParameters"]))
       val query = endpoint.queryFor(stringMap(arguments["query"]))
       val limits = limitsOf(settings.timeouts, arguments["timeoutsMillis"])
+      val sizes = sizesOf(settings.sizes, arguments["sizesBytes"])
       val multipart = endpoint.body == BodyKind.MULTIPART
       // A form is for the entries that take one, a JSON body for the others: never both.
       val form =
@@ -75,7 +93,8 @@ private constructor(
       val text = arguments["body"]
       if (text != null && text !is String) throw invalid()
       val body =
-          if (upload != null) null else bodyOf(settings, endpoint, text as String?, streaming)
+          if (upload != null) null
+          else bodyOf(settings, endpoint, text as String?, streaming, sizes.request)
       return OpenAiRequestPlan(
           endpoint,
           URI.create(settings.baseUrl.toString() + path + query),
@@ -83,10 +102,23 @@ private constructor(
           limits,
           streaming,
           upload,
+          binary,
+          targetOf(arguments["target"]),
+          sizes,
       )
     }
 
     private fun invalid() = ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
+
+    private fun targetOf(given: Any?): DownloadTarget? {
+      if (given == null) return null
+      val target = given as? Map<*, *> ?: throw invalid()
+      return DownloadTarget(
+          ScopeDirectory.at(target["root"] as? String ?: throw invalid()),
+          target["path"] as? String ?: throw invalid(),
+          target["maxBytes"] as? Long,
+      )
+    }
 
     /** The form a pipeline asked for: its text fields and the file parts it gave. */
     private fun uploadOf(
@@ -144,6 +176,26 @@ private constructor(
       }
     }
 
+    /**
+     * The administrator's limits on size, each shortened to what the pipeline asked, never beyond.
+     */
+    private fun sizesOf(admin: OpenAiSizes, asked: Any?): OpenAiSizes {
+      if (asked == null) return admin
+      val map = asked as? Map<*, *> ?: throw invalid()
+      val bytes = HashMap<String, Long>()
+      for ((key, value) in map) {
+        if (key !in SIZE_NAMES) throw invalid()
+        val number = value as? Long ?: throw invalid()
+        if (number < 1) throw invalid()
+        bytes[key as String] = number
+      }
+      return OpenAiSizes(
+          minOf(admin.request, bytes["request"] ?: Long.MAX_VALUE),
+          minOf(admin.response, bytes["response"] ?: Long.MAX_VALUE),
+          minOf(admin.download, bytes["download"] ?: Long.MAX_VALUE),
+      )
+    }
+
     /** The administrator's limits, each shortened to what the pipeline asked for, never beyond. */
     private fun limitsOf(admin: OpenAiLimits, asked: Any?): OpenAiLimits {
       if (asked == null) return admin
@@ -170,12 +222,13 @@ private constructor(
         endpoint: OpenAiEndpoint,
         text: String?,
         streaming: Boolean,
+        maxRequestBytes: Long,
     ): ByteArray? {
       if (endpoint.body == BodyKind.NONE) {
         if (text != null) throw invalid()
         return null
       }
-      if (text != null && text.length > settings.maxRequestBytes) {
+      if (text != null && text.length > maxRequestBytes) {
         throw ResourceOperationFailure(ResourceFailure.REQUEST_TOO_LARGE)
       }
       val given = if (text == null) JsonObject(emptyMap()) else objectOf(text)
@@ -199,7 +252,7 @@ private constructor(
       checkCeilings(settings, given)
 
       val bytes = JsonObject(merged).toString().encodeToByteArray()
-      if (bytes.size > settings.maxRequestBytes) {
+      if (bytes.size > maxRequestBytes) {
         throw ResourceOperationFailure(ResourceFailure.REQUEST_TOO_LARGE)
       }
       return bytes
@@ -252,3 +305,11 @@ private constructor(
     }
   }
 }
+
+/** A file of a scope's directory that the bytes of an answer are written to. */
+internal class DownloadTarget(
+    val directory: ScopeDirectory,
+    val relative: String,
+    /** What the directory may hold at most, counting this file; null: no limit. */
+    val maxBytes: Long?,
+)

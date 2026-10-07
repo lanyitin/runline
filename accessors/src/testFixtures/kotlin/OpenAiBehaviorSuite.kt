@@ -274,4 +274,156 @@ abstract class OpenAiBehaviorSuite {
       assertNull(outcome.recorded, "only the development entry records")
     }
   }
+
+  /** A pipeline that opens a stream of the chat endpoint, pulls what [pull] says and records it. */
+  private fun streaming(
+      pull: String,
+      request: String = "new OpenAiRequest(\"chat.completions\", \"{}\")",
+  ) =
+      """
+      OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+      StringBuilder all = new StringBuilder();
+      try {
+        $pull
+      } catch (ResourceAccessException e) {
+        all.append("failed=").append(e.getFailure().name()).append(";");
+      }
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "all", all.toString());
+      """
+          .trimIndent()
+          .replace("REQUEST", request)
+
+  @Test
+  fun `a pipeline pulls a streamed answer event by event, to its end, with JDK types only`() {
+    rig.defineOpenAi("lemon", settings(), RigKey.Value(key))
+    val body =
+        streaming(
+            """
+            try (OpenAiStream s = lemon.stream(REQUEST)) {
+              all.append("status=").append(s.getStatus()).append(";");
+              String data;
+              int n = 0;
+              while ((data = s.next()) != null) n++;
+              all.append("events=").append(n).append(";");
+            }
+            """
+        )
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertEquals("status=200;events=6;", outcome.shared("all"))
+    val seen = server.requests.single()
+    assertEquals("Bearer $key", seen.header("authorization"))
+    assertEquals("text/event-stream", seen.header("accept"))
+    assertTrue(seen.body.contains("\"stream\":true"), seen.body)
+    assertEquals(0, server.inFlight)
+  }
+
+  /** A service that sends one event and then goes on without ending the stream. */
+  private fun endless() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.event("{}")
+      response.hang()
+      true
+    }
+  }
+
+  private fun await(what: String, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + 10_000_000_000
+    while (!condition()) {
+      check(System.nanoTime() < deadline) { "gave up waiting for $what" }
+      Thread.sleep(10)
+    }
+  }
+
+  @Test
+  fun `a stream that the resource's rules refuse is refused with its category and nothing is sent`() {
+    rig.defineOpenAi("lemon", settings("\"endpoints\":[\"chat.completions\",\"embeddings\"]"))
+    val body =
+        streaming(
+            """
+            try { lemon.stream(new OpenAiRequest("embeddings", "{}")); } catch (ResourceAccessException e) { all.append("embeddings=").append(e.getFailure().name()).append(";"); }
+            try { lemon.stream(new OpenAiRequest("chat.completions", "{\"stream\":true}")); } catch (ResourceAccessException e) { all.append("own=").append(e.getFailure().name()).append(";"); }
+            try { lemon.stream(new OpenAiRequest("files.list", null)); } catch (ResourceAccessException e) { all.append("disabled=").append(e.getFailure().name()).append(";"); }
+            """
+        )
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertEquals(
+        "embeddings=STREAM_NOT_SUPPORTED;own=INVALID_ARGUMENT;disabled=ENDPOINT_NOT_ENABLED;",
+        outcome.shared("all"),
+    )
+    assertEquals(0, server.requests.size)
+  }
+
+  @Test
+  fun `a stream holds the run's share, so a second request waits for it and gets the quota category`() {
+    rig.defineOpenAi("lemon", settings())
+    endless()
+    val body =
+        streaming(
+            """
+            try (OpenAiStream s = lemon.stream(REQUEST)) {
+              s.next();
+              try {
+                lemon.call(new OpenAiRequest("chat.completions", "{}", java.util.Collections.<String,String>emptyMap(), java.util.Collections.<String,String>emptyMap(), new OpenAiTimeouts(null, null, null, null, java.time.Duration.ofMillis(200))));
+                all.append("second=ok;");
+              } catch (ResourceAccessException e) {
+                all.append("second=").append(e.getFailure().name()).append(";");
+              }
+            }
+            """
+        )
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertEquals("second=QUOTA_WAIT_TIMEOUT;", outcome.shared("all"))
+    assertEquals(1, server.requests.size)
+    await("the service to see the stream closed") { server.clientsGone == 1 }
+  }
+
+  @Test
+  fun `a gap longer than the idle limit ends a stream with the idle category, and the events before it were pulled`() {
+    rig.defineOpenAi("lemon", settings("\"timeouts\":{\"idleMs\":300}"))
+    endless()
+    val body =
+        streaming(
+            """
+            try (OpenAiStream s = lemon.stream(REQUEST)) {
+              all.append("first=").append(s.next()).append(";");
+              s.next();
+            }
+            """
+        )
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    assertEquals("first={};failed=IDLE_TIMEOUT;", outcome.shared("all"))
+    await("the service to see the connection go") { server.clientsGone == 1 }
+  }
+
+  @Test
+  fun `a stream the pipeline leaves open is closed when the run ends`() {
+    rig.defineOpenAi("lemon", settings())
+    endless()
+    val body =
+        streaming(
+            """
+            OpenAiStream s = lemon.stream(REQUEST);
+            all.append("first=").append(s.next()).append(";");
+            """
+        )
+
+    val outcome = rig.run(body, typed = typed)
+
+    assertTrue(outcome.succeeded, outcome.failure)
+    await("the service to see the connection go") { server.clientsGone == 1 }
+    assertEquals(0, server.inFlight)
+  }
 }

@@ -1,6 +1,6 @@
 # WI-50 Console 各型別資源的表單與使用量
 
-本文回答：管理員如何在 Console 建立與修改 `file`、`jdbc-pool`、`openai-compatible` 資源，並看到型別專屬的使用量。狀態：已核可（2026-10-06）。相依：WI-45、WI-46、WI-48、WI-49。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 11 點。
+本文回答：管理員如何在 Console 建立與修改 `file`、`jdbc-pool`、`openai-compatible` 資源，並看到型別專屬的使用量。狀態：已核可（2026-10-06）。相依：WI-43、WI-46、WI-48、WI-49。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 11 點。
 
 ## 背景
 

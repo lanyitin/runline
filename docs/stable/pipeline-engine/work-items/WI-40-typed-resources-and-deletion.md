@@ -4,21 +4,21 @@
 
 ## 背景
 
-現行資源只有名稱與容量，API 沒有刪除端點（[08-api](../08-api.md)「共享資源」）。本項建立型別欄位、型別宣告與刪除，使後續各型別可各自交付；本項不引入任何有實體的型別，正式的型別集合此時只有 `counter`。
+現行資源只有名稱與容量，API 沒有刪除端點（[08-api](../08-api.md)「共享資源」）。本項建立型別欄位、型別宣告與刪除，使後續各型別可各自交付；本項不引入任何有實體的型別，可建立的型別此時只有 `counter`。
 
 ## 行為與驗收條件
 
 **資料與遷移**
 - 資源增加型別、型別專屬的非機密設定、機密別名（資料欄位見 [06](../06-data-model.md)）。既有資源於遷移時全部成為 `counter`，容量、啟用、持有與等待語意不變。遷移以真實 PostgreSQL（Testcontainers）驗證：含既有資源的資料庫遷移後內容不變、型別為 `counter`；再次執行為無操作。
-- 型別集合是封閉的。本項的正式型別只有 `counter`；`counter` 帶有型別專屬設定或機密別名時被拒絕。
+- 型別集合是封閉的。本項可建立的型別只有 `counter`；`counter` 帶有型別專屬設定或機密別名時被拒絕。
 
 **建立與修改**
 - 建立資源接受 `type`；省略視為 `counter`，只送名稱與容量的既有呼叫方式行為不變。型別不明、設定欄位不合規時回 422 `invalid_resource`，本文帶 `problem` 說明原因類別。
 - 型別與名稱建立後不可修改：`PATCH` 嘗試修改任一者回 422 `invalid_resource`；容量、啟用與（未來型別的）設定、別名照 ADR-019 第 8 點可改。
-- 型別定義的機制須讓測試原始碼能註冊僅供測試的 Fake 型別（用於驗證後續 WI-41、WI-43、WI-44 的通用機制）；正式發佈的型別集合不含它，也不能經組態或 API 註冊。若這需要在正式程式碼加入「開放外掛」性質的擴充點，停下來回報，由架構決定。
+- 型別集合是封閉的內建集合，不提供任何註冊擴充點，測試也不註冊測試專用型別。尚未實作的型別（`file`、`jdbc-pool`、`openai-compatible`）在對應工作項完成前，建立資源時回 422 `invalid_resource`（`problem` 為型別不明或尚未支援）。與型別無關的通用機制（存取端、檢查）由 [WI-43](WI-43-resource-accessor-boundary.md) 以真實的 `file` 型別驗證。
 
 **型別宣告**
-- Pipeline 的 metadata 可在名稱之外指定期望的型別。只宣告名稱的既有 pipeline 與既有 jar 行為完全不變，不需重新上傳。型別宣告不影響 safe 或 unsafe 判定。
+- Pipeline 的 metadata 可在名稱之外指定期望的型別，型別名稱取自封閉集合（`counter`、`file`、`jdbc-pool`、`openai-compatible`），即使該型別尚未實作也可宣告；集合之外的名稱在上傳時產生警告，建立 run 時視為型別不符。因此本項即可用 `counter` 資源搭配宣告其他型別名稱的 pipeline 驗證 `type_mismatch`。只宣告名稱的既有 pipeline 與既有 jar 行為完全不變，不需重新上傳。型別宣告不影響 safe 或 unsafe 判定。
 - 型別宣告由 core 的宣告契約與 analyzer 的統一 metadata 讀取（WI-19）一致支援；上傳回應與儲存的 metadata 呈現型別宣告，既有欄位與格式向後相容。以真實編譯的測試 jar 驗證。
 - 建立 run 時：宣告了型別且資源型別不符，回 409 `resources_unavailable`，`problems[]` 該項的 `problem` 為 `type_mismatch`；只宣告名稱者對任何型別皆通過；`unknown`、`disabled` 的既有行為不變；多個問題一併回報，被拒絕時不留下任何 run。
 - 上傳時宣告的型別與既有資源型別不符，與「資源未定義」一樣只產生警告，不影響判定。
@@ -41,7 +41,7 @@
 
 ## 架構約束
 
-- 容量、取得、等待、釋放語意不變（[ADR-007](../adr/ADR-007-shared-resources.md)）；不引入存取端（WI-43），不改 Console（WI-49）。
+- 容量、取得、等待、釋放語意不變（[ADR-007](../adr/ADR-007-shared-resources.md)）；不引入存取端與有實體的型別（WI-43），不改 Console（WI-49）。
 - 型別集合封閉，不開放外掛；邊界只傳 JDK 內建型別（[05](../05-ipc.md)）。
 - 資料庫遷移為版本化、單向前進，Engine 啟動時不自行遷移（[06](../06-data-model.md)）。
 - 測試使用真實 PostgreSQL（Testcontainers）與真實編譯的測試 jar，不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。

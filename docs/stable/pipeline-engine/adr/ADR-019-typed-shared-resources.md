@@ -240,7 +240,7 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 |---|---|---|
 | 1 | 連線池與模型服務由 Engine 中介，而非只提供設定 | 採 Engine 中介（方案 B） |
 | 2 | 金鑰庫由誰寫入 | 首階段由維運以工具管理，Engine 唯讀加重載；日後需要自助時另開 ADR |
-| 3 | 分階段與順序 | 先型別化基礎與刪除，再金鑰庫機制，然後依序 `file`、`openai-compatible`、`jdbc-pool` |
+| 3 | 分階段與順序 | 先型別化基礎與刪除，再存取端、檢查端點與 `file`（以第一個真實型別驗證通用機制，不使用測試專用型別），然後金鑰庫機制，最後依序 `openai-compatible`、`jdbc-pool` |
 | 4 | `jdbc-pool` 對 pipeline 的形式 | core 定義的窄 SQL 存取；JDBC 型別暴露待有具體需求再另開 ADR |
 | 5 | 強制釋放是否使存取端失效 | 失效 |
 | 6 | 容量語意 | 首版 run 級，加每 run 同時請求上限；請求級限流待壓測顯示吞吐不足再另開 ADR |
@@ -253,6 +253,7 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 
 - 目標 OpenAI 相容服務（含 lemonade）實際需要哪些端點（對話、補全、嵌入、模型清單）、並行請求上限與典型單次生成時間。影響：端點集合與預設額度、逾時；現行預設為對話、補全、嵌入、模型清單，金鑰選填，每 run 同時請求數 1。由 [WI-46](../work-items/WI-46-openai-compatible-resource.md) 實作前向使用者確認。
 - JDK 25 的金鑰庫工具能否直接匯入與更新任意機密字串項目，以及其預設加密參數。影響：維運手冊與驗收方式。由 [WI-41](../work-items/WI-41-keystore-secrets.md) 的前置驗證實測解決，結果不如預期時停下來回報。
+- 若 WI-41 的前置驗證結果不如預期而需要改變機密機制，影響範圍為 WI-41、WI-42、WI-46、WI-48；`file` 型別（WI-43）不使用機密，不受影響。
 
 ## 工作項
 
@@ -261,9 +262,9 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 | [WI-40](../work-items/WI-40-typed-resources-and-deletion.md) | 資源型別化基礎與刪除 |
 | [WI-41](../work-items/WI-41-keystore-secrets.md) | 金鑰庫機密機制（含前置驗證） |
 | [WI-42](../work-items/WI-42-keystore-deployment.md) | 金鑰庫的部署掛載與維運手冊 |
-| [WI-43](../work-items/WI-43-resource-accessor-boundary.md) | 資源存取端邊界與開發入口 |
-| [WI-44](../work-items/WI-44-resource-check-endpoint.md) | 檢查端點與實體狀態 |
-| [WI-45](../work-items/WI-45-file-resource.md) | `file` 型別 |
+| [WI-43](../work-items/WI-43-resource-accessor-boundary.md) | 資源存取端與開發入口、檢查端點與實體狀態、`file` 型別（合併原 WI-43、WI-44、WI-45） |
+| [WI-44](../work-items/WI-44-resource-check-endpoint.md) | 已併入 WI-43 |
+| [WI-45](../work-items/WI-45-file-resource.md) | 已併入 WI-43 |
 | [WI-46](../work-items/WI-46-openai-compatible-resource.md) | `openai-compatible` 型別（一次完整回傳） |
 | [WI-47](../work-items/WI-47-openai-compatible-streaming.md) | `openai-compatible` 串流 |
 | [WI-48](../work-items/WI-48-jdbc-pool-resource.md) | `jdbc-pool` 型別（PostgreSQL） |

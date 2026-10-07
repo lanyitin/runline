@@ -144,17 +144,17 @@ class JdbcSettingsTest {
     val s =
         valid(
             with(
-                """"properties":{"ApplicationName":"nightly","currentSchema":"etl","readOnly":"true"}"""
+                """"properties":{"ApplicationName":"nightly","currentSchema":"etl","tcpKeepAlive":"true"}"""
             )
         )
 
     assertEquals(
-        mapOf("ApplicationName" to "nightly", "currentSchema" to "etl", "readOnly" to "true"),
+        mapOf("ApplicationName" to "nightly", "currentSchema" to "etl", "tcpKeepAlive" to "true"),
         s.properties,
     )
     assertEquals(
         JdbcSettingsProblem.INVALID_SETTINGS,
-        problem(with(""""properties":{"readOnly":"maybe"}""")),
+        problem(with(""""properties":{"tcpKeepAlive":"maybe"}""")),
     )
     assertEquals(
         JdbcSettingsProblem.INVALID_SETTINGS,
@@ -194,6 +194,11 @@ class JdbcSettingsTest {
             "kerberosServerName",
             "replication",
             "applicationname",
+            // A statement can lift it again, so it would only look like a guard: the rights of the
+            // account are the guard.
+            "readOnly",
+            "readOnlyMode",
+            "defaultRowFetchSize",
         )
     for (name in forbidden) {
       assertEquals(

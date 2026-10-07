@@ -4,6 +4,7 @@ import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceOperationFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
+import java.math.BigDecimal
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
@@ -75,27 +76,60 @@ internal constructor(
             statement(arguments) { connection, sql, parameters ->
               count(connection, sql, parameters)
             }
-        BEGIN -> begin()
-        COMMIT -> end(commit = true)
-        ROLLBACK -> end(commit = false)
-        else -> throw ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
+        BEGIN -> noArguments(arguments).let { begin() }
+        COMMIT -> noArguments(arguments).let { end(commit = true) }
+        ROLLBACK -> noArguments(arguments).let { end(commit = false) }
+        else -> throw refused()
       }
 
+  private fun refused() = ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
+
+  private fun noArguments(arguments: Map<String, Any?>) {
+    if (arguments.isNotEmpty()) throw refused()
+  }
+
+  /**
+   * Runs one statement. What a call may carry is the text and the parameters, and nothing else is
+   * read from it: a member that is anything but those is refused, so that nothing a run puts in a
+   * call is taken for where to connect, whom as, or through what.
+   */
   private fun statement(
       arguments: Map<String, Any?>,
       run: (Connection, String, List<Any?>) -> Any?,
   ): Any? {
-    val sql = arguments["sql"] as String
-    val parameters = (arguments["parameters"] as? List<*>)?.toList() ?: emptyList()
+    if (!STATEMENT_MEMBERS.containsAll(arguments.keys)) throw refused()
+    val sql = arguments["sql"] as? String ?: throw refused()
+    val parameters = parametersOf(arguments["parameters"])
     val open = transaction
-    if (open != null)
-        return open.lock.withLock { guarded { run(open.connection, sql, parameters) } }
+    if (open != null) {
+      return open.lock.withLock { guarded { run(open.connection, sql, parameters) } }
+    }
     val connection = connect()
     try {
       return guarded { run(connection, sql, parameters) }
     } finally {
       pool.release(connection)
     }
+  }
+
+  /** The parameters of a call, each one of the kinds a run can give; anything else is refused. */
+  private fun parametersOf(given: Any?): List<Any?> {
+    if (given == null) return emptyList()
+    val list = given as? List<*> ?: throw refused()
+    val parameters = ArrayList<Any?>(list.size)
+    for (value in list) {
+      when (value) {
+        null,
+        is String,
+        is Boolean,
+        is Long,
+        is Double,
+        is BigDecimal,
+        is ByteArray -> parameters += value
+        else -> throw refused()
+      }
+    }
+    return parameters
   }
 
   private fun connect(): Connection {
@@ -217,6 +251,7 @@ internal constructor(
     const val BEGIN = "jdbc.begin"
     const val COMMIT = "jdbc.commit"
     const val ROLLBACK = "jdbc.rollback"
+    val STATEMENT_MEMBERS = setOf("sql", "parameters")
   }
 }
 

@@ -53,7 +53,13 @@ class BoundResources(
     val name = request["resource"]
     val binding = bindings[name] ?: return failure(ResourceFailure.NOT_PROVIDED)
     val state = states.getValue(name as String)
-    @Suppress("UNCHECKED_CAST") val given = request["arguments"] as Map<String, Any?>
+    // A call that is not even the shape of a call is an answer like any other, never an exception.
+    val operation =
+        request["operation"] as? String ?: return failure(ResourceFailure.INVALID_ARGUMENT)
+    @Suppress("UNCHECKED_CAST")
+    val given =
+        request["arguments"] as? Map<String, Any?>
+            ?: return failure(ResourceFailure.INVALID_ARGUMENT)
     return state.lock.read {
       val revoked = state.invalidation ?: runInvalidation
       if (revoked != null) return@read failure(revoked.failure)
@@ -61,9 +67,9 @@ class BoundResources(
           try {
             withDirectories(given)
           } catch (e: ResourceOperationFailure) {
-            return@read failed(name, binding, request["operation"] as String, e.failure, e.cause)
+            return@read failed(name, binding, operation, e.failure, e.cause)
           }
-      execute(name, binding, request["operation"] as String, arguments)
+      execute(name, binding, operation, arguments)
     }
   }
 

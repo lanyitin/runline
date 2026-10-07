@@ -26,7 +26,6 @@ object PostgresProfile : JdbcProfile {
       mapOf(
           "ApplicationName" to PropertyRule { it.length <= 64 && it.none(Char::isISOControl) },
           "currentSchema" to PropertyRule { IDENTIFIERS.matches(it) },
-          "readOnly" to PropertyRule { it == "true" || it == "false" },
           "tcpKeepAlive" to PropertyRule { it == "true" || it == "false" },
       )
   override val healthQuery = "SELECT 1"
@@ -57,9 +56,12 @@ object PostgresProfile : JdbcProfile {
     // An empty password, not none: with none the driver would look for one in the files and the
     // environment of the Engine's host, which is nobody's decision about this resource.
     properties.setProperty("password", password.orEmpty())
-    val seconds = ((connectTimeoutMillis + 999) / 1000).toString()
-    properties.setProperty("connectTimeout", seconds)
-    properties.setProperty("loginTimeout", seconds)
+    val seconds = (connectTimeoutMillis + 999) / 1000
+    properties.setProperty("connectTimeout", seconds.toString())
+    // The whole of logging in is allowed a little longer than reaching the server, so that a server
+    // that cannot be reached is always the connect limit's failure and never a race between the
+    // two.
+    properties.setProperty("loginTimeout", (seconds + LOGIN_MARGIN_SECONDS).toString())
     extra.forEach { (name, value) -> properties.setProperty(name, value) }
     return properties
   }
@@ -98,6 +100,7 @@ object PostgresProfile : JdbcProfile {
   private val DATABASE = Regex("[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}")
   private val IDENTIFIERS =
       Regex("[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}")
+  private const val LOGIN_MARGIN_SECONDS = 5L
   private val STATE = Regex("[0-9A-Z]{5}")
 }
 

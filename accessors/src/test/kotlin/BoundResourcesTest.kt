@@ -144,4 +144,43 @@ class BoundResourcesTest {
       pool.shutdownNow()
     }
   }
+
+  /** A binding that fails with a category and a status, and notes when it is let go. */
+  private class StatusBinding : ResourceBinding {
+    override val type = "openai-compatible"
+    val closed = AtomicInteger()
+
+    override fun execute(operation: String, arguments: Map<String, Any?>): Any? =
+        throw ResourceOperationFailure(ResourceFailure.RATE_LIMITED, status = 429)
+
+    override fun close() {
+      closed.incrementAndGet()
+    }
+  }
+
+  @Test
+  fun `the status of a failure goes back with its category`() {
+    val host = BoundResources(mapOf("a" to StatusBinding()))
+
+    val answer = write(host, "a", "x")
+
+    assertEquals(false, answer["ok"])
+    assertEquals("RATE_LIMITED", answer["failure"])
+    assertEquals(429, answer["status"])
+    assertEquals(null, answer["errorId"], "a failure with a category needs no errorId")
+  }
+
+  @Test
+  fun `a binding is closed once, when its resource is invalidated, and not before`() {
+    val binding = StatusBinding()
+    val host = BoundResources(mapOf("a" to binding))
+
+    write(host, "a", "x")
+    assertEquals(0, binding.closed.get())
+
+    host.invalidate("a", Invalidation.FORCE_RELEASED)
+    host.invalidateAll(Invalidation.RUN_ENDED)
+
+    assertEquals(1, binding.closed.get())
+  }
 }

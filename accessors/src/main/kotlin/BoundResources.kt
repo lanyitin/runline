@@ -56,7 +56,7 @@ class BoundResources(
           }
       )
     } catch (e: ResourceOperationFailure) {
-      failed(resource, binding, operation, e.failure, e.cause)
+      failed(resource, binding, operation, e.failure, e.cause, e.status)
     } catch (e: Exception) {
       failed(resource, binding, operation, ResourceFailure.FAILED, e)
     }
@@ -69,10 +69,14 @@ class BoundResources(
       operation: String,
       failure: ResourceFailure,
       cause: Throwable?,
+      status: Int? = null,
   ): Map<String, Any?> {
     val errorId = if (failure == ResourceFailure.FAILED) UUID.randomUUID().toString() else null
     observer.failed(resource, binding.type, operation, failure, errorId, cause)
-    return failure(failure).also { answer -> errorId?.let { answer["errorId"] = it } }
+    return failure(failure).also { answer ->
+      errorId?.let { answer["errorId"] = it }
+      status?.let { answer["status"] = it }
+    }
   }
 
   /**
@@ -84,7 +88,13 @@ class BoundResources(
     binding.abort()
     val first =
         state.lock.write {
-          (state.invalidation == null).also { if (it) state.invalidation = reason }
+          (state.invalidation == null).also {
+            if (it) {
+              state.invalidation = reason
+              // Nothing is running on the binding now and nothing can start: let it go.
+              runCatching { binding.close() }
+            }
+          }
         }
     if (first) observer.invalidated(resource, binding.type, reason)
   }

@@ -18,6 +18,7 @@ dependencies {
   // The behavior every host of accessors must show, run by the Engine's and the development
   // entry's own tests (WI-43): the same acceptance tests for both.
   testFixturesImplementation(kotlin("test-junit5"))
+  testFixturesImplementation(libs.kotlinx.serialization.json)
 
   testImplementation(kotlin("test"))
   testImplementation(testFixtures(project(":runner")))

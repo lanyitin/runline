@@ -16,8 +16,20 @@ interface ResourceBinding {
    * anything.
    */
   fun abort() {}
+
+  /**
+   * Lets go of what the binding holds (a client, connections), once, when it is invalidated and
+   * nothing is running on it any more. The entity itself is not closed: it is the resource's.
+   */
+  fun close() {}
 }
 
-/** An operation failed; [failure] is the only thing a run is told about it. */
-class ResourceOperationFailure(val failure: ResourceFailure, cause: Throwable? = null) :
-    RuntimeException(failure.name, cause)
+/**
+ * An operation failed; [failure] and, for the types that talk HTTP, the [status] the service
+ * answered with are the only things a run is told about it.
+ */
+class ResourceOperationFailure(
+    val failure: ResourceFailure,
+    cause: Throwable? = null,
+    val status: Int? = null,
+) : RuntimeException(failure.name, cause)

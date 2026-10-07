@@ -427,6 +427,12 @@ data class EngineConfig(
       if (tokens.map { it.secret }.toSet().size != tokens.size) {
         problems += "auth.tokens contains the same token more than once"
       }
+      // The name is the identity that owns uploads (ADR-012, ADR-020): two tokens may not share it.
+      val repeated = tokens.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+      if (repeated.isNotEmpty()) {
+        problems +=
+            "auth.tokens uses the same name for more than one token: ${repeated.joinToString()}"
+      }
       return tokens
     }
 

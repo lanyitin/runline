@@ -833,6 +833,32 @@ class PackagedEngineTest {
   }
 
   @Test
+  fun `the packaged Engine refuses two tokens with the same name, names it and prints no token`() {
+    val database = PostgresTestContainer.newDatabase()
+    migrate(database, dist.resolve("run-runtime"))
+    val process =
+        launch(
+            "the Engine with two tokens named alike",
+            environment(
+                database,
+                dist.resolve("run-runtime"),
+                mapOf(
+                    "API_TOKENS" to
+                        "ann:developer:tok-first-0123456789,ann:admin:tok-second-0123456789"
+                ),
+            ),
+            "-jar",
+            dist.resolve("engine.jar").toString(),
+            log = "engine.log",
+        )
+
+    assertNotEquals(0, process.awaitExit(TestTimeouts.processExit), output("engine.log"))
+    assertTrue(output("engine.log").contains("ann"), output("engine.log"))
+    assertFalse(output("engine.log").contains("tok-first-0123456789"), output("engine.log"))
+    assertFalse(output("engine.log").contains("tok-second-0123456789"), output("engine.log"))
+  }
+
+  @Test
   fun `the packaged Engine opens its keystore, lists the aliases and masks a secret a run echoes`() {
     val database = PostgresTestContainer.newDatabase()
     migrate(database, dist.resolve("run-runtime"))

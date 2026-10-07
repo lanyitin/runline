@@ -207,6 +207,20 @@ class EngineConfigTest {
   }
 
   @Test
+  fun `a name used by two tokens is rejected, naming the name and no token, whatever the roles`() {
+    for (tokens in
+        listOf(
+            "ann:developer:tok-first-111,ann:developer:tok-second-222",
+            "ann:developer:tok-first-111,ann:admin:tok-second-222",
+        )) {
+      val e = assertFailsWith<ConfigurationException>(tokens) { parse("auth.tokens" to tokens) }
+      assertTrue(e.message!!.contains("ann"), e.message)
+      assertFalse(e.message!!.contains("tok-first-111"), e.message)
+      assertFalse(e.message!!.contains("tok-second-222"), e.message)
+    }
+  }
+
+  @Test
   fun `non positive or non numeric upload limit is rejected`() {
     for (value in listOf("0", "-5", "lots")) {
       assertFailsWith<ConfigurationException>(value) { parse("upload.maxBytes" to value) }

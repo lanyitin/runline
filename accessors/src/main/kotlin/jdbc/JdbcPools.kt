@@ -1,6 +1,8 @@
 package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.ResourceBinding
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** The connection pools of the `jdbc-pool` resources, one generation at a time per resource. */
 class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
@@ -37,11 +39,16 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
           }
           connection
         }
+    pools.computeIfAbsent(resource) { CopyOnWriteArrayList() } += pool
     return JdbcBinding(resource, settings, profile, credential, pool, observer)
   }
 
-  /** How many connections of [resource] a run is using now, in every generation. */
-  fun activeConnections(resource: String): Int = 0
+  private val pools = ConcurrentHashMap<String, MutableList<JdbcConnectionPool>>()
 
-  override fun close() {}
+  /** How many connections of [resource] a run is using now, in every generation. */
+  fun activeConnections(resource: String): Int = pools[resource]?.sumOf { it.active } ?: 0
+
+  override fun close() {
+    pools.values.flatten().forEach { it.close() }
+  }
 }

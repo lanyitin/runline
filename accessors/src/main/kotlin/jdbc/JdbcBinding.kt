@@ -10,6 +10,10 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Statement
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -66,8 +70,23 @@ internal constructor(
   @Volatile private var transaction: Transaction? = null
   private val transactionLock = ReentrantLock()
 
-  override fun execute(operation: String, arguments: Map<String, Any?>): Any? =
-      when (operation) {
+  /** How many connections the run may use at once; the pool is large enough for every run's. */
+  private val share = Semaphore(settings.connectionsPerRun, true)
+
+  /** Cuts off a statement that has run too long; made when it is first needed. */
+  private val timer: ScheduledThreadPoolExecutor by lazy {
+    ScheduledThreadPoolExecutor(1) { task ->
+          Thread.ofPlatform().name("jdbc-statement-timer-$resource").daemon().unstarted(task)
+        }
+        .apply { removeOnCancelPolicy = true }
+  }
+
+  override fun execute(operation: String, arguments: Map<String, Any?>): Any? {
+    if (operation !in OPERATIONS) throw refused()
+    val started = System.nanoTime()
+    var failure: ResourceFailure? = null
+    try {
+      return when (operation) {
         QUERY ->
             statement(arguments) { connection, sql, parameters ->
               rows(connection, sql, parameters)
@@ -78,9 +97,23 @@ internal constructor(
             }
         BEGIN -> noArguments(arguments).let { begin() }
         COMMIT -> noArguments(arguments).let { end(commit = true) }
-        ROLLBACK -> noArguments(arguments).let { end(commit = false) }
-        else -> throw refused()
+        else -> noArguments(arguments).let { end(commit = false) }
       }
+    } catch (e: ResourceOperationFailure) {
+      failure = e.failure
+      throw e
+    } catch (e: Throwable) {
+      failure = ResourceFailure.FAILED
+      throw e
+    } finally {
+      val millis = (System.nanoTime() - started) / 1_000_000
+      runCatching { observer.finished(resource, operation, millis, failure) }
+    }
+  }
+
+  override fun close() {
+    if (timer.isShutdown.not()) timer.shutdownNow()
+  }
 
   private fun refused() = ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
 
@@ -108,7 +141,7 @@ internal constructor(
     try {
       return guarded { run(connection, sql, parameters) }
     } finally {
-      pool.release(connection)
+      give(connection)
     }
   }
 
@@ -132,17 +165,37 @@ internal constructor(
     return parameters
   }
 
+  /** A connection of the run's share: the run waits for its own share, never for another run's. */
   private fun connect(): Connection {
     if (credential is JdbcCredential.Unavailable) {
       observer.acquireFailed(resource, ResourceFailure.SECRET_UNAVAILABLE)
       throw ResourceOperationFailure(ResourceFailure.SECRET_UNAVAILABLE)
     }
+    if (!share.tryAcquire(settings.quotaWaitMillis, TimeUnit.MILLISECONDS)) {
+      observer.acquireFailed(resource, ResourceFailure.QUOTA_WAIT_TIMEOUT)
+      throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
+    }
     try {
       return pool.borrow()
-    } catch (e: SQLException) {
-      val failure = failure(e)
+    } catch (e: Throwable) {
+      share.release()
+      val failure =
+          when (e) {
+            is SQLException -> failure(e)
+            else ->
+                ResourceOperationFailure(ResourceFailure.CONNECTION_FAILED, e, withErrorId = true)
+          }
       observer.acquireFailed(resource, failure.failure)
       throw failure
+    }
+  }
+
+  /** Gives a connection, and the run's share of them, back. */
+  private fun give(connection: Connection) {
+    try {
+      pool.release(connection)
+    } finally {
+      share.release()
     }
   }
 
@@ -153,7 +206,7 @@ internal constructor(
       try {
         connection.autoCommit = false
       } catch (e: SQLException) {
-        pool.release(connection)
+        give(connection)
         throw failure(e)
       }
       transaction = Transaction(connection)
@@ -172,7 +225,7 @@ internal constructor(
         } catch (e: SQLException) {
           throw failure(e)
         } finally {
-          pool.release(open.connection)
+          give(open.connection)
         }
       }
     }
@@ -187,37 +240,66 @@ internal constructor(
         throw failure(e)
       }
 
-  private fun failure(e: SQLException): ResourceOperationFailure {
+  private fun failure(e: SQLException, timedOut: Boolean = false): ResourceOperationFailure {
     val classified = profile.classify(e)
+    val failure = if (timedOut) ResourceFailure.TOTAL_TIMEOUT else classified.failure
     return ResourceOperationFailure(
-        classified.failure,
-        JdbcFailureCause.of(classified.failure, e, (credential as? JdbcCredential.Password)?.value),
-        sqlState = classified.sqlState,
+        failure,
+        JdbcFailureCause.of(failure, e, (credential as? JdbcCredential.Password)?.value),
+        sqlState = if (timedOut) null else classified.sqlState,
         withErrorId = true,
     )
   }
 
   private fun rows(connection: Connection, sql: String, parameters: List<Any?>): Any? =
       prepare(connection, sql, parameters).use { statement ->
-        val result =
-            if (statement is PreparedStatement) statement.executeQuery()
-            else statement.executeQuery(sql)
-        result.use { read(it) }
+        statement.maxRows = settings.maxRows + 1
+        limited(statement) {
+          val result =
+              if (statement is PreparedStatement) statement.executeQuery()
+              else statement.executeQuery(sql)
+          result.use { read(it) }
+        }
       }
 
   private fun count(connection: Connection, sql: String, parameters: List<Any?>): Any? =
       prepare(connection, sql, parameters).use { statement ->
-        if (statement is PreparedStatement) statement.executeLargeUpdate()
-        else statement.executeLargeUpdate(sql)
+        limited(statement) {
+          if (statement is PreparedStatement) statement.executeLargeUpdate()
+          else statement.executeLargeUpdate(sql)
+        }
       }
+
+  /** Runs [body], which executes [statement], and cuts it off when it takes longer than allowed. */
+  private fun <T> limited(statement: Statement, body: () -> T): T {
+    val timedOut = AtomicBoolean()
+    val cutOff =
+        timer.schedule(
+            {
+              timedOut.set(true)
+              runCatching { statement.cancel() }
+            },
+            settings.statementTimeoutMillis,
+            TimeUnit.MILLISECONDS,
+        )
+    try {
+      return body()
+    } catch (e: SQLException) {
+      if (timedOut.get()) throw failure(e, timedOut = true)
+      throw e
+    } finally {
+      cutOff.cancel(false)
+    }
+  }
 
   /**
    * A statement for [sql] as it is. Without parameters it is a plain statement, so that no `?` of
    * the text is taken for a parameter; the JDBC escape syntax is never processed.
    */
   private fun prepare(connection: Connection, sql: String, parameters: List<Any?>): Statement {
-    if (parameters.isEmpty())
-        return connection.createStatement().also { it.setEscapeProcessing(false) }
+    if (parameters.isEmpty()) {
+      return connection.createStatement().also { it.setEscapeProcessing(false) }
+    }
     val statement = connection.prepareStatement(sql)
     try {
       statement.setEscapeProcessing(false)
@@ -234,9 +316,20 @@ internal constructor(
     val columns = java.util.ArrayList<String>()
     for (index in 1..metaData.columnCount) columns += metaData.getColumnLabel(index)
     val rows = java.util.ArrayList<List<Any?>>()
+    var size = 0L
     while (result.next()) {
+      if (rows.size >= settings.maxRows) {
+        throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE)
+      }
       val row = java.util.ArrayList<Any?>(columns.size)
-      for (index in 1..columns.size) row += profile.values.read(result, index)
+      for (index in 1..columns.size) {
+        val value = profile.values.read(result, index)
+        size += sizeOf(value)
+        row += value
+      }
+      if (size > settings.maxResponseBytes) {
+        throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE)
+      }
       rows += row
     }
     val answer = java.util.HashMap<String, Any?>()
@@ -245,13 +338,23 @@ internal constructor(
     return answer
   }
 
+  /** What a value counts for against the limit on the size of an answer. */
+  private fun sizeOf(value: Any?): Long =
+      when (value) {
+        is String -> value.length.toLong()
+        is ByteArray -> value.size.toLong()
+        else -> FIXED_SIZE
+      }
+
   private companion object {
     const val QUERY = "jdbc.query"
     const val UPDATE = "jdbc.update"
     const val BEGIN = "jdbc.begin"
     const val COMMIT = "jdbc.commit"
     const val ROLLBACK = "jdbc.rollback"
+    val OPERATIONS = setOf(QUERY, UPDATE, BEGIN, COMMIT, ROLLBACK)
     val STATEMENT_MEMBERS = setOf("sql", "parameters")
+    const val FIXED_SIZE = 8L
   }
 }
 

@@ -52,6 +52,108 @@ interface OpenAiAccessor {
    * and `stream` is the resource's to set: a body that sets it is refused.
    */
   fun stream(request: OpenAiRequest): OpenAiStream
+
+  /**
+   * Sends one request whose answer is bytes (`files.content`, `audio.speech`) and returns them,
+   * when they are no more than the resource keeps in memory ([ResourceFailure.RESPONSE_TOO_LARGE]
+   * beyond it). For a larger answer, or one that is wanted as a file, use [downloadTo].
+   */
+  fun download(request: OpenAiRequest): OpenAiBinaryResponse
+
+  /**
+   * Sends one request whose answer is bytes and writes them to [target], a file of one of the two
+   * directories of the pipeline (it must be declared writable); the answer is whole in the file or
+   * there is no file from it (the one that was there stays). Only the path and the size come back.
+   * An answer beyond the resource's total limit ([ResourceFailure.RESPONSE_TOO_LARGE]) or that
+   * takes the directory over its limit ([ResourceFailure.SCOPE_FULL]) is cut off.
+   */
+  fun downloadTo(request: OpenAiRequest, target: OpenAiFile): OpenAiStoredResponse
+
+  /**
+   * Sends one request for audio that the service sends as it makes it (`audio.speech`) and returns
+   * once it has begun to answer; the pipeline pulls the bytes chunk by chunk, under the same rules
+   * as [stream]: the stream is the run's share of requests until it ends or is closed.
+   */
+  fun streamBytes(request: OpenAiRequest): OpenAiByteStream
+}
+
+/**
+ * A file of one of the two directories of a pipeline (ADR-009): the [scope] and a path relative to
+ * it. Nothing else names a place; the host knows where the directories are.
+ */
+class OpenAiFile(val scope: FileScope, val path: String)
+
+/**
+ * A file part of a multipart form, as a pipeline gives it: the form field it goes in (one of those
+ * the entry lists), and either bytes or a file of a directory of the pipeline, which the host reads
+ * as it sends it, so that it is never held whole in memory. The name it is sent under is
+ * [filename], which is a plain name of letters, digits, `.`, `_`, `-` and space, 128 characters at
+ * most; when it is left out the name of the file is used. The part's type is the entry's, not the
+ * pipeline's.
+ */
+class OpenAiUpload
+private constructor(
+    val field: String,
+    val filename: String?,
+    val bytes: ByteArray?,
+    val file: OpenAiFile?,
+) {
+  companion object {
+    @JvmStatic
+    fun bytes(field: String, filename: String, bytes: ByteArray) =
+        OpenAiUpload(field, filename, bytes, null)
+
+    @JvmStatic
+    @JvmOverloads
+    fun file(field: String, file: OpenAiFile, filename: String? = null) =
+        OpenAiUpload(field, filename, null, file)
+  }
+}
+
+/**
+ * Limits on size for one call, in bytes; one left out is the resource's, and one that is larger
+ * than the resource's is the resource's.
+ */
+class OpenAiSizes
+@JvmOverloads
+constructor(
+    /** The request, a multipart form included. */
+    val request: Long? = null,
+    /** An answer kept in memory. */
+    val response: Long? = null,
+    /** An answer written to a file. */
+    val download: Long? = null,
+)
+
+/** An answer that is bytes, kept in memory; no header carries a credential. */
+class OpenAiBinaryResponse(
+    val status: Int,
+    val headers: Map<String, List<String>>,
+    val body: ByteArray,
+)
+
+/** An answer that is bytes, written to the file [path] of [scope]; [size] is its length. */
+class OpenAiStoredResponse(
+    val status: Int,
+    val headers: Map<String, List<String>>,
+    val scope: FileScope,
+    val path: String,
+    val size: Long,
+)
+
+/** Audio pulled in chunks, with the same rules as [OpenAiStream]. */
+interface OpenAiByteStream : AutoCloseable {
+  /** The HTTP status the service answered with (always a 2xx: anything else is a failure). */
+  val status: Int
+
+  /** The headers of the answer, lower case, without credentials. */
+  val headers: Map<String, List<String>>
+
+  /** The next bytes, waiting for them; null once the service has sent all there is. */
+  fun next(): ByteArray?
+
+  /** Ends the stream if it has not ended; never fails, and does nothing the second time. */
+  override fun close()
 }
 
 /**
@@ -91,6 +193,13 @@ constructor(
     val pathParameters: Map<String, String> = emptyMap(),
     val query: Map<String, String> = emptyMap(),
     val timeouts: OpenAiTimeouts = OpenAiTimeouts(),
+    /**
+     * For the entries that take a multipart form: its text fields (only those the entry lists) and
+     * its file parts. The entry decides the names of the fields and the type of each part.
+     */
+    val fields: Map<String, String> = emptyMap(),
+    val files: List<OpenAiUpload> = emptyList(),
+    val sizes: OpenAiSizes = OpenAiSizes(),
 )
 
 /**

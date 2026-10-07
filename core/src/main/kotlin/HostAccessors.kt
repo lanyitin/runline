@@ -10,12 +10,14 @@ internal class HostAccessors(
     private val metadata: PipelineMetadata,
     private val link: ResourceLink?,
     private val recorder: IoRecorder? = null,
+    /** The scopes the pipeline may use and how, which is what a file of a request is held to. */
+    private val scopes: Map<FileScope, FileMode> = metadata.files,
 ) : Accessors {
   override fun file(name: String): FileAccessor =
       HostFile(name, linkFor(name, ResourceTypes.FILE), recorder)
 
   override fun openAiCompatible(name: String): OpenAiAccessor =
-      HostOpenAi(name, linkFor(name, ResourceTypes.OPENAI_COMPATIBLE), recorder)
+      HostOpenAi(name, linkFor(name, ResourceTypes.OPENAI_COMPATIBLE), recorder, scopes)
 
   /** The host's link, once the pipeline has the right to an accessor of [type] for [name]. */
   private fun linkFor(name: String, type: String): ResourceLink {
@@ -81,6 +83,7 @@ private class HostOpenAi(
     private val name: String,
     private val link: ResourceLink,
     private val recorder: IoRecorder?,
+    private val scopes: Map<FileScope, FileMode>,
 ) : OpenAiAccessor {
   override fun call(request: OpenAiRequest): OpenAiResponse {
     @Suppress("UNCHECKED_CAST")
@@ -89,7 +92,7 @@ private class HostOpenAi(
     return OpenAiResponse(answer["status"] as Int, headers, answer["body"] as String)
   }
 
-  private fun arguments(request: OpenAiRequest): Map<String, Any?> {
+  private fun arguments(request: OpenAiRequest): java.util.HashMap<String, Any?> {
     // Only the name, the type and the kind of action: never an endpoint, a body or an address.
     recorder?.record(
         IoCategory.RESOURCE,
@@ -103,6 +106,11 @@ private class HostOpenAi(
     arguments["pathParameters"] = java.util.HashMap(request.pathParameters)
     arguments["query"] = java.util.HashMap(request.query)
     arguments["timeoutsMillis"] = millisOf(request.timeouts)
+    if (request.fields.isNotEmpty()) arguments["fields"] = java.util.HashMap(request.fields)
+    if (request.files.isNotEmpty()) {
+      arguments["files"] = java.util.ArrayList(request.files.map(::partOf))
+    }
+    sizesOf(request.sizes)?.let { arguments["sizesBytes"] = it }
     return arguments
   }
 
@@ -111,6 +119,89 @@ private class HostOpenAi(
     val opened = callHost(link, name, "openai.stream.open", arguments(request)) as Map<String, Any?>
     @Suppress("UNCHECKED_CAST") val headers = opened["headers"] as Map<String, List<String>>
     return HostOpenAiStream(name, link, opened["stream"] as Long, opened["status"] as Int, headers)
+  }
+
+  /**
+   * A file part for the host: the scope by name and the path relative to it, which is all a
+   * pipeline names. Where the scope's directory is, and what it may hold, the host knows by itself;
+   * nothing of that is in the call.
+   */
+  private fun partOf(upload: OpenAiUpload): Map<String, Any?> {
+    val part = java.util.HashMap<String, Any?>()
+    part["field"] = upload.field
+    part["filename"] = upload.filename
+    if (upload.bytes != null) {
+      part["bytes"] = upload.bytes
+    } else {
+      val file = upload.file!!
+      require(file.scope, writable = false)
+      record(file, IoAccess.READ)
+      part["scope"] = file.scope.name
+      part["path"] = file.path
+    }
+    return part
+  }
+
+  private fun require(scope: FileScope, writable: Boolean) {
+    val mode = scopes[scope]
+    if (mode == null || (writable && !mode.writable)) {
+      throw ResourceAccessException(name, ResourceFailure.PATH_REJECTED)
+    }
+  }
+
+  /** Only the scope and the relative path of a file are recorded: never a host path. */
+  private fun record(file: OpenAiFile, access: IoAccess) {
+    recorder?.record(IoCategory.FILE, file.path, access, scope = file.scope)
+  }
+
+  private fun sizesOf(sizes: OpenAiSizes): Map<String, Long>? {
+    val bytes = java.util.HashMap<String, Long>()
+    sizes.request?.let { bytes["request"] = it }
+    sizes.response?.let { bytes["response"] = it }
+    sizes.download?.let { bytes["download"] = it }
+    return bytes.ifEmpty { null }
+  }
+
+  override fun download(request: OpenAiRequest): OpenAiBinaryResponse {
+    @Suppress("UNCHECKED_CAST")
+    val answer = callHost(link, name, "openai.download", arguments(request)) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val headers = answer["headers"] as Map<String, List<String>>
+    return OpenAiBinaryResponse(answer["status"] as Int, headers, answer["bytes"] as ByteArray)
+  }
+
+  override fun downloadTo(request: OpenAiRequest, target: OpenAiFile): OpenAiStoredResponse {
+    require(target.scope, writable = true)
+    val arguments = arguments(request)
+    record(target, IoAccess.WRITE)
+    val place = java.util.HashMap<String, Any?>()
+    place["scope"] = target.scope.name
+    place["path"] = target.path
+    arguments["target"] = place
+    @Suppress("UNCHECKED_CAST")
+    val answer = callHost(link, name, "openai.download", arguments) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val headers = answer["headers"] as Map<String, List<String>>
+    return OpenAiStoredResponse(
+        answer["status"] as Int,
+        headers,
+        target.scope,
+        answer["path"] as String,
+        answer["size"] as Long,
+    )
+  }
+
+  override fun streamBytes(request: OpenAiRequest): OpenAiByteStream {
+    val arguments = arguments(request)
+    arguments["binary"] = true
+    @Suppress("UNCHECKED_CAST")
+    val opened = callHost(link, name, "openai.stream.open", arguments) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val headers = opened["headers"] as Map<String, List<String>>
+    return HostOpenAiByteStream(
+        name,
+        link,
+        opened["stream"] as Long,
+        opened["status"] as Int,
+        headers,
+    )
   }
 
   /** The limits the pipeline asked for, by name, in milliseconds. */
@@ -146,6 +237,34 @@ private class HostOpenAiStream(
     if (ended) return
     ended = true
     // A host that is done with the run says so by failing; there is nothing left to close then.
+    try {
+      callHost(link, name, "openai.stream.close", mapOf("stream" to id))
+    } catch (e: ResourceAccessException) {
+      // the stream is gone with the run
+    }
+  }
+}
+
+/** Audio pulled in chunks: the host holds the stream, this is the pipeline's handle on it. */
+private class HostOpenAiByteStream(
+    private val name: String,
+    private val link: ResourceLink,
+    private val id: Long,
+    override val status: Int,
+    override val headers: Map<String, List<String>>,
+) : OpenAiByteStream {
+  @Volatile private var ended = false
+
+  override fun next(): ByteArray? {
+    if (ended) return null
+    val data = callHost(link, name, "openai.stream.next", mapOf("stream" to id)) as ByteArray?
+    if (data == null) ended = true
+    return data
+  }
+
+  override fun close() {
+    if (ended) return
+    ended = true
     try {
       callHost(link, name, "openai.stream.close", mapOf("stream" to id))
     } catch (e: ResourceAccessException) {

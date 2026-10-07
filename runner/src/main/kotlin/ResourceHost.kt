@@ -15,4 +15,16 @@ interface ResourceHost {
    * Never throws: a failure is an answer.
    */
   fun call(request: Map<String, Any?>): Map<String, Any?>
+
+  /**
+   * Told by the Runner, from the host's own side of the boundary, where the run's two directories
+   * are (ADR-009) and how much each may hold, as soon as they exist and before the pipeline body
+   * starts. This is the only way a host learns where a scope is: a call from the run names a scope
+   * and a relative path, never a directory.
+   */
+  fun workspaceReady(
+      sharedDir: java.nio.file.Path,
+      runDir: java.nio.file.Path,
+      maxBytesPerScope: Long,
+  ) {}
 }

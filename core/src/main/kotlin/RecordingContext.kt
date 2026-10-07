@@ -35,5 +35,13 @@ class RecordingContext(
       CheckedNetwork(metadata.name, AccessPolicy.Unrestricted, recorder)
   override val processes: ProcessRunner =
       CheckedProcesses(metadata.name, AccessPolicy.Unrestricted, recorder)
-  override val accessors: Accessors = HostAccessors(metadata, resources, recorder)
+  override val accessors: Accessors =
+      HostAccessors(
+          metadata,
+          resources,
+          recorder,
+          // A recording run may use both scopes, and the record is what the metadata is proposed
+          // from.
+          FileScope.entries.associateWith { FileMode.READ_WRITE },
+      )
 }

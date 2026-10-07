@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors
 
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.runner.ResourceHost
+import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -36,16 +37,39 @@ class BoundResources(
 
   @Volatile private var runInvalidation: Invalidation? = null
 
+  /** Where the run's directories are, once the Runner has said; see [workspaceReady]. */
+  @Volatile private var directories: WorkspaceDirectories? = null
+
+  override fun workspaceReady(sharedDir: Path, runDir: Path, maxBytesPerScope: Long) {
+    directories = WorkspaceDirectories(sharedDir, runDir, maxBytesPerScope)
+  }
+
   override fun call(request: Map<String, Any?>): Map<String, Any?> {
     val name = request["resource"]
     val binding = bindings[name] ?: return failure(ResourceFailure.NOT_PROVIDED)
     val state = states.getValue(name as String)
-    @Suppress("UNCHECKED_CAST") val arguments = request["arguments"] as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val given = request["arguments"] as Map<String, Any?>
     return state.lock.read {
       val revoked = state.invalidation ?: runInvalidation
       if (revoked != null) return@read failure(revoked.failure)
+      val arguments =
+          try {
+            withDirectories(given)
+          } catch (e: ResourceOperationFailure) {
+            return@read failed(name, binding, request["operation"] as String, e.failure, e.cause)
+          }
       execute(name, binding, request["operation"] as String, arguments)
     }
+  }
+
+  /**
+   * What a run says about files is a scope and a relative path. Where the scope is, and how much it
+   * may hold, comes from here: from what the Runner told, never from the call.
+   */
+  private fun withDirectories(arguments: Map<String, Any?>): Map<String, Any?> {
+    if (arguments["files"] == null && arguments["target"] == null) return arguments
+    val known = directories ?: throw ResourceOperationFailure(ResourceFailure.FAILED)
+    return known.trusted(arguments)
   }
 
   private fun execute(

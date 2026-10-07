@@ -53,7 +53,7 @@ class PostgresDefinitionStore(private val dataSource: DataSource) : DefinitionSt
   override fun copyContent(contentHash: String, target: Path): Boolean =
       dataSource.connection.use { connection ->
         connection
-            .prepareStatement("SELECT content FROM pipeline_artifact WHERE content_hash = ?")
+            .prepareStatement("SELECT content FROM artifact_content WHERE content_hash = ?")
             .use {
               it.setString(1, contentHash)
               it.executeQuery().use { rs ->

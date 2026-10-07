@@ -166,15 +166,20 @@ class PostgresAllowListStore(private val dataSource: DataSource) : AllowListStor
             }
 
     override fun copyArtifact(artifactId: Long, target: Path) {
-      connection.prepareStatement("SELECT content FROM pipeline_artifact WHERE id = ?").use {
-        it.setLong(1, artifactId)
-        it.executeQuery().use { rs ->
-          check(rs.next()) { "Artifact $artifactId does not exist" }
-          rs.getBinaryStream(1).use { content ->
-            Files.copy(content, target, StandardCopyOption.REPLACE_EXISTING)
+      connection
+          .prepareStatement(
+              "SELECT c.content FROM pipeline_artifact a " +
+                  "JOIN artifact_content c USING (content_hash) WHERE a.id = ?"
+          )
+          .use {
+            it.setLong(1, artifactId)
+            it.executeQuery().use { rs ->
+              check(rs.next()) { "Artifact $artifactId does not exist" }
+              rs.getBinaryStream(1).use { content ->
+                Files.copy(content, target, StandardCopyOption.REPLACE_EXISTING)
+              }
+            }
           }
-        }
-      }
     }
 
     override fun definitionsOf(artifactId: Long): List<JudgedDefinition> =

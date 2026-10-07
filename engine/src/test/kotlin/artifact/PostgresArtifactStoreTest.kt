@@ -130,7 +130,7 @@ class PostgresArtifactStoreTest {
 
     val stored =
         dataSource.connection.use { c ->
-          c.prepareStatement("SELECT content FROM pipeline_artifact WHERE content_hash = ?").use {
+          c.prepareStatement("SELECT content FROM artifact_content WHERE content_hash = ?").use {
             it.setString(1, new.contentHash)
             it.executeQuery().use { rs ->
               rs.next()

@@ -38,9 +38,9 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
         val owner = (visibility as? Visibility.OwnedBy)?.uploader
         connection
             .prepareStatement(
-                "SELECT id, content_hash, size_bytes, uploaded_by, uploaded_at " +
-                    "FROM pipeline_artifact WHERE (?::text IS NULL OR uploaded_by = ?) " +
-                    "ORDER BY id"
+                "SELECT a.id, a.content_hash, c.size_bytes, a.uploaded_by, a.uploaded_at " +
+                    "FROM pipeline_artifact a JOIN artifact_content c USING (content_hash) " +
+                    "WHERE (?::text IS NULL OR a.uploaded_by = ?) ORDER BY a.id"
             )
             .use { statement ->
               statement.setString(1, owner)
@@ -85,23 +85,49 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
         }
       }
 
-  /** Inserts the artifact row; returns its id, or null when the content hash already exists. */
-  private fun insertArtifact(connection: Connection, artifact: NewArtifact): Long? =
-      Files.newInputStream(artifact.content).use { content ->
-        connection
-            .prepareStatement(
-                "INSERT INTO pipeline_artifact " +
-                    "(content_hash, content, size_bytes, uploaded_by, uploaded_at) " +
-                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT (content_hash) DO NOTHING RETURNING id"
-            )
-            .use {
-              it.setString(1, artifact.contentHash)
-              it.setBinaryStream(2, content, artifact.sizeBytes)
-              it.setLong(3, artifact.sizeBytes)
-              it.setString(4, artifact.uploadedBy)
-              it.setObject(5, artifact.uploadedAt.atOffset(java.time.ZoneOffset.UTC))
-              it.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else null }
-            }
+  /**
+   * Stores the content (once per hash) and a version of it for the uploader; returns the version's
+   * id, or null when the content hash already has a version.
+   */
+  private fun insertArtifact(connection: Connection, artifact: NewArtifact): Long? {
+    insertContent(connection, artifact)
+    if (hasVersion(connection, artifact.contentHash)) return null
+    return connection
+        .prepareStatement(
+            "INSERT INTO pipeline_artifact (content_hash, uploaded_by, uploaded_at) " +
+                "VALUES (?, ?, ?) RETURNING id"
+        )
+        .use {
+          it.setString(1, artifact.contentHash)
+          it.setString(2, artifact.uploadedBy)
+          it.setObject(3, artifact.uploadedAt.atOffset(java.time.ZoneOffset.UTC))
+          it.executeQuery().use { rs ->
+            rs.next()
+            rs.getLong(1)
+          }
+        }
+  }
+
+  private fun insertContent(connection: Connection, artifact: NewArtifact) {
+    Files.newInputStream(artifact.content).use { content ->
+      connection
+          .prepareStatement(
+              "INSERT INTO artifact_content (content_hash, content, size_bytes) " +
+                  "VALUES (?, ?, ?) ON CONFLICT (content_hash) DO NOTHING"
+          )
+          .use {
+            it.setString(1, artifact.contentHash)
+            it.setBinaryStream(2, content, artifact.sizeBytes)
+            it.setLong(3, artifact.sizeBytes)
+            it.executeUpdate()
+          }
+    }
+  }
+
+  private fun hasVersion(connection: Connection, contentHash: String): Boolean =
+      connection.prepareStatement("SELECT 1 FROM pipeline_artifact WHERE content_hash = ?").use {
+        it.setString(1, contentHash)
+        it.executeQuery().use { rs -> rs.next() }
       }
 
   private fun insertDefinition(connection: Connection, artifactId: Long, d: NewDefinition) {
@@ -126,8 +152,9 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
   private fun find(connection: Connection, contentHash: String): ArtifactRecord? =
       connection
           .prepareStatement(
-              "SELECT id, content_hash, size_bytes, uploaded_by, uploaded_at " +
-                  "FROM pipeline_artifact WHERE content_hash = ?"
+              "SELECT a.id, a.content_hash, c.size_bytes, a.uploaded_by, a.uploaded_at " +
+                  "FROM pipeline_artifact a JOIN artifact_content c USING (content_hash) " +
+                  "WHERE a.content_hash = ? ORDER BY a.id LIMIT 1"
           )
           .use {
             it.setString(1, contentHash)

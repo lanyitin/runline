@@ -22,7 +22,8 @@ class PostgresRunStoreTest {
   private val store = PostgresRunStore(dataSource)
   private val t0 = Instant.now().truncatedTo(ChronoUnit.MICROS)
 
-  private fun definitionId(hash: String, name: String) = definitions.find(hash, "alice", name)!!.id
+  private fun definitionId(hash: String, name: String, uploader: String = "alice") =
+      definitions.find(hash, uploader, name)!!.id
 
   private fun newRun(
       definitionId: Long,
@@ -33,8 +34,11 @@ class PostgresRunStoreTest {
       unsafe: UnsafeExecution? = null,
   ) = NewRun(id, definitionId, source, parameters, createdAt, unsafe)
 
-  private fun queued(hash: String = pipelines.save("v1", "nightly"), name: String = "nightly") =
-      store.insert(newRun(definitionId(hash, name)))
+  private fun queued(
+      hash: String = pipelines.save("v1", "nightly"),
+      name: String = "nightly",
+      uploader: String = "alice",
+  ) = store.insert(newRun(definitionId(hash, name, uploader)))
 
   // ---- insert and find ----
 
@@ -108,7 +112,7 @@ class PostgresRunStoreTest {
   @Test
   fun `a run of another uploader's pipeline is not found under owner visibility`() {
     val mine = queued(pipelines.save("v1", "mine", uploader = "alice"), "mine")
-    val theirs = queued(pipelines.save("v2", "theirs", uploader = "bob"), "theirs")
+    val theirs = queued(pipelines.save("v2", "theirs", uploader = "bob"), "theirs", "bob")
 
     assertNotNull(store.find(mine.id, Visibility.OwnedBy("alice")))
     assertNull(store.find(theirs.id, Visibility.OwnedBy("alice")))
@@ -122,7 +126,7 @@ class PostgresRunStoreTest {
     val bob = pipelines.save("v3", "gamma", uploader = "bob")
     val a = store.insert(newRun(definitionId(alice1, "alpha"), createdAt = t0))
     val b = store.insert(newRun(definitionId(alice2, "beta"), createdAt = t0.plusSeconds(1)))
-    val c = store.insert(newRun(definitionId(bob, "gamma"), createdAt = t0.plusSeconds(2)))
+    val c = store.insert(newRun(definitionId(bob, "gamma", "bob"), createdAt = t0.plusSeconds(2)))
     val d = store.insert(newRun(definitionId(alice1, "alpha"), createdAt = t0.plusSeconds(3)))
 
     assertEquals(listOf(d.id, c.id, b.id, a.id), store.list(Visibility.All, null, 10).map { it.id })

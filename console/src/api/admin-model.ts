@@ -11,6 +11,8 @@ export interface Trigger {
   /** `cron` or `webhook`. */
   kind: string;
   contentHash: string;
+  /** Whose version of the content the trigger is bound to. */
+  uploader: string;
   pipeline: string;
   /** What the admin gave. */
   parameters: Record<string, string>;
@@ -80,6 +82,8 @@ export interface AllowListVersion {
 
 export interface VerdictChange {
   contentHash: string;
+  /** Whose version of the content: each version is judged and told on its own. */
+  uploader: string;
   pipeline: string;
   className: string;
   from: string;
@@ -144,6 +148,7 @@ export interface Release {
 
 export interface UnsafeSetting {
   contentHash: string;
+  uploader: string;
   pipeline: string;
   allow: boolean;
   setBy: string;
@@ -161,6 +166,7 @@ function readTrigger(value: unknown): Trigger {
     name: str(r.name, 'trigger name'),
     kind: str(r.kind, 'trigger kind'),
     contentHash: str(r.contentHash, 'trigger contentHash'),
+    uploader: str(r.uploader, 'trigger uploader'),
     pipeline: str(r.pipeline, 'trigger pipeline'),
     parameters: stringMap(r.parameters, 'trigger parameters'),
     effectiveParameters: stringMap(r.effectiveParameters, 'trigger effectiveParameters'),
@@ -263,6 +269,7 @@ export function parseAllowListChange(json: unknown): AllowListChange {
         const change = obj(c, 'a change of a verdict');
         return {
           contentHash: str(change.contentHash, 'contentHash'),
+          uploader: str(change.uploader, 'uploader'),
           pipeline: str(change.pipeline, 'pipeline'),
           className: str(change.className, 'className'),
           from: str(change.from, 'from'),
@@ -327,6 +334,7 @@ export function parseUnsafeSetting(json: unknown): UnsafeSetting {
   const r = obj(json, 'the setting of unsafe execution');
   return {
     contentHash: str(r.contentHash, 'contentHash'),
+    uploader: str(r.uploader, 'uploader'),
     pipeline: str(r.pipeline, 'pipeline'),
     allow: bool(r.allow, 'allow'),
     setBy: str(r.setBy, 'setBy'),

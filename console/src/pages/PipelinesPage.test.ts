@@ -73,8 +73,45 @@ describe('the pipelines page', () => {
     await loaded(view);
     const row = rows(view).find((r) => r.textContent!.includes('order-sync'))!;
     const links = [...row.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(links).toContain(`/pipelines/${HASH_A}?pipeline=order-sync`);
-    expect(links).toContain(`/runs/new?contentHash=${HASH_A}&pipeline=order-sync`);
+    expect(links).toContain(`/pipelines/${HASH_A}?pipeline=order-sync&uploader=ada`);
+    expect(links).toContain(`/runs/new?contentHash=${HASH_A}&pipeline=order-sync&uploader=ada`);
+  });
+
+  test('the same content uploaded by two people is two rows, each linking to its own version', async () => {
+    const view = await page(
+      (engine) => {
+        for (const who of ['ada', 'bob']) {
+          engine.seedArtifact(who, [{ name: 'order-sync', className: 'com.acme.OrderSync' }], {
+            contentHash: HASH_A,
+          });
+        }
+      },
+      { identity: root },
+    );
+    await loaded(view);
+
+    expect(rows(view)).toHaveLength(2);
+    const byUploader = (who: string) =>
+      rows(view).find((r) => r.querySelectorAll('td')[3].textContent!.trim() === who)!;
+    for (const who of ['ada', 'bob']) {
+      const links = [...byUploader(who).querySelectorAll('a')].map((a) => a.getAttribute('href'));
+      expect(links).toContain(`/pipelines/${HASH_A}?pipeline=order-sync&uploader=${who}`);
+      expect(links).toContain(`/runs/new?contentHash=${HASH_A}&pipeline=order-sync&uploader=${who}`);
+    }
+  });
+
+  test('an uploader with characters of an address is one piece of it', async () => {
+    const view = await page(
+      (engine) =>
+        engine.seedArtifact('a&b=c d', [{ name: 'order-sync', className: 'com.acme.OrderSync' }], {
+          contentHash: HASH_A,
+        }),
+      { identity: root },
+    );
+    await loaded(view);
+
+    const link = rows(view)[0].querySelector('a')!.getAttribute('href')!;
+    expect(new URL(link, 'http://x').searchParams.get('uploader')).toBe('a&b=c d');
   });
 
   test('shows what the Engine gives the caller and no more: a developer has only their own', async () => {

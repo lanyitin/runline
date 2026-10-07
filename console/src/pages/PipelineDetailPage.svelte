@@ -28,8 +28,11 @@
     session.state.status === 'authenticated' && session.state.identity.role === 'admin',
   );
 
+  // Whose version, when the address says (a link from a list does): an admin who can see several
+  // and has not been told which is asked, never given one.
+  const wantedUploader = $derived(new URLSearchParams(router.search).get('uploader'));
   const version = createPolled({
-    load: () => api.artifact(contentHash),
+    load: () => api.artifact(contentHash, wantedUploader ?? undefined),
     clock: browserClock,
     visibility: pageVisibility,
     intervalMs: 0,
@@ -40,7 +43,26 @@
     return () => version.dispose();
   });
 
+  // The address can change to another uploader without the page being made again.
+  let shownFor: string | null | undefined;
+  $effect(() => {
+    const uploader = wantedUploader;
+    if (shownFor === undefined) {
+      shownFor = uploader;
+    } else if (uploader !== shownFor) {
+      shownFor = uploader;
+      version.reload();
+    }
+  });
+
   const artifact = $derived(version.data);
+  const ambiguous = $derived.by(() => {
+    const body = version.error?.body as { error?: unknown; uploaders?: unknown } | null | undefined;
+    if (version.error?.status !== 409 || body?.error !== 'ambiguous_version') return null;
+    return Array.isArray(body.uploaders)
+      ? body.uploaders.filter((u): u is string => typeof u === 'string')
+      : [];
+  });
   const wanted = $derived(new URLSearchParams(router.search).get('pipeline'));
   const pipeline = $derived<Pipeline | null>(
     artifact === null ? null : wanted === null ? (artifact.pipelines[0] ?? null) : (artifact.pipelines.find((p) => p.name === wanted) ?? null),
@@ -58,6 +80,17 @@
     <strong>{i18n.t('pipeline.notFound.title')}</strong>
     <p>{i18n.t('pipeline.notFound.body')}</p>
   </div>
+  <p><Link href="/pipelines">{i18n.t('pipeline.back')}</Link></p>
+{:else if ambiguous !== null}
+  <section class="rl-card choose-version" aria-labelledby="choose-version">
+    <h2 id="choose-version">{i18n.t('pipeline.ambiguous.title')}</h2>
+    <p>{i18n.t('pipeline.ambiguous.body')}</p>
+    <ul>
+      {#each ambiguous as uploader (uploader)}
+        <li><Link href={pipelineHref(contentHash, wanted, uploader)}><PlainText value={uploader} /></Link></li>
+      {/each}
+    </ul>
+  </section>
   <p><Link href="/pipelines">{i18n.t('pipeline.back')}</Link></p>
 {:else if version.status === 'failed' && version.error}
   <div class="rl-stack">
@@ -81,7 +114,7 @@
       </div>
       <div class="rl-actions">
         <Badge kind="verdict" value={pipeline.verdict} />
-        <Link href={newRunHref(artifact.contentHash, pipeline.name)} class="rl-btn primary">
+        <Link href={newRunHref(artifact.contentHash, pipeline.name, {}, artifact.uploader)} class="rl-btn primary">
           {i18n.t('pipeline.createRun')}
         </Link>
       </div>
@@ -115,7 +148,7 @@
             <ul>
               {#each artifact.pipelines as other (other.name)}
                 <li>
-                  <Link href={pipelineHref(artifact.contentHash, other.name)}>
+                  <Link href={pipelineHref(artifact.contentHash, other.name, artifact.uploader)}>
                     <PlainText value={other.name} mono />
                   </Link>
                   <Badge kind="verdict" value={other.verdict} />

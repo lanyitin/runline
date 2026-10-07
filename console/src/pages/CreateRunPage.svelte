@@ -38,12 +38,27 @@
       (a, b) => b.uploadedAt.localeCompare(a.uploadedAt) || a.name.localeCompare(b.name),
     ),
   );
-  const keyOf = (d: Pick<Definition, 'contentHash' | 'name'>) => `${d.contentHash}/${d.name}`;
-  const selected = $derived(
-    definitions.find((d) => d.contentHash === wantedHash && d.name === wantedName) ?? null,
+  const wantedUploader = $derived(query.get('uploader'));
+  // A pipeline of a version: the content, whose version of it, and the name in it. The same bytes
+  // uploaded by two people are two choices, never one.
+  const keyOf = (d: Pick<Definition, 'contentHash' | 'uploader' | 'name'>) =>
+    JSON.stringify([d.contentHash, d.uploader, d.name]);
+  const matching = $derived(
+    definitions.filter(
+      (d) =>
+        d.contentHash === wantedHash &&
+        d.name === wantedName &&
+        (wantedUploader === null || d.uploader === wantedUploader),
+    ),
   );
+  // With several versions that fit the address and no uploader in it, nobody is chosen for the person.
+  const selected = $derived(matching.length === 1 ? matching[0] : null);
+  const ambiguousInAddress = $derived(matching.length > 1);
   const missingFromAddress = $derived(
-    list.status === 'ready' && wantedHash !== null && wantedName !== null && selected === null,
+    list.status === 'ready' &&
+      wantedHash !== null &&
+      wantedName !== null &&
+      matching.length === 0,
   );
 
   let values = $state<Record<string, string>>({});
@@ -65,13 +80,9 @@
   });
 
   function choose(key: string) {
-    const [contentHash, ...rest] = key.split('/');
-    const name = rest.join('/');
-    router.replace(
-      key === ''
-        ? '/runs/new'
-        : `/runs/new?${new URLSearchParams({ contentHash, pipeline: name })}`,
-    );
+    if (key === '') return router.replace('/runs/new');
+    const [contentHash, uploader, name] = JSON.parse(key) as [string, string, string];
+    router.replace(`/runs/new?${new URLSearchParams({ contentHash, pipeline: name, uploader })}`);
   }
 
   const label = (parameter: { required: boolean }) =>
@@ -97,6 +108,7 @@
     try {
       const run = await api.createRun({
         contentHash: selected.contentHash,
+        uploader: selected.uploader,
         pipeline: selected.name,
         parameters,
       });
@@ -159,6 +171,8 @@
     <div class="rl-stack">
       {#if missingFromAddress}
         <Notice tone="warning">{i18n.t('createRun.notFound')}</Notice>
+      {:else if ambiguousInAddress}
+        <Notice tone="warning">{i18n.t('createRun.ambiguous')}</Notice>
       {/if}
 
       <div class="rl-field">

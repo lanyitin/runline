@@ -23,6 +23,7 @@ import {
   type ApiRequest,
   type FakeCallerRef,
   type FakeRoute,
+  ambiguousVersion,
 } from './fake-api';
 import { FakeAllowList, judge } from './fake-allowlist';
 import { FakeResources } from './fake-resources';
@@ -69,6 +70,8 @@ export interface FakeRun {
   owner: string;
   state: RunState;
   contentHash: string;
+  /** Whose version of the content the run is of. */
+  uploader: string;
   pipeline: string;
   className: string;
   source: { kind: 'MANUAL' | 'TRIGGER'; name: string };
@@ -103,6 +106,7 @@ export interface Definition {
   unsafeSetAt: string | null;
 }
 
+/** A version: the content, with one uploader's judgement of it (ADR-020). */
 interface Artifact {
   contentHash: string;
   sizeBytes: number;
@@ -130,6 +134,7 @@ export interface FakeBackendOptions {
 }
 
 export class FakeBackend {
+  /** The versions, by `versionKey`: a content hash can be in several, one for each uploader. */
   readonly artifacts = new Map<string, Artifact>();
   readonly runs: FakeRun[] = [];
   /** The shared resources that are defined, who holds them and who waits. */
@@ -152,7 +157,7 @@ export class FakeBackend {
       method: 'DELETE',
       pattern: /^\/api\/v1\/artifacts\/([^/]+)$/,
       admin: true,
-      handle: (_request, match) => this.deleteArtifact(decodeURIComponent(match[1])),
+      handle: (request, match) => this.deleteArtifact(request, decodeURIComponent(match[1])),
     },
     {
       method: 'PUT',
@@ -227,6 +232,37 @@ export class FakeBackend {
     return caller.role === 'admin' || caller.name === owner;
   }
 
+  // ---- versions: a content hash and an uploader ----------------------------------------------
+
+  /** The version of [contentHash] that [uploader] made, if there is one. */
+  version(contentHash: string, uploader: string): Artifact | undefined {
+    return this.artifacts.get(versionKey(contentHash, uploader));
+  }
+
+  /** The versions of [contentHash], the oldest first. */
+  versionsOf(contentHash: string): Artifact[] {
+    return [...this.artifacts.values()].filter((a) => a.contentHash === contentHash);
+  }
+
+  /**
+   * Which version a request means, as the Engine decides it: among the versions the caller may
+   * use, the one [requested] names, or the only one; with several and none named, the caller is
+   * told to name one (nobody's own is preferred). A version the caller may not use is not told
+   * from one that is not there.
+   */
+  resolve(
+    contentHash: string,
+    requested: string | null,
+    mayUse: (uploader: string) => boolean,
+  ): { version: Artifact } | { ambiguous: string[] } | { none: true } {
+    const candidates = this.versionsOf(contentHash).filter(
+      (a) => mayUse(a.uploadedBy) && (requested === null || a.uploadedBy === requested),
+    );
+    if (candidates.length === 0) return { none: true };
+    if (candidates.length > 1) return { ambiguous: candidates.map((a) => a.uploadedBy) };
+    return { version: candidates[0] };
+  }
+
   // ---- upload and definitions ----------------------------------------------------------------
 
   private upload({ caller, body }: ApiRequest): ApiAnswer {
@@ -242,7 +278,8 @@ export class FakeBackend {
     if (!entries) return failure(422, 'not_a_jar', 'The file is not a valid jar.');
 
     const contentHash = createHash('sha256').update(body).digest('hex');
-    const known = this.artifacts.get(contentHash);
+    // Only the caller's own version is looked for: another uploader's must not show here.
+    const known = this.version(contentHash, caller.name);
     if (known) return answer(200, this.artifactDoc(known));
 
     const bundled = [...entries.keys()].find((name) => name.startsWith('dev/lawlan/runline/core/'));
@@ -273,7 +310,7 @@ export class FakeBackend {
       uploadedAt: new Date().toISOString(),
       definitions: pipelines.map((p) => this.describe(p)),
     };
-    this.artifacts.set(contentHash, artifact);
+    this.artifacts.set(versionKey(contentHash, caller.name), artifact);
     return answer(201, this.artifactDoc(artifact));
   }
 
@@ -309,6 +346,7 @@ export class FakeBackend {
   private artifactDoc(a: Artifact) {
     return {
       contentHash: a.contentHash,
+      uploader: a.uploadedBy,
       sizeBytes: a.sizeBytes,
       uploadedBy: a.uploadedBy,
       uploadedAt: a.uploadedAt,
@@ -317,12 +355,11 @@ export class FakeBackend {
     };
   }
 
-  private readArtifact({ caller }: ApiRequest, contentHash: string): ApiAnswer {
-    const artifact = this.artifacts.get(contentHash);
-    if (!artifact || !this.sees(caller, artifact.uploadedBy)) {
-      return failure(404, 'not_found', 'No such version.');
-    }
-    return answer(200, this.artifactDoc(artifact));
+  private readArtifact({ caller, query }: ApiRequest, contentHash: string): ApiAnswer {
+    const found = this.resolve(contentHash, query.get('uploader'), (u) => this.sees(caller, u));
+    if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
+    if ('none' in found) return failure(404, 'not_found', 'No such version.');
+    return answer(200, this.artifactDoc(found.version));
   }
 
   private definitions({ caller }: ApiRequest): ApiAnswer {
@@ -331,6 +368,7 @@ export class FakeBackend {
       .flatMap((a) =>
         a.definitions.map((d) => ({
           contentHash: a.contentHash,
+          uploader: a.uploadedBy,
           uploadedBy: a.uploadedBy,
           uploadedAt: a.uploadedAt,
           ...this.pipelineDoc(d),
@@ -340,18 +378,24 @@ export class FakeBackend {
   }
 
   /** `DELETE /api/v1/artifacts/{contentHash}`: a version that no trigger and no run refers to. */
-  private deleteArtifact(contentHash: string): ApiAnswer {
-    if (!this.artifacts.has(contentHash)) return failure(404, 'not_found', 'No such version.');
-    if (this.triggers.references(contentHash) || this.runs.some((r) => r.contentHash === contentHash)) {
+  private deleteArtifact({ query }: ApiRequest, contentHash: string): ApiAnswer {
+    const found = this.resolve(contentHash, query.get('uploader'), () => true);
+    if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
+    if ('none' in found) return failure(404, 'not_found', 'No such version.');
+    const { uploadedBy } = found.version;
+    if (
+      this.triggers.references(contentHash, uploadedBy) ||
+      this.runs.some((r) => r.contentHash === contentHash && r.uploader === uploadedBy)
+    ) {
       return failure(409, 'in_use', 'A trigger or a run still refers to the version.');
     }
-    this.artifacts.delete(contentHash);
+    this.artifacts.delete(versionKey(contentHash, uploadedBy));
     return answer(204);
   }
 
   /** `PUT .../unsafe-execution`: whether this pipeline of this version may run although UNSAFE. */
   private setUnsafeExecution(
-    { caller, body }: ApiRequest,
+    { caller, body, query }: ApiRequest,
     contentHash: string,
     pipeline: string,
   ): ApiAnswer {
@@ -364,13 +408,19 @@ export class FakeBackend {
     if (typeof allow !== 'boolean') {
       return failure(400, 'bad_request', 'The body must be {"allow": true or false}.');
     }
-    const definition = this.definitionOf(contentHash, pipeline);
-    if (!definition) return failure(404, 'definition_not_found', 'No such version and pipeline.');
+    const found = this.resolve(contentHash, query.get('uploader'), () => true);
+    if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
+    const definition =
+      'version' in found ? found.version.definitions.find((d) => d.name === pipeline) : undefined;
+    if (!('version' in found) || !definition) {
+      return failure(404, 'definition_not_found', 'No such version and pipeline.');
+    }
     definition.allowUnsafeExecution = allow;
     definition.unsafeSetBy = caller.name;
     definition.unsafeSetAt = new Date().toISOString();
     return answer(200, {
       contentHash,
+      uploader: found.version.uploadedBy,
       pipeline,
       allow,
       setBy: definition.unsafeSetBy,
@@ -386,15 +436,21 @@ export class FakeBackend {
   }
 
   private createRun({ caller, body }: ApiRequest): ApiAnswer {
-    let request: { contentHash?: unknown; pipeline?: unknown; parameters?: unknown };
+    let request: {
+      contentHash?: unknown;
+      uploader?: unknown;
+      pipeline?: unknown;
+      parameters?: unknown;
+    };
     try {
       request = JSON.parse(body.toString('utf8'));
     } catch {
       return failure(400, 'bad_request', 'The body must be JSON.');
     }
-    const { contentHash, pipeline, parameters = {} } = request ?? {};
+    const { contentHash, uploader = null, pipeline, parameters = {} } = request ?? {};
     if (
       typeof contentHash !== 'string' ||
+      (uploader !== null && typeof uploader !== 'string') ||
       typeof pipeline !== 'string' ||
       typeof parameters !== 'object' ||
       parameters === null ||
@@ -408,6 +464,7 @@ export class FakeBackend {
     }
     const made = this.attempt({
       contentHash,
+      uploader,
       pipeline,
       parameters: parameters as Record<string, string>,
       source: { kind: 'MANUAL', name: caller.name },
@@ -419,15 +476,17 @@ export class FakeBackend {
       : made.refusal;
   }
 
-  /** The definition of [pipeline] in the version [contentHash], if there is one. */
-  definitionOf(contentHash: string, pipeline: string): Definition | undefined {
-    return this.artifacts.get(contentHash)?.definitions.find((d) => d.name === pipeline);
+  /** The definition of [pipeline] in the version that [uploader] made of [contentHash], if any. */
+  definitionOf(contentHash: string, uploader: string, pipeline: string): Definition | undefined {
+    return this.version(contentHash, uploader)?.definitions.find((d) => d.name === pipeline);
   }
 
   /** The run that a firing of [trigger] makes, or why it is refused: an admin's, so any version. */
   runForTrigger(trigger: FakeTrigger): { run: FakeRun } | { refusal: ApiAnswer } {
     return this.attempt({
       contentHash: trigger.contentHash,
+      // A trigger runs the very version it is bound to.
+      uploader: trigger.uploader,
       pipeline: trigger.pipeline,
       parameters: trigger.parameters,
       source: { kind: 'TRIGGER', name: trigger.name },
@@ -440,6 +499,7 @@ export class FakeBackend {
   /** The checks of a new run, in the Engine's order, and the run when they hold. */
   private attempt(spec: {
     contentHash: string;
+    uploader: string | null;
     pipeline: string;
     parameters: Record<string, string>;
     source: FakeRun['source'];
@@ -447,9 +507,11 @@ export class FakeBackend {
     mayUse: (uploadedBy: string) => boolean;
   }): { run: FakeRun } | { refusal: ApiAnswer } {
     const { contentHash, pipeline, parameters: supplied } = spec;
-    const artifact = this.artifacts.get(contentHash);
+    const found = this.resolve(contentHash, spec.uploader, spec.mayUse);
+    if ('ambiguous' in found) return { refusal: ambiguousVersion(found.ambiguous) };
+    const artifact = 'version' in found ? found.version : undefined;
     const definition = artifact?.definitions.find((d) => d.name === pipeline);
-    if (!artifact || !definition || !spec.mayUse(artifact.uploadedBy)) {
+    if (!artifact || !definition) {
       return { refusal: failure(404, 'definition_not_found', 'No such version and pipeline.') };
     }
 
@@ -494,6 +556,7 @@ export class FakeBackend {
       owner: spec.owner ?? artifact.uploadedBy,
       state: 'QUEUED',
       contentHash,
+      uploader: artifact.uploadedBy,
       pipeline,
       className: definition.className,
       source: spec.source,
@@ -581,7 +644,7 @@ export class FakeBackend {
   ): string {
     const contentHash =
       options.contentHash ?? createHash('sha256').update(randomUUID()).digest('hex');
-    this.artifacts.set(contentHash, {
+    this.artifacts.set(versionKey(contentHash, uploadedBy), {
       contentHash,
       sizeBytes: 1000,
       uploadedBy,
@@ -592,10 +655,12 @@ export class FakeBackend {
   }
 
   /** An admin has allowed the pipeline to run although it is unsafe. */
-  allowUnsafe(contentHash: string, pipeline: string, setBy = 'root') {
-    const definition = this.artifacts
-      .get(contentHash)
-      ?.definitions.find((d) => d.name === pipeline);
+  allowUnsafe(contentHash: string, pipeline: string, setBy = 'root', uploader?: string) {
+    const versions = this.versionsOf(contentHash).filter(
+      (a) => uploader === undefined || a.uploadedBy === uploader,
+    );
+    if (versions.length > 1) throw new Error(`several uploaders have ${contentHash}: name one`);
+    const definition = versions[0]?.definitions.find((d) => d.name === pipeline);
     if (!definition) throw new Error(`no pipeline ${pipeline} in ${contentHash}`);
     definition.allowUnsafeExecution = true;
     definition.unsafeSetBy = setBy;
@@ -609,6 +674,7 @@ export class FakeBackend {
       owner,
       state: 'SUCCEEDED',
       contentHash: '0'.repeat(64),
+      uploader: owner,
       pipeline: 'demo-slow',
       className: 'samples.slow.SlowPipeline',
       source: { kind: 'MANUAL', name: owner },
@@ -699,7 +765,8 @@ export class FakeBackend {
 
   private begin(run: FakeRun) {
     if (run.state !== 'QUEUED') return; // cancelled while it waited
-    const needs = this.definitionOf(run.contentHash, run.pipeline)?.metadata.resources ?? [];
+    const needs =
+      this.definitionOf(run.contentHash, run.uploader, run.pipeline)?.metadata.resources ?? [];
     if (needs.length === 0) return this.start(run);
     const outcome = this.resources.acquire(run, needs, {
       granted: () => this.start(run),
@@ -826,9 +893,16 @@ export class FakeBackend {
   }
 
   /** Every pipeline of every version, with the hash of the version. */
-  allDefinitions(): Array<{ contentHash: string; definition: Definition }> {
+  allDefinitions(): Array<{ contentHash: string; uploader: string; definition: Definition }> {
     return [...this.artifacts.values()].flatMap((a) =>
-      a.definitions.map((definition) => ({ contentHash: a.contentHash, definition })),
+      a.definitions.map((definition) => ({
+        contentHash: a.contentHash,
+        uploader: a.uploadedBy,
+        definition,
+      })),
     );
   }
 }
+
+/** What a version is kept under: the content hash and the uploader (ADR-020). */
+const versionKey = (contentHash: string, uploader: string) => `${contentHash}\u0000${uploader}`;

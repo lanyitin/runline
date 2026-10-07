@@ -7,7 +7,10 @@ let app: TestApp;
 afterEach(() => app.dispose());
 
 const ada = { name: 'ada', role: 'developer' as const };
+const root = { name: 'root', role: 'admin' as const };
 const HASH = 'ab12cd34'.padEnd(64, '5');
+/** What the list of pipelines gives as the value of the choice: a version and a pipeline in it. */
+const choice = (hash: string, uploader: string, name: string) => JSON.stringify([hash, uploader, name]);
 
 const sync = {
   name: 'order-sync',
@@ -22,10 +25,11 @@ const page = async (
   options: {
     query?: string;
     languages?: string[];
+    identity?: { name: string; role: 'admin' | 'developer' };
     seed?: (backend: TestApp['engine']['backend']) => void;
   } = {},
 ) => {
-  app = await createTestApp({ identity: ada, languages: options.languages });
+  app = await createTestApp({ identity: options.identity ?? ada, languages: options.languages });
   app.engine.backend.autoRun = false;
   if (options.seed) options.seed(app.engine.backend);
   else app.engine.backend.seedArtifact('ada', [sync], { contentHash: HASH });
@@ -71,16 +75,18 @@ describe('the pipeline to run', () => {
       },
     });
     await ready(view);
-    expect(view.querySelector<HTMLSelectElement>('select')!.value).toBe(`${HASH}/order-sync`);
+    expect(view.querySelector<HTMLSelectElement>('select')!.value).toBe(
+      choice(HASH, 'ada', 'order-sync'),
+    );
     expect(field(view, 'region')).not.toBeNull();
 
     const select = view.querySelector<HTMLSelectElement>('select')!;
-    select.value = `${HASH}/plain`;
+    select.value = choice(HASH, 'ada', 'plain');
     select.dispatchEvent(new Event('change', { bubbles: true }));
 
     await vi.waitFor(() => expect(field(view, 'region')).toBeNull());
     expect(view.textContent).toContain('This pipeline declares no parameters.');
-    expect(location.search).toBe(`?contentHash=${HASH}&pipeline=plain`);
+    expect(location.search).toBe(`?contentHash=${HASH}&pipeline=plain&uploader=ada`);
   });
 
   test('says when the pipeline of the address is not one the caller may use, and offers the others', async () => {
@@ -99,6 +105,58 @@ describe('the pipeline to run', () => {
     expect([...view.querySelectorAll('a')].some((a) => a.getAttribute('href') === '/upload')).toBe(
       true,
     );
+  });
+});
+
+describe('the same content uploaded by two people', () => {
+  const both = (b: TestApp['engine']['backend']) => {
+    b.seedArtifact('ada', [sync], { contentHash: HASH });
+    b.seedArtifact('bob', [sync], { contentHash: HASH });
+  };
+
+  test('is two choices, each saying whose, and a developer has only their own', async () => {
+    const admin = await page({ identity: root, seed: both, query: '' });
+    await ready(admin);
+    const options = [...admin.querySelectorAll<HTMLOptionElement>('option')].map((o) => o.textContent!.trim());
+    expect(options).toEqual(['Choose a pipeline', 'order-sync · ab12cd3 · ada', 'order-sync · ab12cd3 · bob']);
+  });
+
+  test('the version the address names is the one that is run', async () => {
+    const view = await page({
+      identity: root,
+      seed: both,
+      query: `?contentHash=${HASH}&pipeline=order-sync&uploader=bob`,
+    });
+    await ready(view);
+    expect(view.querySelector<HTMLSelectElement>('select')!.value).toBe(choice(HASH, 'bob', 'order-sync'));
+    type(field(view, 'region'), 'eu');
+
+    submit(view).click();
+
+    await vi.waitFor(() => expect(runsMade()).toHaveLength(1));
+    expect(runsMade()[0]).toMatchObject({ uploader: 'bob', source: { kind: 'MANUAL', name: 'root' } });
+  });
+
+  test('an address that does not say whose chooses nobody, and says so', async () => {
+    const view = await page({ identity: root, seed: both });
+    await ready(view);
+
+    expect(view.querySelector<HTMLSelectElement>('select')!.value).toBe('');
+    expect(view.textContent).toContain('Choose whose version');
+    expect(view.querySelector('form .params')).toBeNull();
+    expect(submit(view).disabled).toBe(true);
+  });
+
+  test('an address that says whose, for a developer, can only be their own', async () => {
+    const view = await page({
+      seed: both,
+      query: `?contentHash=${HASH}&pipeline=order-sync&uploader=bob`,
+    });
+    await ready(view);
+
+    expect(view.querySelector<HTMLSelectElement>('select')!.value).toBe('');
+    expect(view.textContent).toContain('was not found among the pipelines you may see');
+    expect(runsMade()).toHaveLength(0);
   });
 });
 

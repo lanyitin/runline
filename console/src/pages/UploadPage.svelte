@@ -103,8 +103,8 @@
         <li class="pipeline-line">
           <span class="rl-mono"><PlainText value={pipeline.name} mono /></span>
           <Badge kind="verdict" value={pipeline.verdict} />
-          <Link href={pipelineHref(result.artifact.contentHash, pipeline.name)}>{i18n.t('pipelines.details')}</Link>
-          <Link href={newRunHref(result.artifact.contentHash, pipeline.name)}>{i18n.t('pipelines.run')}</Link>
+          <Link href={pipelineHref(result.artifact.contentHash, pipeline.name, result.artifact.uploader)}>{i18n.t('pipelines.details')}</Link>
+          <Link href={newRunHref(result.artifact.contentHash, pipeline.name, {}, result.artifact.uploader)}>{i18n.t('pipelines.run')}</Link>
         </li>
       {/each}
     </ul>

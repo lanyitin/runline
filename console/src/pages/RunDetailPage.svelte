@@ -107,7 +107,7 @@
           {i18n.t('run.cancel')}
         </button>
       {/if}
-      <Link href={newRunHref(run.contentHash, run.pipeline, run.parameters)} class="rl-btn">
+      <Link href={newRunHref(run.contentHash, run.pipeline, run.parameters, run.uploader)} class="rl-btn">
         {i18n.t('run.runAgain')}
       </Link>
     </div>
@@ -153,10 +153,13 @@
         </dd>
         <dt>{i18n.t('run.pipeline')}</dt>
         <dd>
-          <Link href={pipelineHref(run.contentHash, run.pipeline)}><PlainText value={run.pipeline} mono /></Link>
+          <Link href={pipelineHref(run.contentHash, run.pipeline, run.uploader)}><PlainText value={run.pipeline} mono /></Link>
         </dd>
         <dt>{i18n.t('run.version')}</dt>
-        <dd><span class="rl-mono" title={run.contentHash}>{shortHash(run.contentHash)}</span></dd>
+        <dd>
+          <span class="rl-mono" title={run.contentHash}>{shortHash(run.contentHash)}</span>
+          <PlainText value={run.uploader} />
+        </dd>
         <dt>{i18n.t('run.className')}</dt>
         <dd><PlainText value={run.className} mono /></dd>
         <dt>{i18n.t('run.source')}</dt>

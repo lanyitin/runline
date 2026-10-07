@@ -85,8 +85,10 @@ describe('an upload that the Engine takes', () => {
     expect(line.textContent).toContain('demo-slow');
     expect(line.querySelector('.badge')!.textContent).toContain('SAFE');
     const hrefs = [...line.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(hrefs[0]).toMatch(/^\/pipelines\/[0-9a-f]{64}\?pipeline=demo-slow$/);
-    expect(hrefs[1]).toMatch(/^\/runs\/new\?contentHash=[0-9a-f]{64}&pipeline=demo-slow$/);
+    expect(hrefs[0]).toMatch(/^\/pipelines\/[0-9a-f]{64}\?pipeline=demo-slow&uploader=ada$/);
+    expect(hrefs[1]).toMatch(
+      /^\/runs\/new\?contentHash=[0-9a-f]{64}&pipeline=demo-slow&uploader=ada$/,
+    );
   });
 
   test('200: the same bytes are the version that was there, and it says so, and no new version was made', async () => {
@@ -96,9 +98,29 @@ describe('an upload that the Engine takes', () => {
     await uploadWith(view, demoJars().slow);
 
     await vi.waitFor(() => expect(view.querySelector('.result')).not.toBeNull());
-    expect(view.querySelector('.result')!.textContent).toContain('This jar was uploaded before');
+    expect(view.querySelector('.result')!.textContent).toContain('You uploaded this jar before');
     expect(view.querySelector('.result')!.textContent).not.toContain('A new version was made');
     expect(app.engine.backend.artifacts.size).toBe(1);
+  });
+
+  test("201: bytes that another person uploaded are a new version of the uploader's own, and nothing says another person had them", async () => {
+    const view = await page();
+    app.engine.backend.seedArtifact('bob', [{ name: 'demo-slow', className: 'x.S' }], {
+      contentHash: (await import('node:crypto'))
+        .createHash('sha256')
+        .update(demoJars().slow)
+        .digest('hex'),
+    });
+
+    await uploadWith(view, demoJars().slow);
+
+    await vi.waitFor(() => expect(view.querySelector('.result')).not.toBeNull());
+    const text = view.querySelector('.result')!.textContent!;
+    expect(text).toContain('A new version was made');
+    expect(text).not.toContain('before');
+    expect(text).not.toContain('bob');
+    expect(app.engine.backend.versionsOf(view.querySelector('.hash')!.getAttribute('title')!)
+      .map((a) => a.uploadedBy)).toEqual(['bob', 'ada']);
   });
 
   test('says when a pipeline in the jar is UNSAFE and cannot run until an admin allows it', async () => {

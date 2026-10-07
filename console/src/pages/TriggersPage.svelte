@@ -145,7 +145,10 @@
               <td class="kind"><span class="tag kind-{trigger.kind}">{enumLabel(i18n.translate, 'triggerKind', trigger.kind)}</span></td>
               <td class="target">
                 <div class="pipeline"><PlainText value={trigger.pipeline} mono /></div>
-                <div class="version"><span class="hash rl-mono" title={trigger.contentHash}>{shortHash(trigger.contentHash)}</span></div>
+                <div class="version">
+                  <span class="hash rl-mono" title={trigger.contentHash}>{shortHash(trigger.contentHash)}</span>
+                  <span class="uploader rl-help"><PlainText value={trigger.uploader} /></span>
+                </div>
               </td>
               <td class="schedule">
                 {#if trigger.cron !== null}

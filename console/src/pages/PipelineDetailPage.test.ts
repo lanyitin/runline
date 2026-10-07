@@ -186,7 +186,22 @@ describe('the page of a pipeline', () => {
     const link = [...view.querySelectorAll('a')].find(
       (a) => a.textContent!.trim() === 'Create run',
     )!;
-    expect(link.getAttribute('href')).toBe(`/runs/new?contentHash=${HASH}&pipeline=order-sync`);
+    expect(link.getAttribute('href')).toBe(
+      `/runs/new?contentHash=${HASH}&pipeline=order-sync&uploader=ada`,
+    );
+  });
+
+  test("the version of another person is not found, whether or not the address names them", async () => {
+    app = await createTestApp({ identity: ada });
+    app.engine.backend.seedArtifact('bob', [{ name: 'order-sync', className: 'x.O' }], { contentHash: HASH });
+    app.engine.backend.seedArtifact('ada', [{ name: 'order-sync', className: 'x.O' }], { contentHash: HASH });
+    app.context.router.navigate('/pipelines/x?pipeline=order-sync&uploader=bob');
+
+    const view = app.mount(PipelineDetailPage, { contentHash: HASH });
+
+    await vi.waitFor(() => expect(view.querySelector('.rl-notice.warning')).not.toBeNull());
+    expect(view.querySelector('h1')).toBeNull();
+    expect(view.textContent).not.toContain('Choose whose version');
   });
 
   test('shows the pipeline the address names when the version has several, and links the others', async () => {
@@ -200,7 +215,10 @@ describe('the page of a pipeline', () => {
     await ready(view);
     expect(view.querySelector('h1')!.textContent).toBe('two');
     const links = [...view.querySelectorAll('.others a')].map((a) => a.getAttribute('href'));
-    expect(links).toEqual([`/pipelines/${HASH}?pipeline=one`, `/pipelines/${HASH}?pipeline=two`]);
+    expect(links).toEqual([
+      `/pipelines/${HASH}?pipeline=one&uploader=ada`,
+      `/pipelines/${HASH}?pipeline=two&uploader=ada`,
+    ]);
   });
 
   test('shows the first pipeline when the address names none', async () => {

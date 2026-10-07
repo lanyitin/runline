@@ -235,10 +235,29 @@ describe('removing an entry that pipelines need', () => {
 
     await waitFor(view, 'applied');
     expect(names()).not.toContain('java.io.PrintStream');
-    expect(app.engine.backend.definitionOf(HASH, 'demo-slow')!.verdict).toBe('UNSAFE');
-    expect(app.engine.backend.definitionOf(OTHER, 'demo-failing')!.allowUnsafeExecution).toBe(false);
+    expect(app.engine.backend.definitionOf(HASH, 'ada', 'demo-slow')!.verdict).toBe('UNSAFE');
+    expect(app.engine.backend.definitionOf(OTHER, 'ada', 'demo-failing')!.allowUnsafeExecution).toBe(false);
     expect(stat(view, 'unsafe')).toBe('2');
     expect(dialog(view).querySelector('.warning')!.textContent).toContain('taken back');
+  });
+
+  test('lists each uploader\'s version of the same bytes on its own, and says whose it is', async () => {
+    const { view } = await open(
+      (entries) => ({ kind: 'remove', entry: entries.find((e) => e.name === 'java.io.PrintStream')! }),
+      {
+        seed: (backend) =>
+          void backend.seedArtifact(
+            'bob',
+            [{ name: 'demo-slow', className: 'samples.slow.SlowPipeline', references: ['java.io.PrintStream'] }],
+            { contentHash: HASH },
+          ),
+      },
+    );
+    await waitFor(view, 'preview');
+
+    const lines = [...dialog(view).querySelectorAll('li.change')].filter((c) => c.textContent!.includes('demo-slow'));
+
+    expect(lines.map((c) => c.querySelector('.uploader')!.textContent)).toEqual(['ada', 'bob']);
   });
 
   test('says when the entry is gone since the preview was made, and applies nothing', async () => {

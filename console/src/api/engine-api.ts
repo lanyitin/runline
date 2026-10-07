@@ -23,6 +23,8 @@ import {
 
 export interface CreateRunRequest {
   contentHash: string;
+  /** Whose version of the content: an admin who can see several must say. */
+  uploader?: string;
   pipeline: string;
   parameters?: Record<string, string>;
 }
@@ -38,7 +40,10 @@ export function createEngineApi(transport: Transport) {
   return {
     ...createAdminApi(transport),
 
-    /** Puts a jar on the Engine: a new version (201), or the one that has these bytes already (200). */
+    /**
+     * Puts a jar on the Engine: a new version of the uploader (201), or the one the uploader made
+     * of these bytes before (200). What others uploaded is not told.
+     */
     async uploadJar(
       file: Blob,
       options: UploadOptions = {},
@@ -62,10 +67,14 @@ export function createEngineApi(transport: Transport) {
       return { created: response.status === 201, artifact: parseArtifact(body) };
     },
 
-    /** One version, by its hash, with every pipeline in it. */
-    async artifact(contentHash: string): Promise<Artifact> {
+    /**
+     * One version, by its hash and, when the person can see several, whose it is (an admin without
+     * it is told `ambiguous_version`), with every pipeline in it.
+     */
+    async artifact(contentHash: string, uploader?: string): Promise<Artifact> {
+      const query = uploader === undefined ? '' : `?${new URLSearchParams({ uploader })}`;
       return parseArtifact(
-        await succeed(await json(`/api/v1/artifacts/${encodeURIComponent(contentHash)}`)),
+        await succeed(await json(`/api/v1/artifacts/${encodeURIComponent(contentHash)}${query}`)),
       );
     },
 

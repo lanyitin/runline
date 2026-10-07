@@ -54,7 +54,10 @@
       (a, b) => b.uploadedAt.localeCompare(a.uploadedAt) || a.name.localeCompare(b.name),
     ),
   );
-  const keyOf = (d: { contentHash: string; name: string }) => `${d.contentHash}/${d.name}`;
+  // A pipeline of a version: the content, whose version of it, and the name in it. The same bytes
+  // uploaded by two people are two choices, never one.
+  const keyOf = (d: { contentHash: string; uploader: string; name: string }) =>
+    JSON.stringify([d.contentHash, d.uploader, d.name]);
 
   let name = $state('');
   let kind = $state<'cron' | 'webhook'>('cron');
@@ -66,6 +69,7 @@
   let fieldErrors = $state<Record<string, string>>({});
   let failure = $state.raw<ApiFailure | null>(null);
   let busy = $state(false);
+  let ambiguousInAddress = $state(false);
   let created = $state<{ name: string; webhookPath: string; secret: string } | null>(null);
 
   const selected = $derived(definitions.find((d) => keyOf(d) === targetKey) ?? null);
@@ -94,12 +98,25 @@
       cron = trigger.cron ?? '';
       zone = trigger.timeZone ?? 'UTC';
       enabled = trigger.enabled;
-      choose(`${trigger.contentHash}/${trigger.pipeline}`, trigger.parameters);
+      choose(
+        keyOf({ contentHash: trigger.contentHash, uploader: trigger.uploader, name: trigger.pipeline }),
+        trigger.parameters,
+      );
       return;
     }
     const contentHash = start.get('contentHash');
     const pipeline = start.get('pipeline');
-    if (contentHash && pipeline) choose(`${contentHash}/${pipeline}`);
+    const uploader = start.get('uploader');
+    if (!contentHash || !pipeline) return;
+    const fitting = definitions.filter(
+      (d) =>
+        d.contentHash === contentHash &&
+        d.name === pipeline &&
+        (uploader === null || d.uploader === uploader),
+    );
+    // With several versions that fit and no uploader in the address, nobody is chosen for the person.
+    if (fitting.length === 1) choose(keyOf(fitting[0]));
+    else if (fitting.length > 1) ambiguousInAddress = true;
   });
 
   const PRESETS = ['* * * * *', '*/5 * * * *', '0 * * * *', '0 3 * * *', '0 9 * * 1-5'];
@@ -183,6 +200,7 @@
       if (editing) {
         await api.updateTrigger(triggerName, {
           contentHash: selected.contentHash,
+          uploader: selected.uploader,
           pipeline: selected.name,
           parameters,
           enabled,
@@ -194,6 +212,7 @@
           name: name.trim(),
           kind,
           contentHash: selected.contentHash,
+          uploader: selected.uploader,
           pipeline: selected.name,
           parameters,
           enabled,
@@ -293,6 +312,9 @@
           {/each}
         </select>
         <span class="rl-help">{i18n.t('triggerForm.target.help')}</span>
+        {#if ambiguousInAddress && selected === null}
+          <span class="rl-help ambiguous">{i18n.t('triggerForm.target.ambiguous')}</span>
+        {/if}
         {#if errorOf('trigger-target')}<span class="rl-field-error">{errorOf('trigger-target')}</span>{/if}
       </div>
 

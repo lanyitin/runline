@@ -41,7 +41,12 @@
     busy = true;
     failure = null;
     try {
-      const done = await api.setUnsafeExecution(artifact.contentHash, pipeline.name, value);
+      const done = await api.setUnsafeExecution(
+        artifact.contentHash,
+        pipeline.name,
+        value,
+        artifact.uploader,
+      );
       setBy = { by: done.setBy, at: done.setAt };
       asking = false;
       onchanged();
@@ -64,7 +69,7 @@
     deleteFailure = null;
     referrers = null;
     try {
-      await api.deleteVersion(artifact.contentHash);
+      await api.deleteVersion(artifact.contentHash, artifact.uploader);
       deleting = false;
       ondeleted();
     } catch (error) {
@@ -80,8 +85,12 @@
     try {
       const [triggers, runs] = await Promise.all([api.triggers(), api.runs({ limit: 200 })]);
       referrers = {
-        triggers: triggers.filter((t) => t.contentHash === artifact.contentHash),
-        runs: runs.filter((r) => r.contentHash === artifact.contentHash).length,
+        triggers: triggers.filter(
+          (t) => t.contentHash === artifact.contentHash && t.uploader === artifact.uploader,
+        ),
+        runs: runs.filter(
+          (r) => r.contentHash === artifact.contentHash && r.uploader === artifact.uploader,
+        ).length,
       };
     } catch {
       // The refusal is already said; what refers to the version is a help, not a need.
@@ -125,7 +134,7 @@
 
     <div class="block">
       <h3>{i18n.t('admin.trigger.bind')}</h3>
-      <Link href={newTriggerHref(artifact.contentHash, pipeline.name)} class="rl-btn">{i18n.t('admin.trigger.bind')}</Link>
+      <Link href={newTriggerHref(artifact.contentHash, pipeline.name, artifact.uploader)} class="rl-btn">{i18n.t('admin.trigger.bind')}</Link>
     </div>
 
     <div class="block">

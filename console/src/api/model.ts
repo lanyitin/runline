@@ -48,15 +48,20 @@ export interface Pipeline {
   warnings: Warning[];
 }
 
-/** A pipeline in a listing, with the version it is in. */
+/**
+ * A pipeline in a listing, with the version it is in. A version is a content hash and the person
+ * who uploaded it (`uploader`): the same bytes uploaded by two people are two versions (ADR-020).
+ */
 export interface Definition extends Pipeline {
   contentHash: string;
+  uploader: string;
   uploadedBy: string;
   uploadedAt: string;
 }
 
 export interface Artifact {
   contentHash: string;
+  uploader: string;
   sizeBytes: number;
   uploadedBy: string;
   uploadedAt: string;
@@ -74,6 +79,8 @@ export interface Run {
   runId: string;
   state: string;
   contentHash: string;
+  /** Whose version of the content the run is of. */
+  uploader: string;
   pipeline: string;
   className: string;
   source: { kind: string; name: string };
@@ -164,6 +171,7 @@ export function parseArtifact(json: unknown): Artifact {
   const record = obj(json, 'the version');
   return {
     contentHash: str(record.contentHash, 'contentHash'),
+    uploader: str(record.uploader, 'uploader'),
     sizeBytes: num(record.sizeBytes, 'sizeBytes'),
     uploadedBy: str(record.uploadedBy, 'uploadedBy'),
     uploadedAt: str(record.uploadedAt, 'uploadedAt'),
@@ -184,6 +192,7 @@ export function parseDefinitions(json: unknown): {
       const definition = obj(d, 'a definition');
       return {
         contentHash: str(definition.contentHash, 'contentHash'),
+        uploader: str(definition.uploader, 'uploader'),
         uploadedBy: str(definition.uploadedBy, 'uploadedBy'),
         uploadedAt: str(definition.uploadedAt, 'uploadedAt'),
         ...parsePipelineFields(definition),
@@ -209,6 +218,7 @@ export function parseRun(json: unknown): Run {
     runId: str(record.runId, 'runId'),
     state: str(record.state, 'state'),
     contentHash: str(record.contentHash, 'contentHash'),
+    uploader: str(record.uploader, 'uploader'),
     pipeline: str(record.pipeline, 'pipeline'),
     className: str(record.className, 'className'),
     source: { kind: str(source.kind, 'source kind'), name: str(source.name, 'source name') },

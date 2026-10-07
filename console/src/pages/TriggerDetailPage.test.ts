@@ -89,7 +89,10 @@ describe('the page of a cron trigger', () => {
     const binding = section(view, 'Runs');
     expect(binding.textContent).toContain('demo-slow');
     expect(binding.textContent).toContain(HASH);
-    expect(binding.querySelector('a')!.getAttribute('href')).toBe(`/pipelines/${HASH}?pipeline=demo-slow`);
+    expect(binding.textContent).toContain('ada');
+    expect(binding.querySelector('a')!.getAttribute('href')).toBe(
+      `/pipelines/${HASH}?pipeline=demo-slow&uploader=ada`,
+    );
     const params = [...section(view, 'Parameters').querySelectorAll('tbody tr')].map((tr) =>
       [...tr.querySelectorAll('td')].map((td) => td.textContent!.trim()),
     );

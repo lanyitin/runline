@@ -68,6 +68,7 @@ describe('the triggers list', () => {
     expect(nightly.querySelector('.kind')!.textContent).toContain('Cron');
     expect(nightly.querySelector('.target')!.textContent).toContain('demo-slow');
     expect(nightly.querySelector('.target .hash')!.textContent).toBe('c0ffee1');
+    expect(nightly.querySelector('.target .uploader')!.textContent).toBe('ada');
     expect(nightly.querySelector('.updated')!.textContent).toContain('root');
     expect(rows(view)[1].querySelector('.kind')!.textContent).toContain('Webhook');
   });

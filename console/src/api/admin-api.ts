@@ -33,6 +33,8 @@ export interface CreateTriggerRequest {
   name: string;
   kind: 'cron' | 'webhook';
   contentHash: string;
+  /** Whose version of the content: an admin who can see several must say. */
+  uploader?: string;
   pipeline: string;
   parameters?: Record<string, string>;
   cron?: string;
@@ -42,7 +44,9 @@ export interface CreateTriggerRequest {
 
 /** What is given of a trigger to change: at least one. */
 export interface UpdateTriggerRequest {
+  /** With `uploader`: the version the binding moves to. Alone, it names a version too. */
   contentHash?: string;
+  uploader?: string;
   pipeline?: string;
   parameters?: Record<string, string>;
   enabled?: boolean;
@@ -64,6 +68,8 @@ export interface ChangeOptions {
 const q = encodeURIComponent;
 const withPreview = (path: string, options: ChangeOptions) =>
   options.preview ? `${path}?preview=true` : path;
+const uploaderQuery = (uploader: string | undefined) =>
+  uploader === undefined ? '' : `?${new URLSearchParams({ uploader })}`;
 const jsonBody = (method: string, body: unknown): RequestInit => ({
   method,
   headers: { 'Content-Type': 'application/json' },
@@ -180,22 +186,28 @@ export function createAdminApi(transport: Transport) {
     },
 
     // ---- unsafe execution and versions -------------------------------------------------------
+    /** Of one version: [uploader] says whose when several uploaders have the content. */
     async setUnsafeExecution(
       contentHash: string,
       pipeline: string,
       allow: boolean,
+      uploader?: string,
     ): Promise<UnsafeSetting> {
       return parseUnsafeSetting(
         await succeed(
           await json(
-            `/api/v1/definitions/${q(contentHash)}/${q(pipeline)}/unsafe-execution`,
+            `/api/v1/definitions/${q(contentHash)}/${q(pipeline)}/unsafe-execution${uploaderQuery(uploader)}`,
             jsonBody('PUT', { allow }),
           ),
         ),
       );
     },
-    async deleteVersion(contentHash: string): Promise<void> {
-      await succeed(await json(`/api/v1/artifacts/${q(contentHash)}`, { method: 'DELETE' }));
+    async deleteVersion(contentHash: string, uploader?: string): Promise<void> {
+      await succeed(
+        await json(`/api/v1/artifacts/${q(contentHash)}${uploaderQuery(uploader)}`, {
+          method: 'DELETE',
+        }),
+      );
     },
   };
 }

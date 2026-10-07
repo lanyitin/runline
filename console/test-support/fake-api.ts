@@ -31,6 +31,12 @@ export const answer = (
 export const failure = (status: number, error: string, message: string, extra: object = {}) =>
   answer(status, { error, message, ...extra });
 
+/** 409 `ambiguous_version`: the caller can see several versions of the content and named none. */
+export const ambiguousVersion = (uploaders: string[]) =>
+  failure(409, 'ambiguous_version', 'Several uploaders have this version: name one.', {
+    uploaders,
+  });
+
 export const forbidden = () => failure(403, 'forbidden', 'This needs the role ADMIN.');
 
 /** A route: [handle] gets the request and what the groups of the path matched. */

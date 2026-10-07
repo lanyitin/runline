@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, test, vi } from 'vitest';
 import type { DemoJars } from '../test-support/fake-jars';
+import { uniqueJar } from '../test-support/zip';
 import type { ContractCaller } from './system-contract';
 
 export interface PipelinesContractSetup {
@@ -467,6 +468,200 @@ export function describePipelinesContract(name: string, setup: PipelinesContract
       ]) {
         expect([path, (await call(null, method, path)).status]).toEqual([path, 401]);
       }
+    });
+  });
+
+  // ---- the same bytes, uploaded by more than one person (WI-54, ADR-020) ----
+
+  let versionCounter = 0;
+  /** Bytes no one has uploaded: each test of the versions starts from its own. */
+  const fresh = (bytes: Uint8Array) =>
+    uniqueJar(bytes, `v${Date.now().toString(36)}${(versionCounter++).toString(36)}`);
+
+  /** The shape of a JSON value: its keys and the kinds of its values, not the values. */
+  const shape = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(shape)
+      : value !== null && typeof value === 'object'
+        ? Object.fromEntries(
+            Object.entries(value as object)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([key, v]) => [key, shape(v)]),
+          )
+        : value === null
+          ? 'null'
+          : typeof value;
+
+  describe(`one jar uploaded by more than one person with ${name}`, () => {
+    test('each uploader gets a version of their own: 201 for both, 200 for the same person again, and the answer says whose it is', async () => {
+      const bytes = fresh(setup.jars().slow);
+      const first = await upload(ada(), bytes);
+      const second = await upload(bob(), bytes);
+      const again = await upload(bob(), bytes);
+
+      expect([first.status, second.status, again.status]).toEqual([201, 201, 200]);
+      expect(second.body.contentHash).toBe(first.body.contentHash);
+      expect(first.body).toMatchObject({ uploader: ada().name, uploadedBy: ada().name });
+      expect(second.body).toMatchObject({ uploader: bob().name, uploadedBy: bob().name });
+      expect(again.body.uploadedAt).toBe(second.body.uploadedAt);
+    });
+
+    test('what another person uploaded before cannot be told from the answer to a jar nobody had: the same status and the same fields', async () => {
+      const shared = fresh(setup.jars().slow);
+      await upload(ada(), shared);
+
+      const duplicate = await upload(bob(), shared);
+      const brandNew = await upload(bob(), fresh(setup.jars().slow));
+
+      expect(duplicate.status).toBe(brandNew.status);
+      expect(shape(duplicate.body)).toEqual(shape(brandNew.body));
+      expect(JSON.stringify(duplicate.body)).not.toContain(JSON.stringify(ada().name));
+    });
+
+    test('a developer sees only their own version; an admin sees both, each with its uploader', async () => {
+      const bytes = fresh(setup.jars().slow);
+      const { body } = await upload(ada(), bytes);
+      await upload(bob(), bytes);
+      const hash = body.contentHash;
+
+      const own = (who: ContractCaller) =>
+        call(who, 'GET', '/api/v1/definitions').then((a) =>
+          a.body.definitions.filter((d: any) => d.contentHash === hash),
+        );
+      expect((await own(ada())).map((d: any) => d.uploader)).toEqual([ada().name]);
+      expect((await own(bob())).map((d: any) => d.uploader)).toEqual([bob().name]);
+      expect((await own(root())).map((d: any) => d.uploader).sort()).toEqual(
+        [ada().name, bob().name].sort(),
+      );
+    });
+
+    test('a developer who names another uploader gets the answer for a version that is not there; naming themselves works', async () => {
+      const bytes = fresh(setup.jars().slow);
+      const { body } = await upload(ada(), bytes);
+      await upload(bob(), bytes);
+      const path = `/api/v1/artifacts/${body.contentHash}`;
+      const nothing = await call(bob(), 'GET', `/api/v1/artifacts/${'0'.repeat(64)}`);
+
+      const other = await call(bob(), 'GET', `${path}?uploader=${ada().name}`);
+      const unknown = await call(bob(), 'GET', `${path}?uploader=nobody`);
+      const self = await call(bob(), 'GET', `${path}?uploader=${bob().name}`);
+
+      for (const answer of [other, unknown]) {
+        expect(answer.status).toBe(404);
+        expect(answer.body).toEqual(nothing.body);
+      }
+      expect(self.status).toBe(200);
+      expect(self.body.uploader).toBe(bob().name);
+    });
+
+    test('an admin who can see several versions must say whose: 409 ambiguous_version with the uploaders, or the uploader parameter', async () => {
+      const bytes = fresh(setup.jars().slow);
+      const { body } = await upload(ada(), bytes);
+      await upload(bob(), bytes);
+      const path = `/api/v1/artifacts/${body.contentHash}`;
+
+      const ambiguous = await call(root(), 'GET', path);
+      expect(ambiguous.status).toBe(409);
+      expect(ambiguous.body.error).toBe('ambiguous_version');
+      expect([...ambiguous.body.uploaders].sort()).toEqual([ada().name, bob().name].sort());
+      expect(typeof ambiguous.body.message).toBe('string');
+
+      expect((await call(root(), 'GET', `${path}?uploader=${bob().name}`)).body.uploader).toBe(
+        bob().name,
+      );
+      expect((await call(root(), 'GET', `${path}?uploader=nobody`)).status).toBe(404);
+      // An admin who has a version too is not given it for want of a choice.
+      await upload(root(), bytes);
+      expect((await call(root(), 'GET', path)).status).toBe(409);
+    });
+
+    test('a run is of the version of whoever makes it; an admin names the uploader, and a developer cannot reach another one', async () => {
+      const bytes = fresh(setup.jars().slow);
+      const { body } = await upload(ada(), bytes);
+      await upload(bob(), bytes);
+      const run = (who: ContractCaller, extra: object = {}) =>
+        createRun(who, {
+          contentHash: body.contentHash,
+          pipeline: 'demo-slow',
+          parameters: { steps: '1', delayMillis: '10' },
+          ...extra,
+        });
+
+      const mine = await run(bob());
+      expect(mine.status).toBe(201);
+      expect(mine.body.uploader).toBe(bob().name);
+      const reaching = await run(bob(), { uploader: ada().name });
+      expect([reaching.status, reaching.body.error]).toEqual([404, 'definition_not_found']);
+      const ambiguous = await run(root());
+      expect([ambiguous.status, ambiguous.body.error]).toEqual([409, 'ambiguous_version']);
+      const named = await run(root(), { uploader: ada().name });
+      expect(named.status).toBe(201);
+      expect(named.body.uploader).toBe(ada().name);
+      expect(named.body.source).toEqual({ kind: 'MANUAL', name: root().name });
+      await untilTerminal(bob(), mine.body.runId);
+      await untilTerminal(root(), named.body.runId);
+    });
+
+    test('the setting of unsafe execution is of one version: approving one uploader\'s does not approve the other\'s', async () => {
+      const bytes = fresh(setup.jars().unsafe);
+      const { body } = await upload(ada(), bytes);
+      await upload(bob(), bytes);
+      const put = (query: string, allow: boolean) =>
+        call(
+          root(),
+          'PUT',
+          `/api/v1/definitions/${body.contentHash}/demo-unsafe/unsafe-execution${query}`,
+          JSON.stringify({ allow }),
+          'application/json',
+        );
+
+      const ambiguous = await put('', true);
+      expect([ambiguous.status, ambiguous.body.error]).toEqual([409, 'ambiguous_version']);
+      const approved = await put(`?uploader=${ada().name}`, true);
+      try {
+        expect(approved.status).toBe(200);
+        expect(approved.body).toMatchObject({ uploader: ada().name, allow: true });
+        const request = (who: ContractCaller) =>
+          createRun(who, { contentHash: body.contentHash, pipeline: 'demo-unsafe' });
+        const refused = await request(bob());
+        expect([refused.status, refused.body.error]).toEqual([409, 'unsafe_not_allowed']);
+        const flags = (
+          await call(root(), 'GET', '/api/v1/definitions')
+        ).body.definitions
+          .filter((d: any) => d.contentHash === body.contentHash)
+          .map((d: any) => [d.uploader, d.allowUnsafeExecution])
+          .sort();
+        expect(flags).toEqual(
+          [
+            [ada().name, true],
+            [bob().name, false],
+          ].sort(),
+        );
+      } finally {
+        await put(`?uploader=${ada().name}`, false);
+      }
+    });
+
+    test('deleting is of one version: it needs the uploader when several exist, and the other version stays and still runs', async () => {
+      const bytes = fresh(setup.jars().slow);
+      const { body } = await upload(ada(), bytes);
+      await upload(bob(), bytes);
+      const path = `/api/v1/artifacts/${body.contentHash}`;
+
+      const ambiguous = await call(root(), 'DELETE', path);
+      expect([ambiguous.status, ambiguous.body.error]).toEqual([409, 'ambiguous_version']);
+      expect((await call(bob(), 'DELETE', `${path}?uploader=${bob().name}`)).status).toBe(403);
+      expect((await call(root(), 'DELETE', `${path}?uploader=${ada().name}`)).status).toBe(204);
+
+      expect((await call(ada(), 'GET', path)).status).toBe(404);
+      expect((await call(bob(), 'GET', path)).status).toBe(200);
+      const made = await createRun(bob(), {
+        contentHash: body.contentHash,
+        pipeline: 'demo-slow',
+        parameters: { steps: '1', delayMillis: '10' },
+      });
+      expect(made.status).toBe(201);
+      await untilTerminal(bob(), made.body.runId);
     });
   });
 }

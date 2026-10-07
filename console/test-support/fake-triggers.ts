@@ -7,6 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   answer,
+  ambiguousVersion,
   failure,
   isStringMap,
   jsonObject,
@@ -20,6 +21,8 @@ export interface FakeTrigger {
   name: string;
   kind: 'cron' | 'webhook';
   contentHash: string;
+  /** Whose version of the content the trigger is bound to. */
+  uploader: string;
   pipeline: string;
   parameters: Record<string, string>;
   enabled: boolean;
@@ -138,7 +141,9 @@ export class FakeTriggers {
   ];
 
   /** A trigger as it is, for the screens that must show what the Engine can hold. */
-  seed(trigger: Partial<FakeTrigger> & Pick<FakeTrigger, 'name' | 'contentHash' | 'pipeline'>): FakeTrigger {
+  seed(
+    trigger: Partial<FakeTrigger> & Pick<FakeTrigger, 'name' | 'contentHash' | 'pipeline'>,
+  ): FakeTrigger {
     const at = new Date().toISOString();
     const made: FakeTrigger = {
       kind: 'cron',
@@ -152,6 +157,8 @@ export class FakeTriggers {
       createdAt: at,
       updatedBy: 'root',
       updatedAt: at,
+      // The only uploader of the content, when the test does not say whose version it binds.
+      uploader: this.backend.versionsOf(trigger.contentHash)[0]?.uploadedBy ?? '',
       ...trigger,
     };
     this.triggers.set(made.name, made);
@@ -159,15 +166,18 @@ export class FakeTriggers {
   }
 
   /** Whether a version is bound by a trigger (it cannot be deleted then). */
-  references(contentHash: string): boolean {
-    return [...this.triggers.values()].some((t) => t.contentHash === contentHash);
+  references(contentHash: string, uploader: string): boolean {
+    return [...this.triggers.values()].some(
+      (t) => t.contentHash === contentHash && t.uploader === uploader,
+    );
   }
 
   // ---- the documents ---------------------------------------------------------------------------
 
   private effective(trigger: FakeTrigger): Record<string, string> {
     const declared =
-      this.backend.definitionOf(trigger.contentHash, trigger.pipeline)?.metadata.parameters ?? [];
+      this.backend.definitionOf(trigger.contentHash, trigger.uploader, trigger.pipeline)?.metadata
+        .parameters ?? [];
     return {
       ...Object.fromEntries(
         declared.filter((p) => p.default !== null).map((p) => [p.name, p.default as string]),
@@ -181,6 +191,7 @@ export class FakeTriggers {
       name: trigger.name,
       kind: trigger.kind,
       contentHash: trigger.contentHash,
+      uploader: trigger.uploader,
       pipeline: trigger.pipeline,
       parameters: trigger.parameters,
       effectiveParameters: this.effective(trigger),
@@ -206,10 +217,11 @@ export class FakeTriggers {
   /** What is wrong with the parameters of a binding, as the answer of a run that is refused. */
   private checkBinding(
     contentHash: string,
+    uploader: string,
     pipeline: string,
     parameters: Record<string, string>,
   ): ApiAnswer | null {
-    const definition = this.backend.definitionOf(contentHash, pipeline);
+    const definition = this.backend.definitionOf(contentHash, uploader, pipeline);
     if (!definition) return failure(404, 'definition_not_found', 'No such version and pipeline.');
     const declared = definition.metadata.parameters;
     const problems = [
@@ -233,6 +245,7 @@ export class FakeTriggers {
       !request ||
       typeof request.name !== 'string' ||
       typeof request.contentHash !== 'string' ||
+      (request.uploader !== undefined && typeof request.uploader !== 'string') ||
       typeof request.pipeline !== 'string' ||
       (request.parameters !== undefined && !isStringMap(request.parameters)) ||
       (request.cron !== undefined && typeof request.cron !== 'string') ||
@@ -260,7 +273,18 @@ export class FakeTriggers {
       return failure(409, 'trigger_exists', `The trigger ${request.name} exists.`);
     }
     const parameters = (request.parameters as Record<string, string> | undefined) ?? {};
-    const refused = this.checkBinding(request.contentHash, request.pipeline, parameters);
+    // An admin sees every version, and none is preferred: the uploader must be clear.
+    const found = this.backend.resolve(
+      request.contentHash,
+      (request.uploader as string | undefined) ?? null,
+      () => true,
+    );
+    if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
+    if ('none' in found) {
+      return failure(404, 'definition_not_found', 'No such version and pipeline.');
+    }
+    const uploader = found.version.uploadedBy;
+    const refused = this.checkBinding(request.contentHash, uploader, request.pipeline, parameters);
     if (refused) return refused;
 
     const now = new Date().toISOString();
@@ -269,6 +293,7 @@ export class FakeTriggers {
       name: request.name,
       kind,
       contentHash: request.contentHash,
+      uploader,
       pipeline: request.pipeline,
       parameters,
       enabled: request.enabled ?? true,
@@ -301,6 +326,7 @@ export class FakeTriggers {
     if (
       !request ||
       (request.contentHash !== undefined && typeof request.contentHash !== 'string') ||
+      (request.uploader !== undefined && typeof request.uploader !== 'string') ||
       (request.pipeline !== undefined && typeof request.pipeline !== 'string') ||
       (request.parameters !== undefined && !isStringMap(request.parameters)) ||
       (request.enabled !== undefined && typeof request.enabled !== 'boolean') ||
@@ -309,7 +335,15 @@ export class FakeTriggers {
     ) {
       return failure(400, 'bad_request', 'The body is not what a change needs.');
     }
-    const given = ['contentHash', 'pipeline', 'parameters', 'enabled', 'cron', 'timeZone'].filter(
+    const given = [
+      'contentHash',
+      'uploader',
+      'pipeline',
+      'parameters',
+      'enabled',
+      'cron',
+      'timeZone',
+    ].filter(
       (key) => request[key] !== undefined,
     );
     if (given.length === 0) return this.invalid('nothing_to_change', 'Nothing to change.');
@@ -325,10 +359,26 @@ export class FakeTriggers {
     const contentHash = (request.contentHash as string | undefined) ?? trigger.contentHash;
     const pipeline = (request.pipeline as string | undefined) ?? trigger.pipeline;
     const parameters = (request.parameters as Record<string, string> | undefined) ?? trigger.parameters;
-    const refused = this.checkBinding(contentHash, pipeline, parameters);
+    // The binding stays on its version unless the request moves it: a content hash or an uploader
+    // is a move, and must come to one uploader's version.
+    let uploader = trigger.uploader;
+    if (request.contentHash !== undefined || request.uploader !== undefined) {
+      const found = this.backend.resolve(
+        contentHash,
+        (request.uploader as string | undefined) ?? null,
+        () => true,
+      );
+      if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
+      if ('none' in found) {
+        return failure(404, 'definition_not_found', 'No such version and pipeline.');
+      }
+      uploader = found.version.uploadedBy;
+    }
+    const refused = this.checkBinding(contentHash, uploader, pipeline, parameters);
     if (refused) return refused;
 
     trigger.contentHash = contentHash;
+    trigger.uploader = uploader;
     trigger.pipeline = pipeline;
     trigger.parameters = parameters;
     if (request.enabled !== undefined) trigger.enabled = request.enabled as boolean;

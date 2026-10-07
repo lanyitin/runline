@@ -14,13 +14,13 @@ const page = async (
     mode?: 'create' | 'edit';
     query?: string;
     languages?: string[];
+    /** Others who uploaded the very same bytes as ada did. */
+    sharedWith?: string[];
     seed?: (api: TestApp['context']['api']) => Promise<void>;
   } = {},
 ) => {
   app = await createTestApp({ identity: root, languages: options.languages });
-  app.engine.backend.seedArtifact(
-    'ada',
-    [
+  const pipelines = [
       {
         name: 'demo-slow',
         className: 'samples.slow.SlowPipeline',
@@ -34,9 +34,10 @@ const page = async (
         className: 'x.NeedsToken',
         parameters: [{ name: 'token', required: true }],
       },
-    ],
-    { contentHash: HASH },
-  );
+    ];
+  for (const uploader of ['ada', ...(options.sharedWith ?? [])]) {
+    app.engine.backend.seedArtifact(uploader, pipelines, { contentHash: HASH });
+  }
   await options.seed?.(app.context.api);
   const mode = options.mode ?? 'create';
   app.context.router.navigate(`/triggers/${mode === 'create' ? 'new' : 'edit'}${options.query ?? ''}`);
@@ -50,7 +51,9 @@ const type = (input: HTMLInputElement | HTMLSelectElement, value: string) => {
   input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
 };
 const submit = (view: HTMLElement) => view.querySelector<HTMLButtonElement>('button.submit')!.click();
-const target = `${HASH}/demo-slow`;
+/** What the list of pipelines gives as the value of the choice: a version and a pipeline in it. */
+const choice = (uploader: string, name: string) => JSON.stringify([HASH, uploader, name]);
+const target = choice('ada', 'demo-slow');
 const errorAt = (view: HTMLElement, id: string) =>
   view.querySelector(`#${id}`)!.closest('.rl-field')!.querySelector('.rl-field-error')?.textContent ?? null;
 
@@ -196,7 +199,7 @@ describe('making a trigger', () => {
     expect(errorAt(view, 'trigger-cron')).toBe('Enter a cron expression.');
     expect(app.engine.backend.triggers.triggers.size).toBe(0);
 
-    type(field(view, 'trigger-target'), `${HASH}/needs-token`);
+    type(field(view, 'trigger-target'), choice('ada', 'needs-token'));
     await tick();
     submit(view);
     await tick();
@@ -369,5 +372,85 @@ describe('changing a trigger', () => {
     await vi.waitFor(() => expect(view.querySelector('[role="alert"]')).not.toBeNull());
     expect(view.textContent).toContain('No such trigger');
     expect(view.querySelector('form')).toBeNull();
+  });
+});
+
+describe('the same content uploaded by two people', () => {
+  test('a trigger is made for the version the address names, and the trigger says whose', async () => {
+    const { view } = await page({
+      sharedWith: ['bob'],
+      query: `?contentHash=${HASH}&pipeline=demo-slow&uploader=bob`,
+    });
+    await ready(view);
+    await tick();
+    expect(field<HTMLSelectElement>(view, 'trigger-target').value).toBe(choice('bob', 'demo-slow'));
+
+    type(field(view, 'trigger-name'), 'bobs');
+    type(field(view, 'trigger-cron'), '* * * * *');
+    submit(view);
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+    expect(await app.context.api.trigger('bobs')).toMatchObject({ contentHash: HASH, uploader: 'bob' });
+  });
+
+  test('an address that does not say whose chooses nobody, says so, and makes nothing', async () => {
+    const { view } = await page({
+      sharedWith: ['bob'],
+      query: `?contentHash=${HASH}&pipeline=demo-slow`,
+    });
+    await ready(view);
+    await tick();
+
+    expect(field<HTMLSelectElement>(view, 'trigger-target').value).toBe('');
+    expect(view.textContent).toContain('Choose whose version');
+    type(field(view, 'trigger-name'), 'nobody');
+    type(field(view, 'trigger-cron'), '* * * * *');
+    submit(view);
+    await vi.waitFor(() => expect(errorAt(view, 'trigger-target')).not.toBeNull());
+    expect(await app.context.api.triggers()).toEqual([]);
+  });
+
+  test('a trigger is changed in what it runs of the version it has, and moves to the other only when chosen', async () => {
+    const seed = async (api: TestApp['context']['api']) => {
+      await api.createTrigger({
+        name: 'bobs',
+        kind: 'cron',
+        contentHash: HASH,
+        uploader: 'bob',
+        pipeline: 'demo-slow',
+        cron: '* * * * *',
+      });
+    };
+    const { view } = await page({ mode: 'edit', query: '?name=bobs', sharedWith: ['bob'], seed });
+    await ready(view);
+    await tick();
+    expect(field<HTMLSelectElement>(view, 'trigger-target').value).toBe(choice('bob', 'demo-slow'));
+
+    type(field(view, 'trigger-cron'), '0 3 * * *');
+    submit(view);
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+    expect(await app.context.api.trigger('bobs')).toMatchObject({ uploader: 'bob', cron: '0 3 * * *' });
+  });
+
+  test('moves to the other uploader\'s version when that is chosen', async () => {
+    const seed = async (api: TestApp['context']['api']) => {
+      await api.createTrigger({
+        name: 'bobs',
+        kind: 'cron',
+        contentHash: HASH,
+        uploader: 'bob',
+        pipeline: 'demo-slow',
+        cron: '* * * * *',
+      });
+    };
+    const { view } = await page({ mode: 'edit', query: '?name=bobs', sharedWith: ['bob'], seed });
+    await ready(view);
+    await tick();
+
+    type(field(view, 'trigger-target'), choice('ada', 'demo-slow'));
+    submit(view);
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+    expect((await app.context.api.trigger('bobs')).uploader).toBe('ada');
   });
 });

@@ -395,7 +395,7 @@ export class FakeAllowList {
     const changes: Array<Record<string, unknown>> = [];
     let examinedDefinitions = 0;
     const judged: Array<{ definition: Definition; now: ReturnType<typeof judge>; revoke: boolean }> = [];
-    for (const { contentHash, definition } of this.backend.allDefinitions()) {
+    for (const { contentHash, uploader, definition } of this.backend.allDefinitions()) {
       examinedDefinitions += 1;
       const now = judge(definition, made.entries);
       const changed = now.verdict !== definition.verdict;
@@ -404,6 +404,7 @@ export class FakeAllowList {
       if (changed) {
         changes.push({
           contentHash,
+          uploader,
           pipeline: definition.name,
           className: definition.className,
           from: definition.verdict,

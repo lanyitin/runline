@@ -232,6 +232,7 @@ describe('the allow-list', () => {
     expect(preview.impact.changes).toEqual([
       {
         contentHash,
+        uploader: 'root',
         pipeline: 'demo-slow',
         className: 'samples.slow.SlowPipeline',
         from: 'SAFE',

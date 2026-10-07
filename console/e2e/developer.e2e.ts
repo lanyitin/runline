@@ -93,7 +93,7 @@ describe('uploading a jar', () => {
     const result = page.locator('.result');
     await result.waitFor();
     // A new version the first time, the version that was there on the runs after it.
-    expect(await result.innerText()).toMatch(/A new version was made|This jar was uploaded before/);
+    expect(await result.innerText()).toMatch(/A new version was made|You uploaded this jar before/);
     const line = result.locator('.pipeline-line');
     expect(await line.innerText()).toContain('demo-slow');
     expect(await line.locator('.badge').innerText()).toContain('SAFE');
@@ -104,7 +104,7 @@ describe('uploading a jar', () => {
     await page.setInputFiles('input[type="file"]', jar('demo-slow'));
     await page.locator('button.submit').click();
     await result.waitFor();
-    expect(await result.innerText()).toContain('This jar was uploaded before');
+    expect(await result.innerText()).toContain('You uploaded this jar before');
     expect(await violations(page)).toEqual([]);
     expect(problems.csp).toEqual([]);
     expect(problems.foreign).toEqual([]);

@@ -50,10 +50,11 @@
   {:else}
     <h3>{i18n.t('allow.impact.changes')}</h3>
     <ul class="changes">
-      {#each impact.changes as item (`${item.contentHash}/${item.pipeline}`)}
+      {#each impact.changes as item (JSON.stringify([item.contentHash, item.uploader, item.pipeline]))}
         <li class="change">
           <span class="pipeline"><PlainText value={item.pipeline} mono /></span>
           <span class="hash rl-mono" title={item.contentHash}>{shortHash(item.contentHash)}</span>
+          <span class="uploader"><PlainText value={item.uploader} /></span>
           <span class="verdicts">
             <Badge kind="verdict" value={item.from} />
             <span aria-hidden="true">→</span>
@@ -149,7 +150,8 @@
   .pipeline {
     font-weight: 600;
   }
-  .hash {
+  .hash,
+  .uploader {
     color: var(--text-muted);
     font-size: var(--text-xs);
   }

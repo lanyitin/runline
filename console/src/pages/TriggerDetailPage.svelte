@@ -207,6 +207,8 @@
       <dl class="rl-dl">
         <dt>{i18n.t('trigger.pipeline')}</dt>
         <dd><PlainText value={trigger.pipeline} mono /></dd>
+        <dt>{i18n.t('trigger.uploader')}</dt>
+        <dd><PlainText value={trigger.uploader} /></dd>
         <dt>{i18n.t('trigger.version')}</dt>
         <dd class="hash-line">
           <span class="rl-mono"><PlainText value={trigger.contentHash} mono /></span>
@@ -216,7 +218,7 @@
             copied={i18n.t('common.copied')}
             failed={i18n.t('common.copyFailed')}
           />
-          <Link href={pipelineHref(trigger.contentHash, trigger.pipeline)}>{i18n.t('trigger.viewPipeline')}</Link>
+          <Link href={pipelineHref(trigger.contentHash, trigger.pipeline, trigger.uploader)}>{i18n.t('trigger.viewPipeline')}</Link>
         </dd>
       </dl>
     </section>

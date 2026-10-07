@@ -18,6 +18,7 @@ const page = async (
     identity?: { name: string; role: 'admin' | 'developer' };
     unsafe?: boolean;
     languages?: string[];
+    query?: string;
     seed?: (backend: TestApp['engine']['backend']) => void;
   } = {},
 ) => {
@@ -40,7 +41,7 @@ const page = async (
     { contentHash: HASH },
   );
   options.seed?.(app.engine.backend);
-  app.context.router.navigate('/pipelines/x?pipeline=order-sync');
+  app.context.router.navigate(options.query ?? '/pipelines/x?pipeline=order-sync');
   return app.mount(PipelineDetailPage, { contentHash: HASH });
 };
 const ready = (view: HTMLElement) => vi.waitFor(() => expect(view.querySelector('h1')).not.toBeNull());
@@ -48,7 +49,7 @@ const admin = (view: HTMLElement) => view.querySelector<HTMLElement>('section.ad
 const button = (root: ParentNode, label: string) =>
   [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.trim() === label)!;
 const dialog = (view: HTMLElement) => view.querySelector<HTMLElement>('[role="dialog"]')!;
-const allowed = () => app.engine.backend.definitionOf(HASH, 'order-sync')!.allowUnsafeExecution;
+const allowed = () => app.engine.backend.definitionOf(HASH, 'ada', 'order-sync')!.allowUnsafeExecution;
 
 describe('the page of a pipeline, for a developer', () => {
   test('has nothing of the admin: no switch, no deleting', async () => {
@@ -173,7 +174,7 @@ describe('deleting the version', () => {
     expect(ask.textContent).toContain('order-sync');
     expect(ask.textContent).toContain('order-other');
     expect(ask.textContent).toContain('cannot be undone');
-    expect(app.engine.backend.artifacts.has(HASH)).toBe(true);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
   });
 
   test('deletes it when confirmed, and shows the list of pipelines', async () => {
@@ -185,7 +186,7 @@ describe('deleting the version', () => {
     button(dialog(view), 'Delete the version').click();
 
     await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
-    expect(app.engine.backend.artifacts.has(HASH)).toBe(false);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeUndefined();
   });
 
   test('does not delete when it is not confirmed', async () => {
@@ -195,7 +196,7 @@ describe('deleting the version', () => {
     await tick();
     button(dialog(view), 'Cancel').click();
     await tick();
-    expect(app.engine.backend.artifacts.has(HASH)).toBe(true);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
     expect(dialog(view)).toBeNull();
   });
 
@@ -211,7 +212,7 @@ describe('deleting the version', () => {
     await vi.waitFor(() => expect(dialog(view).querySelector('.in-use')).not.toBeNull());
     expect(dialog(view).querySelector('.in-use')!.textContent).toContain('1 run');
     expect(dialog(view).querySelector('.in-use')!.textContent).toContain('retention');
-    expect(app.engine.backend.artifacts.has(HASH)).toBe(true);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
     expect(app.context.router.path).not.toBe('/pipelines');
   });
 
@@ -238,7 +239,94 @@ describe('a trigger for this version', () => {
     const view = await page();
     await ready(view);
     const link = [...admin(view).querySelectorAll('a')].find((a) => a.textContent!.trim() === 'Bind a trigger')!;
-    expect(link.getAttribute('href')).toBe(`/triggers/new?contentHash=${HASH}&pipeline=order-sync`);
+    expect(link.getAttribute('href')).toBe(
+      `/triggers/new?contentHash=${HASH}&pipeline=order-sync&uploader=ada`,
+    );
+  });
+});
+
+describe('the same content uploaded by two people', () => {
+  const sharedWithBob = (b: TestApp['engine']['backend']) =>
+    void b.seedArtifact(
+      'bob',
+      [
+        {
+          name: 'order-sync',
+          className: 'com.acme.OrderSync',
+          reasons: [{ kind: 'UNRESTRICTED_ACCESS', category: 'NETWORK' }],
+        },
+      ],
+      { contentHash: HASH },
+    );
+
+  test('asks whose version when the address names none, with a link to each, and does not guess', async () => {
+    const view = await page({ seed: sharedWithBob });
+
+    await vi.waitFor(() => expect(view.querySelector('.choose-version')).not.toBeNull());
+    const choice = view.querySelector('.choose-version')!;
+    expect(choice.textContent).toContain('Choose whose version');
+    expect([...choice.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([
+      `/pipelines/${HASH}?pipeline=order-sync&uploader=ada`,
+      `/pipelines/${HASH}?pipeline=order-sync&uploader=bob`,
+    ]);
+    expect(view.querySelector('section.admin')).toBeNull();
+    expect(view.querySelector('h1')).toBeNull();
+  });
+
+  test("shows the version the address names, and what is done to it is done to that version only", async () => {
+    const view = await page({ seed: sharedWithBob, query: '/pipelines/x?pipeline=order-sync&uploader=bob' });
+    await ready(view);
+    expect(view.querySelector('dl.facts')!.textContent).toContain('bob');
+    const toggle = admin(view).querySelector<HTMLInputElement>('input[role="switch"]')!;
+
+    toggle.click();
+    await tick();
+    button(dialog(view), 'Allow unsafe execution').click();
+
+    const of = (uploader: string) =>
+      app.engine.backend.definitionOf(HASH, uploader, 'order-sync')!.allowUnsafeExecution;
+    await vi.waitFor(() => expect(of('bob')).toBe(true));
+    expect(of('ada')).toBe(false);
+  });
+
+  test('deleting takes the version shown and leaves the other uploader\'s', async () => {
+    const view = await page({ seed: sharedWithBob, query: '/pipelines/x?pipeline=order-sync&uploader=bob' });
+    await ready(view);
+    button(admin(view), 'Delete this version').click();
+    await tick();
+
+    button(dialog(view), 'Delete the version').click();
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
+    expect(app.engine.backend.version(HASH, 'bob')).toBeUndefined();
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('a trigger for the version is bound to the uploader shown', async () => {
+    const view = await page({ seed: sharedWithBob, query: '/pipelines/x?pipeline=order-sync&uploader=bob' });
+    await ready(view);
+    const link = [...admin(view).querySelectorAll('a')].find((a) => a.textContent!.trim() === 'Bind a trigger')!;
+    expect(link.getAttribute('href')).toBe(
+      `/triggers/new?contentHash=${HASH}&pipeline=order-sync&uploader=bob`,
+    );
+  });
+
+  test('a trigger of the other uploader\'s version does not keep this one from being deleted, and is not named', async () => {
+    const view = await page({
+      seed: (b) => {
+        sharedWithBob(b);
+        b.triggers.seed({ name: 'adas', contentHash: HASH, uploader: 'ada', pipeline: 'order-other' });
+      },
+      query: '/pipelines/x?pipeline=order-sync&uploader=bob',
+    });
+    await ready(view);
+    button(admin(view), 'Delete this version').click();
+    await tick();
+
+    button(dialog(view), 'Delete the version').click();
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
+    expect(app.engine.backend.version(HASH, 'bob')).toBeUndefined();
   });
 });
 

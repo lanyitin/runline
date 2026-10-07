@@ -127,11 +127,11 @@
           </tr>
         </thead>
         <tbody>
-          {#each shown as definition (`${definition.contentHash}/${definition.name}`)}
+          {#each shown as definition (JSON.stringify([definition.contentHash, definition.uploader, definition.name]))}
             <tr>
               <td>
                 <div class="name">
-                  <Link href={pipelineHref(definition.contentHash, definition.name)}>
+                  <Link href={pipelineHref(definition.contentHash, definition.name, definition.uploader)}>
                     <PlainText value={definition.name} mono />
                   </Link>
                 </div>
@@ -143,9 +143,9 @@
               <td class="rl-nowrap"><Timestamp iso={definition.uploadedAt} /></td>
               <td><span class="allow-list rl-mono"><PlainText value={definition.allowListVersion} /></span></td>
               <td class="rl-nowrap">
-                <Link href={pipelineHref(definition.contentHash, definition.name)}>{i18n.t('pipelines.details')}</Link>
+                <Link href={pipelineHref(definition.contentHash, definition.name, definition.uploader)}>{i18n.t('pipelines.details')}</Link>
                 ·
-                <Link href={newRunHref(definition.contentHash, definition.name)}>{i18n.t('pipelines.run')}</Link>
+                <Link href={newRunHref(definition.contentHash, definition.name, {}, definition.uploader)}>{i18n.t('pipelines.run')}</Link>
               </td>
             </tr>
           {/each}

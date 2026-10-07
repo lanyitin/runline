@@ -53,9 +53,10 @@ describe('the page of a run', () => {
     expect(fact(t.view, 'Run ID')!.textContent).toContain(t.run.runId);
     expect(fact(t.view, 'Pipeline')!.textContent).toBe('order-sync');
     expect(fact(t.view, 'Pipeline')!.querySelector('a')!.getAttribute('href')).toBe(
-      `/pipelines/${HASH}?pipeline=order-sync`,
+      `/pipelines/${HASH}?pipeline=order-sync&uploader=ada`,
     );
     expect(fact(t.view, 'Version')!.textContent).toContain('ab12cd3');
+    expect(fact(t.view, 'Version')!.textContent).toContain('ada');
     expect(fact(t.view, 'Class')!.textContent).toBe('com.acme.OrderSync');
     expect(fact(t.view, 'Source')!.textContent).toContain('MANUAL');
     expect(fact(t.view, 'Source')!.textContent).toContain('ada');
@@ -94,8 +95,18 @@ describe('the page of a run', () => {
       (a) => a.textContent!.trim() === 'Run again',
     )!;
     expect(link.getAttribute('href')).toBe(
-      `/runs/new?contentHash=${HASH}&pipeline=order-sync&param.region=eu&param.batch=100`,
+      `/runs/new?contentHash=${HASH}&pipeline=order-sync&uploader=ada&param.region=eu&param.batch=100`,
     );
+  });
+
+  test("the links of a run lead to the very version it is of, whoever's it is", async () => {
+    const t = await begin({ run: { uploader: 'ada', state: 'SUCCEEDED' } });
+    await t.ready();
+    const hrefs = [...t.view.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.filter((h) => h.includes('contentHash') || h.startsWith('/pipelines/'))).toEqual(
+      expect.arrayContaining([expect.stringContaining('uploader=ada')]),
+    );
+    expect(hrefs.filter((h) => h.startsWith('/pipelines/') && !h.includes('uploader=ada'))).toEqual([]);
   });
 
   test('says in the words of the screen that the run is not there, or is not for the caller to see', async () => {

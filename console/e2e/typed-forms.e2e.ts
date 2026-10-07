@@ -128,7 +128,7 @@ async function signedIn(context: BrowserContext, who: { token: string }, path: s
 
 /** Opens the form to define a resource of [type] (its label), with a name. */
 async function defineForm(page: Page, type: string, name: string) {
-  await page.getByRole('button', { name: 'Define a resource' }).click();
+  await page.getByRole('button', { name: 'Define a resource' }).first().click();
   await dialog(page).locator('#resource-type').selectOption({ label: type });
   await dialog(page).locator('#resource-name').fill(name);
 }
@@ -410,7 +410,7 @@ describe('the forms in zh-TW, and for a developer', () => {
       const card = cardOf(page, name);
       await card.waitFor();
       expect(await card.locator('.type-usage').innerText()).toBe('使用中的連線：0 / 3');
-      await page.getByRole('button', { name: '定義資源' }).click();
+      await page.getByRole('button', { name: '定義資源' }).first().click();
       await dialog(page).locator('#resource-type').selectOption('jdbc-pool');
       expect(await dialog(page).locator('.pool-size').innerText()).toContain('連線池大小');
       await dialog(page).locator('#resource-type').selectOption('openai-compatible');

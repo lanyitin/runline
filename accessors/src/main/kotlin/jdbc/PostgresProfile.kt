@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.core.ResourceFailure
 import java.math.BigDecimal
+import java.net.SocketTimeoutException
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
@@ -70,8 +71,26 @@ object PostgresProfile : JdbcProfile {
 
   override fun classify(e: SQLException): Classified {
     val state = e.sqlState?.takeIf { STATE.matches(it) }
-    return Classified(ResourceFailure.SQL_ERROR, state)
+    val failure =
+        when {
+          // Connecting: nothing answered in time, or nothing answered at all.
+          state == "08001" && e.hasCause<SocketTimeoutException>() ->
+              ResourceFailure.CONNECT_TIMEOUT
+          // The account or the password is not accepted (class 28, "invalid authorization").
+          state != null && state.startsWith("28") -> ResourceFailure.DENIED
+          // Class 08 is "connection exception"; 53300 is too many connections, 57P01 to 57P03 is a
+          // server that is shutting down or not yet up.
+          state != null && state.startsWith("08") -> ResourceFailure.CONNECTION_FAILED
+          state == "53300" || state == "57P01" || state == "57P02" || state == "57P03" ->
+              ResourceFailure.CONNECTION_FAILED
+          state == null && e.hasCause<java.io.IOException>() -> ResourceFailure.CONNECTION_FAILED
+          else -> ResourceFailure.SQL_ERROR
+        }
+    return Classified(failure, state)
   }
+
+  private inline fun <reified T : Throwable> Throwable.hasCause(): Boolean =
+      generateSequence(this) { it.cause }.any { it is T }
 
   /** A name, an IPv4 number, or an IPv6 number in brackets; nothing that could say more. */
   private val HOST =

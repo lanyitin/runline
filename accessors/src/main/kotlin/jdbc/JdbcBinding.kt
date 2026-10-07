@@ -98,12 +98,19 @@ internal constructor(
     }
   }
 
-  private fun connect(): Connection =
-      try {
-        pool.borrow()
-      } catch (e: SQLException) {
-        throw failure(e)
-      }
+  private fun connect(): Connection {
+    if (credential is JdbcCredential.Unavailable) {
+      observer.acquireFailed(resource, ResourceFailure.SECRET_UNAVAILABLE)
+      throw ResourceOperationFailure(ResourceFailure.SECRET_UNAVAILABLE)
+    }
+    try {
+      return pool.borrow()
+    } catch (e: SQLException) {
+      val failure = failure(e)
+      observer.acquireFailed(resource, failure.failure)
+      throw failure
+    }
+  }
 
   private fun begin(): Any? {
     transactionLock.withLock {
@@ -150,7 +157,7 @@ internal constructor(
     val classified = profile.classify(e)
     return ResourceOperationFailure(
         classified.failure,
-        e,
+        JdbcFailureCause.of(classified.failure, e, (credential as? JdbcCredential.Password)?.value),
         sqlState = classified.sqlState,
         withErrorId = true,
     )
@@ -210,5 +217,29 @@ internal constructor(
     const val BEGIN = "jdbc.begin"
     const val COMMIT = "jdbc.commit"
     const val ROLLBACK = "jdbc.rollback"
+  }
+}
+
+/**
+ * What the host's log is given for a failure of the database. A message of the database or the
+ * driver can hold the address, the account, a statement or a value, so for a refusal of a statement
+ * only the category, the SQLState and the kind of exception are kept; for a failure that holds no
+ * statement (connecting, logging in, a timeout) the driver's words are kept too, with the password
+ * taken out, because they are what a failure to connect is diagnosed from. The exception itself is
+ * not chained: its message is in every printout of the chain.
+ */
+internal class JdbcFailureCause private constructor(message: String) : RuntimeException(message) {
+  companion object {
+    private const val LONGEST_MESSAGE = 500
+
+    fun of(failure: ResourceFailure, e: SQLException, password: String?): Throwable {
+      val said =
+          if (failure == ResourceFailure.SQL_ERROR) ""
+          else "; the driver said: " + masked(e.message.orEmpty(), password).take(LONGEST_MESSAGE)
+      return JdbcFailureCause("$failure sqlState=${e.sqlState} exception=${e.javaClass.name}$said")
+    }
+
+    private fun masked(text: String, password: String?): String =
+        if (password.isNullOrEmpty()) text else text.replace(password, "***")
   }
 }

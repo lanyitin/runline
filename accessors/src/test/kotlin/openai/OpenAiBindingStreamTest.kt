@@ -314,4 +314,39 @@ class OpenAiBindingStreamTest {
     assertEquals(200, callWithQuotaWait(b, 200)["status"], "the share is free again")
     assertEquals(ResourceFailure.TOTAL_TIMEOUT, failure { next(b, opened) }.failure)
   }
+
+  @Test
+  fun `a pull that races an abort is never mistaken for the normal end of the stream`() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      while (true) response.event("""{"n":1}""")
+      @Suppress("UNREACHABLE_CODE") true
+    }
+    val pulling = Executors.newCachedThreadPool()
+    try {
+      repeat(40) {
+        val b = binding()
+        val opened = open(b)
+        val ready = java.util.concurrent.CountDownLatch(1)
+        val result =
+            pulling.submit<String> {
+              ready.countDown()
+              while (true) {
+                try {
+                  if (next(b, opened) == null) return@submit "null"
+                } catch (e: ResourceOperationFailure) {
+                  return@submit e.failure.name
+                }
+              }
+              @Suppress("UNREACHABLE_CODE") ""
+            }
+        ready.await()
+        Thread.sleep((it % 5).toLong())
+        b.abort()
+        assertEquals("CANCELLED", result.get(5, TimeUnit.SECONDS), "run $it")
+      }
+    } finally {
+      pulling.shutdownNow()
+    }
+  }
 }

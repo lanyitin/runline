@@ -24,6 +24,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -106,14 +107,14 @@ class OpenAiBinding(
       private val endpoint: String,
       private val events: ServerSentEvents,
   ) {
-    private val ended = AtomicBoolean()
-
-    /** Why the stream ended, when it did not end well: what every later pull fails with. */
-    @Volatile private var failure: ResourceFailure? = null
+    /** Set once, when the stream is over, with why: what every later pull comes to. */
+    private val over = AtomicReference<Ending>()
 
     fun next(): String? {
-      failure?.let { throw ResourceOperationFailure(it) }
-      if (ended.get()) return null
+      over.get()?.let { ending ->
+        ending.failure?.let { throw ResourceOperationFailure(it) }
+        return null
+      }
       val data =
           try {
             stopped(call)?.let { throw it }
@@ -131,8 +132,7 @@ class OpenAiBinding(
 
     /** The stream is over, whichever way: the connection goes, the share is given back. */
     fun end(reason: ResourceFailure?) {
-      if (!ended.compareAndSet(false, true)) return
-      failure = reason
+      if (!over.compareAndSet(null, Ending(reason))) return
       runCatching { call.stream?.close() }
       call.release()
       report.finish(endpoint, reason, null)
@@ -592,3 +592,6 @@ class OpenAiBinding(
             .apply { removeOnCancelPolicy = true }
   }
 }
+
+/** Why a stream is over: null when it ended well. */
+private class Ending(val failure: ResourceFailure?)

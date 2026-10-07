@@ -158,10 +158,18 @@ class PostgresAllowListStore(private val dataSource: DataSource) : AllowListStor
 
     override fun artifacts(): List<ArtifactRef> =
         connection
-            .prepareStatement("SELECT id, content_hash FROM pipeline_artifact ORDER BY id")
+            .prepareStatement(
+                "SELECT id, content_hash, uploaded_by FROM pipeline_artifact ORDER BY id"
+            )
             .use {
               it.executeQuery().use { rs ->
-                rs.all { ArtifactRef(rs.getLong("id"), rs.getString("content_hash")) }
+                rs.all {
+                  ArtifactRef(
+                      rs.getLong("id"),
+                      rs.getString("content_hash"),
+                      rs.getString("uploaded_by"),
+                  )
+                }
               }
             }
 

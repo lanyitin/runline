@@ -76,6 +76,7 @@ data class WaiterDoc(
 @Serializable
 data class DeclaringDefinitionDoc(
     val contentHash: String,
+    val uploader: String,
     val pipeline: String,
     val declaredType: String?,
     val triggers: Int,
@@ -205,7 +206,13 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
               declarations.definitions.size,
               declarations.triggerCount,
               declarations.definitions.map {
-                DeclaringDefinitionDoc(it.contentHash, it.pipeline, it.declaredType, it.triggers)
+                DeclaringDefinitionDoc(
+                    it.contentHash,
+                    it.uploader,
+                    it.pipeline,
+                    it.declaredType,
+                    it.triggers,
+                )
               },
           ),
   )

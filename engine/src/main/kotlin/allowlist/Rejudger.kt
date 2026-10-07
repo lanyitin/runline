@@ -42,6 +42,7 @@ internal class Rejudger(private val analyzer: SafetyAnalyzer, private val scratc
           changes +=
               VerdictChange(
                   artifact.contentHash,
+                  artifact.uploader,
                   definition.name,
                   definition.className,
                   definition.verdict,

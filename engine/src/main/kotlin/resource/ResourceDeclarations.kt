@@ -3,6 +3,8 @@ package dev.lawlan.runline.engine.resource
 /** A pipeline definition that declares a shared resource, and what is bound to it. */
 data class DeclaringDefinition(
     val contentHash: String,
+    /** Whose version of the content declares it (ADR-020). */
+    val uploader: String,
     val pipeline: String,
     /** The type the definition expects of the resource; null when it declares the name only. */
     val declaredType: String?,

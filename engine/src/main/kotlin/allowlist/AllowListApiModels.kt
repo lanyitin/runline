@@ -59,6 +59,7 @@ data class VersionResponse(
 @Serializable
 data class VerdictChangeResponse(
     val contentHash: String,
+    val uploader: String,
     val pipeline: String,
     val className: String,
     val from: String,
@@ -145,6 +146,7 @@ fun Impact.toResponse() =
         changes.map {
           VerdictChangeResponse(
               it.contentHash,
+              it.uploader,
               it.pipeline,
               it.className,
               it.from.name,

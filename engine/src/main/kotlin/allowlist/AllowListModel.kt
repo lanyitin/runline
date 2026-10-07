@@ -78,8 +78,8 @@ data class AllowListSnapshot(
     get() = version.version
 }
 
-/** An uploaded jar, as far as judging it again needs. */
-data class ArtifactRef(val id: Long, val contentHash: String)
+/** A stored version (a jar and its uploader), as far as judging it again needs. */
+data class ArtifactRef(val id: Long, val contentHash: String, val uploader: String)
 
 /** A definition stored with a verdict, which a new allow list may change. */
 data class JudgedDefinition(

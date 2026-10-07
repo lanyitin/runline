@@ -71,15 +71,15 @@ class PostgresResourceDeclarationStoreTest {
 
     assertEquals(
         setOf(
-            DeclaringDefinition(v1, "nightly", null, 0),
-            DeclaringDefinition(v2, "nightly", "file", 0),
+            DeclaringDefinition(v1, "alice", "nightly", null, 0),
+            DeclaringDefinition(v2, "alice", "nightly", "file", 0),
         ),
         declared.getValue("lemonade").definitions.toSet(),
     )
     assertEquals(
         setOf(
-            DeclaringDefinition(v2, "nightly", null, 0),
-            DeclaringDefinition(other, "other", null, 0),
+            DeclaringDefinition(v2, "alice", "nightly", null, 0),
+            DeclaringDefinition(other, "alice", "other", null, 0),
         ),
         declared.getValue("gpu").definitions.toSet(),
     )

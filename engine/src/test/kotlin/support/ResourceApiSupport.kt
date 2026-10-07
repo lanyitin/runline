@@ -96,7 +96,16 @@ abstract class ResourceApiSupport {
       token: String = TestTokens.ALICE,
       /** Hosts the pipeline says it may connect to (`network`); none by default. */
       network: List<String> = emptyList(),
-  ): HttpResponse {
+  ): HttpResponse = uploadBytes(jarBytes(name, names, types, body, network), token)
+
+  /** The bytes of a compiled pipeline, to upload more than once (as different uploaders). */
+  protected fun jarBytes(
+      name: String,
+      names: List<String> = emptyList(),
+      types: Map<String, String> = emptyMap(),
+      body: String = "",
+      network: List<String> = emptyList(),
+  ): ByteArray {
     val fqcn = "demo.R${counter++}"
     var declaration =
         RunHarness.DEFAULT_DECLARATION.replace(
@@ -120,12 +129,18 @@ abstract class ResourceApiSupport {
             "j-${System.nanoTime()}.jar",
             mapOf(fqcn to PipelineJars.pipeline(fqcn, name, declaration, "", body)),
         )
-    return client.post("/api/v1/artifacts") {
-      bearer(token)()
-      contentType(ContentType.Application.OctetStream)
-      setBody(Files.readAllBytes(jar))
-    }
+    return Files.readAllBytes(jar)
   }
+
+  protected suspend fun ApplicationTestBuilder.uploadBytes(
+      bytes: ByteArray,
+      token: String = TestTokens.ALICE,
+  ): HttpResponse =
+      client.post("/api/v1/artifacts") {
+        bearer(token)()
+        contentType(ContentType.Application.OctetStream)
+        setBody(bytes)
+      }
 
   protected suspend fun ApplicationTestBuilder.uploaded(
       name: String,

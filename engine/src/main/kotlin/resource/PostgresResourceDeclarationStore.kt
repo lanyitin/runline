@@ -18,6 +18,7 @@ class PostgresResourceDeclarationStore(private val dataSource: DataSource) :
                 .add(
                     DeclaringDefinition(
                         rows.getString("content_hash"),
+                        rows.getString("uploaded_by"),
                         rows.getString("pipeline"),
                         rows.getString("declared_type"),
                         rows.getInt("triggers"),
@@ -33,12 +34,12 @@ class PostgresResourceDeclarationStore(private val dataSource: DataSource) :
   private companion object {
     // jsonb_exists is the function behind the `?` operator, which a JDBC statement cannot carry.
     const val QUERY =
-        "SELECT r.name AS resource, a.content_hash, d.name AS pipeline, " +
+        "SELECT r.name AS resource, a.content_hash, a.uploaded_by, d.name AS pipeline, " +
             "d.metadata -> 'resourceTypes' ->> r.name AS declared_type, " +
             "(SELECT count(*) FROM pipeline_trigger t WHERE t.definition_id = d.id) AS triggers " +
             "FROM unnest(?::text[]) AS r(name) " +
             "JOIN pipeline_definition d ON jsonb_exists(d.metadata -> 'resources', r.name) " +
             "JOIN pipeline_artifact a ON a.id = d.artifact_id " +
-            "ORDER BY r.name, a.uploaded_at, a.content_hash, d.name"
+            "ORDER BY r.name, a.uploaded_at, a.content_hash, a.uploaded_by, d.name"
   }
 }

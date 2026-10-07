@@ -30,6 +30,8 @@ enum class ChangeMode {
 /** A stored definition whose verdict a change flips. */
 data class VerdictChange(
     val contentHash: String,
+    /** Whose version of the content; each version is judged and reported on its own (ADR-020). */
+    val uploader: String,
     val pipeline: String,
     val className: String,
     val from: Verdict,

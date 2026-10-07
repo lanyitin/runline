@@ -277,6 +277,36 @@ class ResourceTypeDeclarationApiTest : ResourceApiSupport() {
       }
 
   @Test
+  fun `the same bytes uploaded by two people are two declaring definitions, each with its uploader and triggers`() =
+      testApplication {
+        engine()
+        define("lemonade")
+        val bytes = jarBytes("shared", listOf("lemonade"))
+        val hash = uploadBytes(bytes, TestTokens.ALICE).json().text("contentHash")
+        uploadBytes(bytes, TestTokens.BOB)
+        val trigger =
+            client.post("/api/v1/triggers") {
+              bearer(TestTokens.ROOT)()
+              contentType(ContentType.Application.Json)
+              setBody(
+                  """{"name":"nightly","kind":"cron","contentHash":"$hash","uploader":"bob",""" +
+                      """"pipeline":"shared","cron":"0 2 * * *","timeZone":"UTC"}"""
+              )
+            }
+        assertEquals(HttpStatusCode.Created, trigger.status, trigger.bodyAsText())
+
+        val declaredBy = resource("lemonade")["declaredBy"]!!.jsonObject
+
+        assertEquals(2, declaredBy["count"]!!.jsonPrimitive.int)
+        assertEquals(1, declaredBy["triggers"]!!.jsonPrimitive.int)
+        val byUploader = declaredBy.array("definitions").associateBy { it.text("uploader") }
+        assertEquals(setOf("alice", "bob"), byUploader.keys)
+        assertEquals(0, byUploader.getValue("alice")["triggers"]!!.jsonPrimitive.int)
+        assertEquals(1, byUploader.getValue("bob")["triggers"]!!.jsonPrimitive.int)
+        assertEquals(setOf(hash), byUploader.values.map { it.text("contentHash") }.toSet())
+      }
+
+  @Test
   fun `only an administrator can see who declares a resource`() = testApplication {
     engine()
     define("lemonade")

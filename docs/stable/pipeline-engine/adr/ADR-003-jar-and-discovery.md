@@ -1,6 +1,6 @@
 # ADR-003 Jar 發佈、宣告式 metadata 與探索
 
-狀態：已核可（2026-10-03）。回答：pipeline 如何發佈與被找到。
+狀態：已核可（2026-10-03）；版本的識別方式由 [ADR-020](ADR-020-per-uploader-artifact-versions.md) 修訂為內容雜湊加上傳者。回答：pipeline 如何發佈與被找到。
 
 ## 背景
 Pipeline 以 jar 發佈，Engine 要以反射或類似機制找出可執行的 pipeline，並在上傳時就取得 metadata 與安全判定。

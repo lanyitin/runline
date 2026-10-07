@@ -334,4 +334,43 @@ class JdbcResourceRunTest {
       )
     }
   }
+
+  @Test
+  fun `a pipeline jar that brings a driver of its own does not change the driver the resource uses`() {
+    val h = harness()
+    define(h)
+    // A class with the name of the Engine's driver, in the pipeline's jar, which says when it is
+    // used for anything but being loaded.
+    val impostor =
+        """
+        package org.postgresql;
+        public class Driver {
+          public static final String WHO = "the pipeline's own";
+          public java.sql.Connection connect(String url, java.util.Properties info) {
+            throw new IllegalStateException("the pipeline's own driver was asked to connect");
+          }
+        }
+        """
+            .trimIndent()
+    val hash =
+        h.upload(
+            "impostor",
+            """
+            String own;
+            try { own = String.valueOf(Class.forName("org.postgresql.Driver").getField("WHO").get(null)); }
+            catch (Exception e) { own = "not found: " + e; }
+            JdbcAccessor db = context.getAccessors().jdbcPool("db");
+            String via = String.valueOf(db.query("SELECT current_user").getRows());
+            ${write("answer", "own + \"|\" + via")}
+            """
+                .trimIndent(),
+            declaration = declaration,
+            extraClasses = mapOf("org.postgresql.Driver" to impostor),
+        )
+
+    val run = h.awaitEnd(h.start(hash, "impostor"))
+
+    assertEquals(RunState.SUCCEEDED, run.state, run.failure?.message)
+    assertEquals("the pipeline's own|[[$role]]", h.result("impostor", "answer"))
+  }
 }

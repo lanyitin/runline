@@ -170,13 +170,16 @@ class RunHarness(
       uploader: String = "alice",
       members: String = "",
       declaration: String = DEFAULT_DECLARATION,
+      /** More classes of the jar, by their full names, as Java source. */
+      extraClasses: Map<String, String> = emptyMap(),
   ): String {
     val fqcn = "demo.P${counter++}"
     val jar =
         PipelineJars.build(
             dir,
             "$name-${System.nanoTime()}.jar",
-            mapOf(fqcn to PipelineJars.pipeline(fqcn, name, declaration, members, body)),
+            mapOf(fqcn to PipelineJars.pipeline(fqcn, name, declaration, members, body)) +
+                extraClasses,
         )
     val result =
         staging.stage(Files.newInputStream(jar), Long.MAX_VALUE).use {

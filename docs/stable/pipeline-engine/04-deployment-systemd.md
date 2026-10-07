@@ -37,7 +37,7 @@
 
 ## 金鑰庫（機密與憑證）
 
-金鑰庫內容與維運規則（機密限可列印 ASCII、以密碼檔參數操作、更新為先刪後建加原子替換、憑證項目不受 ASCII 限制）見 [04](04-deployment.md)「組態與密鑰」與 [ADR-019](adr/ADR-019-typed-shared-resources.md)；掛載與維運步驟由 [WI-42](work-items/WI-42-keystore-deployment.md) 落入本文。
+金鑰庫內容與維運規則（機密限可列印 ASCII、以密碼檔參數操作、更新為先刪後建加原子替換、憑證項目不受 ASCII 限制）見 [04](04-deployment.md)「組態與密鑰」與 [ADR-019](adr/ADR-019-typed-shared-resources.md)；Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD_FILE`、`RUNLINE_KEYSTORE_PASSWORD`）與失敗類別見 [04](04-deployment.md)「組態與密鑰」；掛載與維運步驟由 [WI-42](work-items/WI-42-keystore-deployment.md) 落入本文，目前 `deploy/` 的檔案尚未掛載金鑰庫（不設定即沒有金鑰庫）。
 
 ## 已接受的限度
 

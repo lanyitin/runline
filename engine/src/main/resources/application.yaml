@@ -28,6 +28,7 @@ ktor:
       - dev.lawlan.runline.engine.ArtifactRoutesKt.configureArtifactRoutes
       - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
       - dev.lawlan.runline.engine.ResourceRoutesKt.configureResourceRoutes
+      - dev.lawlan.runline.engine.SecretRoutesKt.configureSecretRoutes
       - dev.lawlan.runline.engine.AllowListRoutesKt.configureAllowListRoutes
       - dev.lawlan.runline.engine.TriggerRoutesKt.configureTriggerRoutes
       - dev.lawlan.runline.engine.WebhookRoutesKt.configureWebhookRoutes
@@ -133,3 +134,16 @@ resources:
   root: "$RUNLINE_RESOURCE_ROOT:"
   checkTimeoutSeconds: "$RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS:"
   maxReadBytes: "$RUNLINE_RESOURCE_MAX_READ_BYTES:"
+
+# Secrets (WI-41, ADR-019): the keystore the Engine opens read-only. RUNLINE_KEYSTORE_PATH is the
+# PKCS12 file; its password is given by RUNLINE_KEYSTORE_PASSWORD_FILE (the path of a file whose
+# first line is the password, for example a Docker secret; preferred, because the environment is
+# easily carried into subprocesses and diagnostics) or by RUNLINE_KEYSTORE_PASSWORD; both set is a
+# configuration error, and so is a path without a password or a password without a path. All
+# three unset: no keystore, the Engine starts and resources that name an alias cannot be used. The
+# file must not be under the shared directory, a run directory or RUNLINE_RESOURCE_ROOT. The
+# keystore is managed with the JDK's keytool, never through the API (see the deployment guides).
+secrets:
+  keystorePath: "$RUNLINE_KEYSTORE_PATH:"
+  passwordFile: "$RUNLINE_KEYSTORE_PASSWORD_FILE:"
+  password: "$RUNLINE_KEYSTORE_PASSWORD:"

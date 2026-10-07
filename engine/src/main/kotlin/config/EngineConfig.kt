@@ -5,6 +5,7 @@ import dev.lawlan.runline.analyzer.AllowListText
 import dev.lawlan.runline.analyzer.DefaultAllowList
 import dev.lawlan.runline.engine.artifact.JarLimits
 import dev.lawlan.runline.engine.auth.Role
+import dev.lawlan.runline.engine.secret.SecretValue
 import dev.lawlan.runline.runner.WorkspaceConfig
 import io.ktor.server.config.*
 import java.nio.file.Path
@@ -87,6 +88,12 @@ data class ResourceSettings(
     val maxReadBytes: Long,
 )
 
+/**
+ * Where the Engine's secrets are (WI-41, ADR-019 decision 6): a PKCS12 [keystore] and the
+ * [password] that opens it.
+ */
+data class SecretSettings(val keystore: Path, val password: SecretValue)
+
 /** How long run, log and trigger records are kept, and how the clean-up runs (WI-20). */
 data class RetentionSettings(
     /** A run that has ended is removed, with its log, this long after it ended. */
@@ -144,6 +151,8 @@ data class EngineConfig(
     val retention: RetentionSettings,
     val telemetry: TelemetryConfig,
     val resources: ResourceSettings,
+    /** Null when the Engine was given no keystore. */
+    val secrets: SecretSettings? = null,
 ) {
   companion object {
     private const val DEFAULT_MAX_UPLOAD_BYTES = 50L * 1024 * 1024
@@ -275,6 +284,7 @@ data class EngineConfig(
               optionalNumber("resources.checkTimeoutSeconds", min = 1)
                   ?: DEFAULT_CHECK_TIMEOUT_SECONDS
           )
+      val secrets = secretSettings(::text, problems)
       val runtimeDir = required("runs.runtimeDir")
       val runs =
           RunSettings(
@@ -301,6 +311,20 @@ data class EngineConfig(
           problems += "resources.root must not be, contain or lie inside $key"
         }
       }
+      // The keystore is none of those places either: they are where pipelines and files of
+      // resources live, and the keystore must stay out of reach of both.
+      if (secrets != null) {
+        for ((key, dir) in
+            listOf(
+                "workspace.sharedRoot" to sharedRoot,
+                "workspace.runRoot" to runRoot,
+                "resources.root" to resourceRoot,
+            )) {
+          if (lieInside(secrets.keystore.toString(), dir)) {
+            problems += "secrets.keystorePath must not lie inside $key"
+          }
+        }
+      }
       if (problems.isNotEmpty()) {
         throw ConfigurationException(invalid(problems))
       }
@@ -314,8 +338,50 @@ data class EngineConfig(
           retention,
           TelemetryConfig(text("telemetry.serviceName") ?: DEFAULT_SERVICE_NAME),
           ResourceSettings(Path.of(resourceRoot), checkTimeout, maxReadBytes),
+          secrets,
       )
     }
+
+    /**
+     * The keystore and where its password comes from (WI-41): a password file, which is preferred
+     * because the platform keeps its content out of the environment, or an environment variable,
+     * not both. Null when there is no keystore; nothing here ever says a path or a password.
+     */
+    private fun secretSettings(
+        text: (String) -> String?,
+        problems: MutableList<String>,
+    ): SecretSettings? {
+      val keystore = text("secrets.keystorePath")
+      val passwordFile = text("secrets.passwordFile")
+      val password = text("secrets.password")
+      if (keystore == null && passwordFile == null && password == null) return null
+      if (keystore == null)
+          problems += "secrets.keystorePath is required when a keystore password is given"
+      if (passwordFile != null && password != null) {
+        problems += "secrets.passwordFile and secrets.password must not both be set"
+        return null
+      }
+      if (passwordFile == null && password == null) {
+        problems += "secrets.passwordFile or secrets.password is required when a keystore is given"
+        return null
+      }
+      val value =
+          password
+              ?: try {
+                java.nio.file.Files.newBufferedReader(Path.of(passwordFile!!))
+                    .use { it.readLine() }
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: null.also { problems += "secrets.passwordFile is empty" }
+              } catch (e: java.io.IOException) {
+                null.also { problems += "secrets.passwordFile cannot be read" }
+              }
+      if (keystore == null || value == null) return null
+      return SecretSettings(Path.of(keystore), SecretValue(value))
+    }
+
+    /** Whether [file] is [directory] or below it, links resolved as far as they exist. */
+    private fun lieInside(file: String, directory: String): Boolean =
+        directory.isNotBlank() && canonical(file).startsWith(canonical(directory))
 
     /**
      * Whether two directories are the same or one holds the other, links resolved if they exist.

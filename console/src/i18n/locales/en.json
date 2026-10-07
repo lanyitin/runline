@@ -147,6 +147,8 @@
   "error.resource_not_found": "No such shared resource.",
   "error.resources_unavailable": "A shared resource the pipeline needs is not defined or is disabled.",
   "error.run_not_found": "No such run, or it is not yours to see.",
+  "error.secret_store_not_configured": "The Engine has no keystore configured, so there are no secrets to show or reload.",
+  "error.secret_store_unreadable": "The keystore could not be read, so the secrets in memory are unchanged.",
   "error.shutting_down": "The Engine is shutting down. Try again in a moment.",
   "error.too_large": "The file is larger than the upload limit.",
   "error.trigger_exists": "A trigger of this name exists already.",

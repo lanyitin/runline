@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.engine.secret.SecretMasking
 import java.time.Clock
 import java.util.UUID
 import org.slf4j.LoggerFactory
@@ -25,9 +26,11 @@ class RunProgress(
   fun finish(
       id: UUID,
       state: RunState,
-      failure: FailureInfo? = null,
+      reported: FailureInfo? = null,
       residualThreads: List<String> = emptyList(),
   ) {
+    // What a service echoed back into an exception message must not be kept or logged as it came.
+    val failure = reported?.masked()
     if (runs.finish(id, state, clock.instant(), failure)) {
       if (failure == null) log.info("Run {} ended {}", id, state)
       else log.warn("Run {} ended {}: {}: {}", id, state, failure.type, failure.message)
@@ -38,3 +41,6 @@ class RunProgress(
     }
   }
 }
+
+private fun FailureInfo.masked() =
+    FailureInfo(type, message?.let(SecretMasking::mask), SecretMasking.mask(trace))

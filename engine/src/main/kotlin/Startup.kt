@@ -4,6 +4,7 @@ import dev.lawlan.runline.engine.allowlist.AllowListAdmin
 import dev.lawlan.runline.engine.config.EngineConfig
 import dev.lawlan.runline.engine.config.RunRuntime
 import dev.lawlan.runline.engine.db.DatabaseMigrator
+import dev.lawlan.runline.engine.secret.SecretStore
 import io.ktor.server.application.*
 import io.ktor.server.plugins.di.*
 
@@ -19,6 +20,10 @@ fun Application.configureStartupChecks() {
   // The first start gives the allow list its initial content; later starts leave it alone.
   val admin: AllowListAdmin by dependencies
   admin.initialize(config.initialAllowList)
+  // A keystore that is configured and cannot be opened stops the start (WI-41); the category of the
+  // failure is all it says. The store is opened when it is first used, which is here.
+  val secrets: SecretStore by dependencies
+  secrets.entries()
   // A run's class loader must get the Runner, core and Kotlin jars and nothing of the Engine.
   RunRuntime.fromDirectory(config.runs.runtimeDir)
 }

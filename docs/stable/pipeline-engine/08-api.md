@@ -207,7 +207,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱，另可宣告期望的型別；規則見 [ADR-007](adr/ADR-007-shared-resources.md) 與 [ADR-019](adr/ADR-019-typed-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
-資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別是 `counter`（只有名稱與容量，也就是資源原本的語意）與 `file`（Engine 主機上資源根目錄之下的一個檔案）；其餘兩種在各自的工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。機密相關的端點由後續工作項寫入本文。
+資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別是 `counter`（只有名稱與容量，也就是資源原本的語意）與 `file`（Engine 主機上資源根目錄之下的一個檔案）；其餘兩種在各自的工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。機密的清單與重載端點見下一節「機密（管理員）」；資源對別名的解析與狀態（`not_set`、`found`、`missing`、`invalid_secret`）由接受別名的型別在其工作項寫入本文。
 
 資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，沒有時為 `null`；機密值不會出現在任何回應）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
@@ -280,6 +280,39 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 認證：Bearer（admin）
 
 強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
+
+## 機密（管理員）
+
+機密保存在 Engine 唯讀開啟的 PKCS12 金鑰庫，由維運以 JDK 的金鑰庫工具管理；API 只認別名，**不接受也不回傳任何機密值**，也不回傳項目內容與金鑰庫密碼（[ADR-019](adr/ADR-019-typed-shared-resources.md) 第 6 點、[WI-41](work-items/WI-41-keystore-secrets.md)）。別名一律以小寫（`Locale.ROOT`）正規化：請求與回應中的別名都是正規化後的形式，資源引用別名時大小寫不同視為同一個。
+
+別名的狀態（`status`）：
+
+| `status` | 意義 |
+|---|---|
+| `found` | 別名存在且可使用 |
+| `invalid_secret` | 機密項目的值含非可列印 ASCII 字元（已損毀，或違反機密字元集），Engine 拒絕使用它且不輸出值；請維運刪除後重新匯入 |
+
+項目類型（`type`）：`secret`（機密）、`trusted_certificate`（受信任憑證）、`private_key`（私鑰與憑證鏈）。後兩種的資源使用由 [WI-52](work-items/WI-52-tls-trust-and-mtls.md) 驗證。其他類型的項目被忽略（記錄於 log），不出現在清單。
+
+### `GET /api/v1/secrets`
+
+認證：Bearer（admin）
+
+列出金鑰庫的別名。200 本文 `{"secrets": [...]}`，每項 `{alias, type, status, usedBy}`：`usedBy` 為引用該別名的資源名稱（排序；沒有時為 `[]`）。409 `secret_store_not_configured`：Engine 沒有組態金鑰庫。開發人員得到 403，沒有 token 得到 401。
+
+### `POST /api/v1/secrets/reload`
+
+認證：Bearer（admin）
+
+整體重新讀取金鑰庫檔案（不在檔案變動時自動重載，生效時點由管理員決定）。200 本文 `{"aliases": 3, "changed": [{"alias": "...", "usedBy": [...]}]}`：`aliases` 為重載後的別名數；`changed` 為新增、移除或內容有變更的別名（依別名排序）與引用它們的資源，內容是否有變更以內部指紋判斷，不輸出任何值。重載後，內容有變的別名其引用資源之後被取得的 run 使用新機密，進行中的 run 不受影響。
+
+| 狀態 | 意義 |
+|---|---|
+| 200 | 已重載 |
+| 409 `secret_store_not_configured` | Engine 沒有組態金鑰庫 |
+| 422 `secret_store_unreadable` | 金鑰庫無法讀取，記憶體中的內容維持原狀；本文多一個 `problem`，為失敗類別：`file_missing`（檔案缺失）、`wrong_password`（密碼錯誤）、`corrupt`（檔案毀損或截斷）、`wrong_format`（格式不符：不是 PKCS12，例如 JKS、JCEKS 或其他檔案）、`unreadable`（其餘無法開啟）。不含路徑、密碼與例外內容 |
+
+重載記錄管理員名稱與結果類別於 log，並計入 metric `runline.secrets.reloads`（標籤只有 `result`：`ok` 或失敗類別）。
 
 ## 白名單（管理員）
 

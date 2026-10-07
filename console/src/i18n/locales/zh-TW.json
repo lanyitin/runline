@@ -147,6 +147,8 @@
   "error.resource_not_found": "沒有這個共享資源。",
   "error.resources_unavailable": "pipeline 需要的共享資源尚未定義或已停用。",
   "error.run_not_found": "沒有這個 run，或你無權查看。",
+  "error.secret_store_not_configured": "Engine 沒有組態金鑰庫，沒有機密可顯示或重載。",
+  "error.secret_store_unreadable": "金鑰庫無法讀取，記憶體中的機密維持原狀。",
   "error.shutting_down": "Engine 正在關閉，請稍後再試。",
   "error.too_large": "檔案超過上傳大小上限。",
   "error.trigger_exists": "已有同名的 trigger。",

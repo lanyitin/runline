@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.packaged
 
 import dev.lawlan.runline.engine.config.DatabaseConfig
+import dev.lawlan.runline.engine.support.Keystores
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.PostgresTestContainer
@@ -829,6 +830,80 @@ class PackagedEngineTest {
 
     assertNotEquals(0, process.awaitExit(TestTimeouts.processExit), output("engine.log"))
     assertTrue(output("engine.log").contains("runs.maxConcurrent"), output("engine.log"))
+  }
+
+  @Test
+  fun `the packaged Engine opens its keystore, lists the aliases and masks a secret a run echoes`() {
+    val database = PostgresTestContainer.newDatabase()
+    migrate(database, dist.resolve("run-runtime"))
+    val keystores = Keystores(Files.createTempDirectory(work, "keystore"))
+    val file =
+        keystores.pkcs12(
+            "engine.p12",
+            mapOf("Api-Key" to "marker-packaged-key-31"),
+            "marker-packaged-storepass-31",
+        )
+    val passwordFile = keystores.passwordFile("marker-packaged-storepass-31", "engine.pw")
+    startEngine(
+        database,
+        dist.resolve("run-runtime"),
+        mapOf(
+            "RUNLINE_KEYSTORE_PATH" to file.toString(),
+            "RUNLINE_KEYSTORE_PASSWORD_FILE" to passwordFile.toString(),
+        ),
+    )
+
+    val listed = get("/api/v1/secrets", ROOT)
+    assertEquals(200, listed.statusCode(), listed.body())
+    assertEquals(
+        listOf("api-key"),
+        json(listed)["secrets"]!!.jsonArray.map { it.jsonObject["alias"]!!.jsonPrimitive.content },
+    )
+    // A pipeline that fails with the key in its message, as a service that echoes it would make it.
+    val runId =
+        uploadAndRun(
+            "echo",
+            """throw new IllegalStateException("key marker-packaged-key-31 refused");""",
+        )
+    val ended = awaitState(runId, "FAILED")
+
+    assertEquals(
+        "key *** refused",
+        ended["failure"]!!.jsonObject["message"]!!.jsonPrimitive.content,
+    )
+    for (said in listOf(listed.body(), ended.toString(), output("engine.log"))) {
+      assertFalse(said.contains("marker-packaged-key-31"), said)
+      assertFalse(said.contains("marker-packaged-storepass-31"), said)
+    }
+    assertTrue(output("engine.log").contains("key *** refused"), "the Engine's own log is masked")
+  }
+
+  @Test
+  fun `the packaged Engine exits with a non-zero code and a category when the keystore password is wrong`() {
+    val database = PostgresTestContainer.newDatabase()
+    migrate(database, dist.resolve("run-runtime"))
+    val keystores = Keystores(Files.createTempDirectory(work, "keystore"))
+    val file = keystores.pkcs12("engine.p12", mapOf("a" to "value"))
+    val process =
+        launch(
+            "the Engine with a wrong keystore password",
+            environment(
+                database,
+                dist.resolve("run-runtime"),
+                mapOf(
+                    "RUNLINE_KEYSTORE_PATH" to file.toString(),
+                    "RUNLINE_KEYSTORE_PASSWORD" to "marker-wrong-password-32",
+                ),
+            ),
+            "-jar",
+            dist.resolve("engine.jar").toString(),
+            log = "engine.log",
+        )
+
+    assertNotEquals(0, process.awaitExit(TestTimeouts.processExit), output("engine.log"))
+    assertTrue(output("engine.log").contains("wrong_password"), output("engine.log"))
+    assertFalse(output("engine.log").contains("marker-wrong-password-32"), output("engine.log"))
+    assertFalse(output("engine.log").contains(file.toString()), output("engine.log"))
   }
 
   /** The self-check command of the packaged jar, as a container runs it: exit code and output. */

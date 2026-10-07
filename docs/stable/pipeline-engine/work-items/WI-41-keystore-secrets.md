@@ -1,6 +1,6 @@
 # WI-41 金鑰庫機密機制
 
-本文回答：Engine 如何從 PKCS12 金鑰庫唯讀載入機密、以別名被資源引用、重載與保證機密不外洩。狀態：已核可（2026-10-06）。相依：WI-40、WI-43（資源根目錄的組態）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 6 點。
+本文回答：Engine 如何從 PKCS12 金鑰庫唯讀載入機密、以別名被資源引用、重載與保證機密不外洩。狀態：已核可（2026-10-06），已實作（2026-10-07，見「實作結果」）。相依：WI-40、WI-43（資源根目錄的組態）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 6 點。
 
 ## 背景
 
@@ -22,7 +22,7 @@
 ## 行為與驗收條件
 
 **組態與啟動**
-- Engine 組態提供金鑰庫檔案路徑與金鑰庫密碼的來源：環境變數，或密碼檔路徑（命名依既有 `RUNLINE_` 慣例，寫入 [04](../04-deployment.md)）。同時設定兩種來源視為組態錯誤。密碼值不出現在任何 log、錯誤訊息或命令列。
+- Engine 組態提供金鑰庫檔案路徑與金鑰庫密碼的來源：環境變數，或密碼檔路徑（命名依既有 `RUNLINE_` 慣例，寫入 [04](../04-deployment.md)：`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD_FILE`、`RUNLINE_KEYSTORE_PASSWORD`）。同時設定兩種來源視為組態錯誤。密碼值不出現在任何 log、錯誤訊息或命令列。
 - 組態指定了金鑰庫但無法開啟：Engine 啟動失敗，原因只含類別（見下方「金鑰庫格式與開啟失敗」）。未指定金鑰庫：Engine 可啟動，引用別名的資源其檢查與使用失敗。
 - 金鑰庫檔案對其他使用者可讀時記錄警告（不含密碼）；金鑰庫位於 pipeline 共享目錄、run 私有目錄或資源根目錄（WI-43）之下時拒絕啟動，原因列出鍵名。
 - Engine 只以唯讀方式開啟金鑰庫：在唯讀掛載、唯讀檔案權限下運作正常，且啟動、重載前後檔案內容與修改時間不變。
@@ -30,7 +30,7 @@
 **金鑰庫格式與開啟失敗**
 - 格式檢查必須明確：以真實的 PKCS12 檔、JKS 檔、JCEKS 檔、截斷檔與垃圾檔驗證，只有 PKCS12 被接受，其餘以「格式不符」或「檔案毀損」拒絕。不得依賴 JDK 的 `keystore.type.compat` 預設行為（預設為開時要求 PKCS12 的讀取可能也能開 JKS 檔）：須先實測該設定在 JDK 25 下對各種檔案的實際行為，記錄結果，並以測試鎖定（含該設定關閉與預設兩種情況下行為一致）。
 - 開啟失敗類別與原因對應：檔案缺失；密碼錯誤（對應完整性檢查失敗的 I/O 例外）；檔案毀損或截斷（對應檔案結尾例外）；格式不符（含 JKS 等其他格式）；其餘為無法開啟。以真實檔案驗證每一類。密碼錯誤的辨識依賴例外訊息文字，無法確定時歸入「無法開啟」而非誤判，並在程式碼外的文件註明須隨 JDK 升級重新驗證。
-- 項目類型與內容檢查：載入時辨識三種項目（機密項目、受信任憑證項目、私鑰項目，後兩者的資源使用由 [WI-52](WI-52-tls-trust-and-mtls.md) 驗證）；其他類型的項目被忽略並記錄警告（只含別名與類型）。機密項目的值含非可列印 ASCII 字元時該別名被拒絕使用並記錄警告（別名與類別，不含值）；此別名在清單與資源狀態的呈現見 ADR-019 待確認問題，實作前向架構確認。
+- 項目類型與內容檢查：載入時辨識三種項目（機密項目、受信任憑證項目、私鑰項目，後兩者的資源使用由 [WI-52](WI-52-tls-trust-and-mtls.md) 驗證）；其他類型的項目被忽略並記錄警告（只含別名與類型）。機密項目的值含非可列印 ASCII 字元時該別名被拒絕使用並記錄警告（別名與類別，不含值）；此別名在機密清單與資源狀態的狀態為 `invalid_secret`（2026-10-07 已決定，見 ADR-019 決定 11；08-api 的別名狀態列舉含它）。
 - 不可偵測的損毀（非 ASCII 被破壞後恰落在可列印範圍）無法在載入時辨識，會在連線時以認證失敗呈現；此限度記載於 07 與維運手冊（WI-42），不要求本項偵測。
 
 **別名查找**
@@ -58,3 +58,18 @@
 - 機密提供者保持可替換（沿用 [ADR-012](../adr/ADR-012-api-authentication.md) 的原則），日後可加入其他來源。
 - 同 JVM 內 unsafe pipeline 可讀取行程環境與記憶體，此限度接受並記載（[07](../07-nfr-risks.md)），本項不嘗試補強。
 - 測試使用真實 PKCS12 檔案（以 JDK 工具產生）與真實 PostgreSQL（Testcontainers），不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。
+
+## 實作結果（2026-10-07）
+
+組態與程式：`engine/src/main/kotlin/secret/`（`SecretStore` 介面與 `KeystoreSecretStore`、`NoSecretStore`、`KeystoreLoader`、`SecretCatalog`、`SecretMasking`），路由 `SecretRoutes.kt`，組態 `secrets.*`（`application.yaml`）。測試在 `engine/src/test/kotlin/secret/` 與 `config/SecretSettingsTest.kt`，金鑰庫一律由 JDK 25 的 `keytool` 產生（`support/Keystores.kt`）。
+
+實作時的決定與細節（超出條文之處，供審閱）：
+
+- 重載回應的 `changed` 包含新增、移除與內容有變的別名（被移除的別名其引用資源同樣受影響）；內容是否有變以 SHA-256 指紋判斷（機密為值，憑證項目為憑證，私鑰項目為憑證鏈，不碰私鑰本身），指紋不輸出。
+- 「對其他使用者可讀」的警告只看 others 的讀取權限；群組可讀不警告（根擁有、服務群組可讀是常見的正確設定）。
+- 機密值為空，或含非可列印 ASCII（0x20 至 0x7E 以外的位元組，含 `keytool -genseckey` 產生的二進位金鑰），為 `invalid_secret`。
+- 遮蔽（`SecretMasking`）是行程內全域的登記表：金鑰庫開啟時登記其可用機密與金鑰庫密碼，關閉時撤銷；掛在 logback 的 `%msg` 與例外轉換器（`logback.xml`）、run log 的每一行寫入（`RunRecorder`），以及 run 結束時記錄的失敗訊息與堆疊（`RunProgress`）。
+- 開啟失敗類別（`file_missing`、`wrong_password`、`corrupt`、`wrong_format`、`unreadable`）的辨識：先檢查檔頭（0x30 開頭才是 PKCS12，空檔為毀損，其餘為格式不符），再載入；檔案結尾例外為毀損，原因為 `UnrecoverableKeyException` 的 I/O 例外為密碼錯誤（依型別，不依訊息文字），其餘為無法開啟。`keystore.type.compat` 的實測與決定記於 ADR-019 第 6 點的「實測結果」。
+- 載入時遇到三種之外的項目類型：忽略並記錄警告（別名）。JDK 25 的 PKCS12 無法寫出這種項目，此分支沒有真實檔案可驗證。
+- 機密與金鑰庫的內部型別（`SecretValue` 等）只在 Engine 內；run 的 class loader 只有 Runner、core 與 Kotlin 函式庫（既有的封裝後行程測試驗證 run 看不到 Engine 的類別）。
+- 重載失敗回應的 `problem` 為失敗類別；Console 的文字只補了兩個新錯誤碼（`consoleApiDocCheck` 要求），畫面屬 WI-49。

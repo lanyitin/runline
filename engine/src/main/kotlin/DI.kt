@@ -24,6 +24,7 @@ import dev.lawlan.runline.engine.info.SystemStatus
 import dev.lawlan.runline.engine.resource.*
 import dev.lawlan.runline.engine.retention.*
 import dev.lawlan.runline.engine.run.*
+import dev.lawlan.runline.engine.secret.*
 import dev.lawlan.runline.engine.trigger.*
 import dev.lawlan.runline.runner.Runner
 import dev.lawlan.runline.runner.Workspaces
@@ -54,6 +55,12 @@ fun Application.configureDependencyInjection() {
       getOpenTelemetry(serviceName = resolve<EngineConfig>().telemetry.serviceName)
     }
     provide<BuildInfo> { BuildInfo.load() }
+    // Secrets (WI-41): opened when first needed, which is at startup (see configureStartupChecks);
+    // with no keystore configured the store finds nothing.
+    provide<SecretStore> {
+      resolve<EngineConfig>().secrets?.let { KeystoreSecretStore.open(it.keystore, it.password) }
+          ?: NoSecretStore
+    }
     provide<ConsoleAssets> { ClasspathConsoleAssets(CONSOLE_RESOURCE_ROOT) }
     provide<TokenAuthenticator> { ConfiguredTokenAuthenticator(resolve<EngineConfig>().tokens) }
     provide<AllowListStore> { PostgresAllowListStore(resolve<DataSource>()) }
@@ -67,6 +74,10 @@ fun Application.configureDependencyInjection() {
           resolve<AllowListTelemetry>(),
           Path.of(System.getProperty("java.io.tmpdir")),
       )
+    }
+    provide<SecretTelemetry> { SecretTelemetry(resolve<OpenTelemetry>()) }
+    provide<SecretCatalog> {
+      SecretCatalog(resolve<SecretStore>(), resolve<ResourceStore>(), resolve<SecretTelemetry>())
     }
     provide<SystemStatus> {
       SystemStatus(resolve<BuildInfo>(), resolve<Clock>(), resolve<AllowListStore>())

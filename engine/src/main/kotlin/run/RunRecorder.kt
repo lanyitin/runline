@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.engine.secret.SecretMasking
 import dev.lawlan.runline.runner.RunEvent
 import dev.lawlan.runline.runner.RunListener
 import dev.lawlan.runline.runner.RunStatus
@@ -37,7 +38,11 @@ internal class RunRecorder(
   private fun append(event: RunEvent.LogLine) {
     try {
       val target = appender ?: logs.open(runId).also { appender = it }
-      target.append(clock.instant(), LogStream.valueOf(event.stream.name), event.line)
+      target.append(
+          clock.instant(),
+          LogStream.valueOf(event.stream.name),
+          SecretMasking.mask(event.line),
+      )
     } catch (e: Exception) {
       // A log that cannot be stored must not disturb the run; say so once, not per line.
       if (!logFailureReported) {

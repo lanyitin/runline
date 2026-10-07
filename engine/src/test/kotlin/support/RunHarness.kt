@@ -56,6 +56,12 @@ class RunHarness(
     jarDirectory: Path? = null,
     openTelemetry: OpenTelemetry = OpenTelemetry.noop(),
     maxReadBytes: Long = 10L * 1024 * 1024,
+    /** Where the keys named by the resources' aliases come from; no keystore by default. */
+    secrets: dev.lawlan.runline.engine.secret.SecretStore =
+        dev.lawlan.runline.engine.secret.NoSecretStore,
+    /** What the Engine does with what `openai-compatible` calls report; nothing by default. */
+    openAiObserver: dev.lawlan.runline.accessors.openai.OpenAiObserver =
+        dev.lawlan.runline.accessors.openai.OpenAiObserver.NONE,
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -69,7 +75,9 @@ class RunHarness(
   val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
   val behaviors =
       ResourceBehaviors.forEngine(
-          ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10), maxReadBytes)
+          ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10), maxReadBytes),
+          secrets,
+          openAiObserver,
       )
   val resourceAdmin =
       ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }
@@ -178,6 +186,19 @@ class RunHarness(
     assertIs<CreateResourceResult.Created>(
         resourceAdmin.create(name, capacity, root, "file", settings)
     )
+  }
+
+  /**
+   * Defines an `openai-compatible` resource with [settings] (JSON of its settings) and, if given,
+   * the alias of its key.
+   */
+  fun defineOpenAi(name: String, settings: String, capacity: Int = 1, alias: String? = null) {
+    val root = ApiIdentity("root", Role.ADMIN)
+    val parsed =
+        kotlinx.serialization.json.Json.parseToJsonElement(settings)
+            as kotlinx.serialization.json.JsonObject
+    val created = resourceAdmin.create(name, capacity, root, "openai-compatible", parsed, alias)
+    assertIs<CreateResourceResult.Created>(created, "$created")
   }
 
   /**

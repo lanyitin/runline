@@ -26,10 +26,15 @@ interface ResourceBinding {
 
 /**
  * An operation failed; [failure] and, for the types that talk HTTP, the [status] the service
- * answered with are the only things a run is told about it.
+ * answered with, and for those that talk SQL, the [sqlState], are the only things a run is told
+ * about it. The [cause] is for the host's log. A failure that [withErrorId] is given an errorId
+ * under which the host logs the cause, whatever its category; any other gets one only when it is a
+ * plain failure.
  */
 class ResourceOperationFailure(
     val failure: ResourceFailure,
     cause: Throwable? = null,
     val status: Int? = null,
+    val sqlState: String? = null,
+    val withErrorId: Boolean = false,
 ) : RuntimeException(failure.name, cause)

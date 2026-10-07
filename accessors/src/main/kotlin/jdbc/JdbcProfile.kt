@@ -46,6 +46,12 @@ interface JdbcProfile {
    */
   val resetStatements: List<String>
 
+  /**
+   * Statements that give a connection the session settings the Engine wants, run when it is opened
+   * and again after [resetStatements].
+   */
+  val startStatements: List<String>
+
   /** The values passing between Java and the database. */
   val values: JdbcValues
 

@@ -90,7 +90,7 @@ class BoundResources(
           }
       )
     } catch (e: ResourceOperationFailure) {
-      failed(resource, binding, operation, e.failure, e.cause, e.status)
+      failed(resource, binding, operation, e.failure, e.cause, e.status, e.sqlState, e.withErrorId)
     } catch (e: Exception) {
       failed(resource, binding, operation, ResourceFailure.FAILED, e)
     }
@@ -104,12 +104,17 @@ class BoundResources(
       failure: ResourceFailure,
       cause: Throwable?,
       status: Int? = null,
+      sqlState: String? = null,
+      withErrorId: Boolean = false,
   ): Map<String, Any?> {
-    val errorId = if (failure == ResourceFailure.FAILED) UUID.randomUUID().toString() else null
+    val errorId =
+        if (failure == ResourceFailure.FAILED || withErrorId) UUID.randomUUID().toString() else null
     observer.failed(resource, binding.type, operation, failure, errorId, cause)
     return failure(failure).also { answer ->
       errorId?.let { answer["errorId"] = it }
       status?.let { answer["status"] = it }
+      // Five characters of the standard's alphabet and nothing more, whatever the binding gave.
+      sqlState?.takeIf { SQL_STATE.matches(it) }?.let { answer["sqlState"] = it }
     }
   }
 
@@ -134,6 +139,10 @@ class BoundResources(
   fun invalidateAll(reason: Invalidation) {
     if (runInvalidation == null) runInvalidation = reason
     bindings.keys.forEach { invalidate(it, reason) }
+  }
+
+  private companion object {
+    val SQL_STATE = Regex("[0-9A-Z]{5}")
   }
 
   private fun success(value: Any?) =

@@ -21,6 +21,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /** What the resource sends the service as its key. */
 sealed interface OpenAiCredential {
@@ -47,6 +52,7 @@ class OpenAiBinding(
     private val resource: String,
     private val settings: OpenAiSettings,
     private val credential: OpenAiCredential = OpenAiCredential.None,
+    private val observer: OpenAiObserver = OpenAiObserver.NONE,
 ) : ResourceBinding {
   override val type: String = ResourceTypes.OPENAI_COMPATIBLE
 
@@ -62,13 +68,98 @@ class OpenAiBinding(
             .build()
       }
 
+  /** How many requests this run has in flight, at most; the capacity limits the runs. */
+  private val quota = RequestQuota(settings.requestsPerRun)
+
+  /** The calls that have a request in flight, which an abort cuts. */
+  private val live: MutableSet<Call> = ConcurrentHashMap.newKeySet()
+
+  @Volatile private var aborted = false
+
   override fun execute(operation: String, arguments: Map<String, Any?>): Any? {
     check(operation == OPERATION) { "unknown operation $operation" }
+    val endpoint =
+        (arguments["endpoint"] as? String)?.let { OpenAiEndpoints.find(it)?.id } ?: "unknown"
+    val report = Report()
+    var result: Throwable? = null
+    try {
+      return run(arguments, endpoint, report)
+    } catch (e: Throwable) {
+      result = e
+      throw e
+    } finally {
+      val failure =
+          when (result) {
+            null -> null
+            is ResourceOperationFailure -> result.failure
+            else -> ResourceFailure.FAILED
+          }
+      report.finish(endpoint, failure, (result as? ResourceOperationFailure)?.status)
+    }
+  }
+
+  /** What an observer is told about one call, gathered as it goes. */
+  private inner class Report {
+    var sent = false
+    var quotaWaitMillis = 0L
+    var firstByteMillis: Long? = null
+    var generationMillis: Long? = null
+    var usage: OpenAiTokenUsage? = null
+    var status: Int? = null
+
+    fun finish(endpoint: String, failure: ResourceFailure?, failedStatus: Int?) {
+      val outcome =
+          OpenAiOutcome(
+              failure,
+              failedStatus ?: status,
+              sent,
+              quotaWaitMillis,
+              firstByteMillis,
+              generationMillis,
+              usage,
+          )
+      runCatching { observer.finished(resource, endpoint, outcome) }
+    }
+  }
+
+  private fun run(arguments: Map<String, Any?>, endpoint: String, report: Report): Any? {
+    if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
     val plan = OpenAiRequestPlan.of(settings, arguments)
     if (credential is OpenAiCredential.Unavailable) {
       throw ResourceOperationFailure(ResourceFailure.SECRET_UNAVAILABLE)
     }
-    return exchange(Call(plan.limits), plan)
+    val waitStart = System.nanoTime()
+    val got =
+        try {
+          quota.acquire(plan.limits.quotaWaitMillis)
+        } catch (e: InterruptedException) {
+          Thread.currentThread().interrupt()
+          throw ResourceOperationFailure(ResourceFailure.CANCELLED, e)
+        } catch (e: QuotaAborted) {
+          throw ResourceOperationFailure(ResourceFailure.CANCELLED, e)
+        }
+    report.quotaWaitMillis = millisSince(waitStart)
+    if (!got) throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
+    try {
+      val call = Call(plan.limits)
+      live += call
+      try {
+        if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
+        report.sent = true
+        runCatching { observer.started(resource, endpoint) }
+        return exchange(call, plan, report)
+      } finally {
+        live -= call
+      }
+    } finally {
+      quota.release()
+    }
+  }
+
+  override fun abort() {
+    aborted = true
+    quota.abort()
+    live.forEach { it.stop(ResourceFailure.CANCELLED) }
   }
 
   override fun close() {
@@ -90,19 +181,20 @@ class OpenAiBinding(
     }
   }
 
-  private fun exchange(call: Call, plan: OpenAiRequestPlan): Map<String, Any?> {
+  private fun exchange(call: Call, plan: OpenAiRequestPlan, report: Report): Map<String, Any?> {
     val total =
         call.limits.totalMillis?.let {
           TIMERS.schedule({ call.stop(ResourceFailure.TOTAL_TIMEOUT) }, it, TimeUnit.MILLISECONDS)
         }
     try {
-      return send(call, plan)
+      return send(call, plan, report)
     } finally {
       total?.cancel(false)
     }
   }
 
-  private fun send(call: Call, plan: OpenAiRequestPlan): Map<String, Any?> {
+  private fun send(call: Call, plan: OpenAiRequestPlan, report: Report): Map<String, Any?> {
+    val sentAt = System.nanoTime()
     var uri = plan.uri
     var method = plan.method
     var body = plan.body
@@ -112,6 +204,8 @@ class OpenAiBinding(
       val response = awaitHeaders(call, client, request(uri, method, body, call.limits))
       val status = response.statusCode()
       call.stream = response.body()
+      report.status = status
+      report.firstByteMillis = millisSince(sentAt)
       if (status in REDIRECTS) {
         response.body().close()
         val next = redirectTarget(uri, response) ?: throw blocked(status)
@@ -132,7 +226,10 @@ class OpenAiBinding(
         response.body().close()
         throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
       }
+      val readStart = System.nanoTime()
       val text = readBody(call, response.body(), status)
+      report.generationMillis = millisSince(readStart)
+      report.usage = usageOf(text)
       return mapOf(
           "status" to status,
           "headers" to answerHeaders(response.headers().map()),
@@ -150,8 +247,10 @@ class OpenAiBinding(
     call.future = future
     try {
       return future.get()
+    } catch (e: InterruptedException) {
+      throw interrupted(call, e)
     } catch (e: ExecutionException) {
-      throw stopped(call) ?: classify(e.cause ?: e)
+      throw stopped(call) ?: classify(call, e.cause ?: e)
     } catch (e: CancellationException) {
       throw stopped(call) ?: ResourceOperationFailure(ResourceFailure.CANCELLED, e)
     }
@@ -172,7 +271,7 @@ class OpenAiBinding(
           try {
             stream.read(buffer)
           } catch (e: IOException) {
-            throw stopped(call) ?: classify(e)
+            throw stopped(call) ?: classify(call, e)
           } finally {
             idle.cancel(false)
           }
@@ -191,8 +290,22 @@ class OpenAiBinding(
   private fun stopped(call: Call): ResourceOperationFailure? =
       call.stoppedFor?.let { ResourceOperationFailure(it) }
 
+  /** The thread was interrupted (the run was cancelled): the call stops and the thread stays so. */
+  private fun interrupted(call: Call, cause: Throwable): ResourceOperationFailure {
+    call.stop(ResourceFailure.CANCELLED)
+    Thread.currentThread().interrupt()
+    return ResourceOperationFailure(ResourceFailure.CANCELLED, cause)
+  }
+
   /** What the client threw, as the category it comes to. */
-  private fun classify(cause: Throwable): ResourceOperationFailure =
+  private fun classify(call: Call, cause: Throwable): ResourceOperationFailure =
+      when {
+        Thread.currentThread().isInterrupted || cause is InterruptedException ->
+            interrupted(call, cause)
+        else -> classifyIo(cause)
+      }
+
+  private fun classifyIo(cause: Throwable): ResourceOperationFailure =
       when (cause) {
         is HttpConnectTimeoutException ->
             ResourceOperationFailure(ResourceFailure.CONNECT_TIMEOUT, cause)
@@ -245,6 +358,24 @@ class OpenAiBinding(
     val root = base.rawPath.orEmpty()
     val path = target.rawPath.orEmpty()
     return if (path == root || path.startsWith("$root/")) target else null
+  }
+
+  private fun millisSince(start: Long): Long = (System.nanoTime() - start) / 1_000_000
+
+  /** The tokens the answer says were used, if it says; whatever is not a number is left out. */
+  private fun usageOf(text: String): OpenAiTokenUsage? {
+    val usage =
+        try {
+          (Json.parseToJsonElement(text) as? JsonObject)?.get("usage") as? JsonObject
+        } catch (e: SerializationException) {
+          null
+        } ?: return null
+    fun count(name: String) = (usage[name] as? JsonPrimitive)?.longOrNull
+    return OpenAiTokenUsage(
+        count("prompt_tokens"),
+        count("completion_tokens"),
+        count("total_tokens"),
+    )
   }
 
   private fun portOf(uri: URI): Int =

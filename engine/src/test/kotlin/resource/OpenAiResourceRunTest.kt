@@ -471,4 +471,106 @@ class OpenAiResourceRunTest {
     assertEquals(1, server.requests.size, "the first run's request went where it was told")
     assertEquals(1, elsewhere.requests.size, "the second run's went to the new address")
   }
+
+  // ---- streams (WI-47) ----
+
+  /** A service that sends one event and then goes on without ending the stream. */
+  private val endlessStream:
+      (
+          dev.lawlan.runline.accessors.fake.FakeRequest,
+          dev.lawlan.runline.accessors.fake.FakeResponse,
+      ) -> Boolean =
+      { _, response ->
+        response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+        response.event("{}")
+        response.hang()
+        true
+      }
+
+  /** Pulls a stream until the run is stopped, noting what the pull came to. */
+  private val pulling =
+      """
+      OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+      OpenAiStream s = lemon.stream(new OpenAiRequest("chat.completions", "{}"));
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "first", s.next());
+      String ended;
+      try { s.next(); ended = "returned"; } catch (ResourceAccessException e) { ended = e.getFailure().name(); }
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "pull", ended);
+      """
+          .trimIndent()
+
+  @Test
+  fun `with capacity one a streaming run is the only request the service has, and the next run streams after it`() {
+    val h = harness(maxConcurrent = 2)
+    h.defineOpenAi("lemon", settings(), capacity = 1)
+    server.chunkDelayMillis = 150
+    val hash =
+        h.upload(
+            "streamer",
+            """
+            try (OpenAiStream s = context.getAccessors().openAiCompatible("lemon").stream(new OpenAiRequest("chat.completions", "{}"))) {
+              int n = 0;
+              while (s.next() != null) n++;
+              context.getFiles().writeText(FileScope.PIPELINE_SHARED, "events", Integer.toString(n));
+            }
+            """
+                .trimIndent(),
+            declaration = declaration,
+        )
+
+    val first = h.start(hash, "streamer")
+    await("the stream at the service") { server.inFlight == 1 }
+    val second = h.start(hash, "streamer")
+    h.await(second, RunState.WAITING_FOR_RESOURCES)
+
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(first, seconds = 60).state)
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(second, seconds = 60).state)
+    assertEquals(1, server.peakInFlight)
+    assertEquals("6", h.result("streamer", "events"))
+  }
+
+  @Test
+  fun `a forced release cuts the stream a run is pulling, the service sees the connection go, and the pull is cancelled`() {
+    val h = harness(maxConcurrent = 2)
+    h.defineOpenAi("lemon", settings(), capacity = 1)
+    server.script = endlessStream
+    val hash = h.upload("puller", pulling, declaration = declaration)
+    val first = h.start(hash, "puller")
+    await("the stream at the service") { server.inFlight == 1 }
+    await("the first event") { Files.exists(h.shared("puller", "first")) }
+
+    h.coordinator!!.forceRelease("lemon", first, admin)
+
+    await("the service to see the connection go") { server.clientsGone == 1 }
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(first).state)
+    assertEquals("{}", h.result("puller", "first"))
+    assertEquals("CANCELLED", h.result("puller", "pull"))
+    assertEquals(0, server.inFlight)
+  }
+
+  @Test
+  fun `cancelling a run that pulls a stream cuts the stream and frees the capacity`() {
+    val h = harness(maxConcurrent = 2)
+    h.defineOpenAi("lemon", settings(), capacity = 1)
+    server.script = endlessStream
+    // The failure of the pull is not caught: a run that is cancelled ends when it gives up.
+    val hash =
+        h.upload(
+            "puller",
+            """
+            OpenAiStream s = context.getAccessors().openAiCompatible("lemon").stream(new OpenAiRequest("chat.completions", "{}"));
+            while (true) s.next();
+            """
+                .trimIndent(),
+            declaration = declaration,
+        )
+    val run = h.start(hash, "puller")
+    await("the stream at the service") { server.inFlight == 1 }
+
+    assertEquals(CancelResult.CancellationRequested, h.service.cancel(run, Visibility.All))
+
+    await("the service to see the connection go") { server.clientsGone == 1 }
+    assertEquals(RunState.CANCELLED, h.awaitEnd(run).state)
+    assertEquals(emptyList(), h.coordinator!!.activity("lemon").holders)
+  }
 }

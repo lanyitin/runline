@@ -9,11 +9,13 @@
   import Link from '../ui/Link.svelte';
   import PlainText from '../ui/PlainText.svelte';
   import Timestamp from '../ui/Timestamp.svelte';
-  import { settingsSummary, takesSecret } from './resource-types';
+  import { settingsSummary, takesSecret, usageLines, type UsageLine } from './resource-types';
 
   // One shared resource as the resources page shows it (ADR-019): its type, the settings that are
   // not secret, the alias of its secret and whether the keystore has it (never a value), the last
-  // check, how much of it is held, who holds it and who waits, and the pipeline definitions that
+  // check, how much of it is held and the use of its type's own (connections that runs hold of a
+  // pool, requests in flight to a service; read again with the page, never by a check), who holds
+  // it and who waits, and the pipeline definitions that
   // declare it, each a link to its page. A check is made here, only when the admin asks for it (it
   // may reach a service or a database); the card then shows it as the last check. Changing,
   // deleting and releasing a holder are the page's, which asks first.
@@ -33,6 +35,11 @@
     check.ok
       ? i18n.t('resources.check.passed')
       : i18n.t('resources.check.failed', { failure: enumLabel(i18n.translate, 'checkFailure', check.failure ?? '') });
+  const usage = $derived(usageLines(resource));
+  const usageText = (line: UsageLine) =>
+    line.limit !== null && i18n.translate.has(`resources.use.${line.measure}`)
+      ? i18n.translate(`resources.use.${line.measure}`, { count: line.count, limit: line.limit })
+      : `${line.measure}: ${line.count}`;
   const duration = (seconds: number) => formatDuration(Math.round(seconds) * 1000, i18n.locale);
 
   let checking = $state(false);
@@ -101,6 +108,9 @@
     <progress value={resource.holders.length} max={resource.capacity}></progress>
     <span class="usage rl-mono">{i18n.t('resources.usage', { held: resource.holders.length, capacity: resource.capacity })}</span>
   </div>
+  {#each usage as line (line.measure)}
+    <p class="type-usage rl-mono">{usageText(line)}</p>
+  {/each}
   {#if resource.holders.length > resource.capacity}
     <p class="rl-help over">{i18n.t('resources.overCapacity')}</p>
   {/if}
@@ -307,6 +317,9 @@
     width: 100%;
     height: 8px;
     accent-color: var(--accent);
+  }
+  .type-usage {
+    font-size: var(--text-sm);
   }
   .over {
     margin: 0;

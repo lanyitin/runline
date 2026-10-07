@@ -171,14 +171,22 @@ export function createAdminApi(transport: Transport) {
     async resources(): Promise<Resource[]> {
       return parseResources(await succeed(await json('/api/v1/resources')));
     },
-    async createResource(request: { name: string; type?: string; capacity: number }): Promise<Resource> {
+    /** Settings and alias as 08-api.md says of the type; never a secret value. */
+    async createResource(request: {
+      name: string;
+      type?: string;
+      capacity: number;
+      settings?: Record<string, unknown>;
+      secretAlias?: string;
+    }): Promise<Resource> {
       return parseResource(
         await succeed(await json('/api/v1/resources', jsonBody('POST', request))),
       );
     },
     async updateResource(
       name: string,
-      change: { capacity?: number; enabled?: boolean },
+      /** Only what changes: the settings replace the stored ones as a whole. */
+      change: { capacity?: number; enabled?: boolean; settings?: Record<string, unknown>; secretAlias?: string },
     ): Promise<Resource> {
       return parseResource(
         await succeed(await json(`/api/v1/resources/${q(name)}`, jsonBody('PATCH', change))),

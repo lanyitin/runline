@@ -41,6 +41,9 @@ const choose = (select: HTMLSelectElement, value: string) => {
   select.value = value;
   select.dispatchEvent(new Event('change', { bubbles: true }));
 };
+/** The error said at the field (or group of fields) of this id. */
+const errorAt = (view: HTMLElement, id: string) =>
+  dialog(view).querySelector(`#${id}`)!.closest('.rl-field, fieldset')!.querySelector('.rl-field-error')?.textContent ?? null;
 const RUN_A = '11111111-1111-4111-8111-111111111111';
 const RUN_B = '22222222-2222-4222-8222-222222222222';
 
@@ -207,7 +210,7 @@ describe('defining a resource', () => {
 
     type(dialog(view).querySelector('#resource-name')!, '-bad');
     button(dialog(view), 'Define').click();
-    await vi.waitFor(() => expect(dialog(view).querySelector('[role="alert"]')!.textContent).toContain('not valid'));
+    await vi.waitFor(() => expect(errorAt(view, 'resource-name')).toContain('not valid'));
     expect(dialog(view)).not.toBeNull();
   });
 });
@@ -223,6 +226,9 @@ describe('the type of a resource in its form', () => {
     expect([...select.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([
       ['', 'Choose a type'],
       ['counter', 'Counter'],
+      ['file', 'File'],
+      ['jdbc-pool', 'Database pool (JDBC)'],
+      ['openai-compatible', 'OpenAI-compatible service'],
     ]);
     expect(dialog(view).querySelector('#resource-name')).toBeNull();
     expect(dialog(view).querySelector('#resource-capacity')).toBeNull();
@@ -274,21 +280,27 @@ describe('the type of a resource in its form', () => {
     expect(dialog(view).querySelector('#resource-type')).toBeNull();
   });
 
-  test('never asks for a secret value', async () => {
+  test('never asks for a secret value: of any type, a secret is chosen by its alias, and nothing else is about a secret', async () => {
     const { view } = await page({ seed: typed });
     await loaded(view);
-    button(view, 'Define a resource').click();
-    await tick();
-    choose(dialog(view).querySelector('#resource-type')!, 'counter');
-    await tick();
-    expect(dialog(view).querySelectorAll('input[type="password"], textarea')).toHaveLength(0);
-    button(dialog(view), 'Cancel').click();
-    await tick();
+    for (const option of ['counter', 'file', 'jdbc-pool', 'openai-compatible']) {
+      button(view, 'Define a resource').click();
+      await tick();
+      choose(dialog(view).querySelector('#resource-type')!, option);
+      await tick();
+      expect([option, dialog(view).querySelectorAll('input[type="password"], textarea')]).toEqual([option, expect.objectContaining({ length: 0 })]);
+      const secretFields = [...dialog(view).querySelectorAll<HTMLElement>('input, select')].filter((e) => /secret|key|password/i.test(e.id));
+      expect([option, secretFields.map((e) => `${e.tagName}#${e.id}`)]).toEqual([
+        option,
+        option === 'jdbc-pool' || option === 'openai-compatible' ? ['SELECT#resource-secret'] : [],
+      ]);
+      button(dialog(view), 'Cancel').click();
+      await tick();
+    }
 
     button(card(view, 'llm'), 'Change').click();
     await tick();
     expect(dialog(view).querySelectorAll('input[type="password"], textarea')).toHaveLength(0);
-    expect([...dialog(view).querySelectorAll('input')].map((i) => i.id)).toEqual(['resource-capacity', 'resource-enabled']);
   });
 });
 
@@ -768,5 +780,418 @@ describe('the secrets of the keystore', () => {
     expect(alert).toContain('unchanged');
     expect(alert).toContain('password');
     expect(rows(view).map((r) => r[0])).toEqual(['broken', 'corporate-ca', 'llm-key']);
+  });
+});
+
+/** Opens the form to define a resource of [option], with a name. */
+const defineForm = async (view: HTMLElement, option: string, name: string) => {
+  button(view, 'Define a resource').click();
+  await tick();
+  choose(dialog(view).querySelector('#resource-type')!, option);
+  await tick();
+  type(dialog(view).querySelector('#resource-name')!, name);
+};
+const field = (view: HTMLElement, id: string) => dialog(view).querySelector<HTMLInputElement>(`#${id}`)!;
+/** The settings that the Engine was last sent, by the method of the call. */
+const sent = (method: string) => {
+  const call = [...app.engine.received].reverse().find((entry) => entry.method === method && entry.path.startsWith('/api/v1/resources'));
+  return call === undefined ? undefined : JSON.parse(call.body);
+};
+const keystore = (backend: TestApp['engine']['backend']) =>
+  backend.secrets.configure([
+    { alias: 'orders-pass', type: 'secret', status: 'found', fingerprint: 'a' },
+    { alias: 'llm-key', type: 'secret', status: 'found', fingerprint: 'b' },
+    { alias: 'broken', type: 'secret', status: 'invalid_secret', fingerprint: 'c' },
+    { alias: 'corporate-ca', type: 'trusted_certificate', status: 'found', fingerprint: 'd' },
+  ]);
+
+describe('the form of a file', () => {
+  test('defines it with its path under the resource root, and its card shows the path', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'file', 'report');
+    expect(dialog(view).textContent).toContain('resource root');
+    type(field(view, 'resource-path'), 'reports/today.csv');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST')).toEqual({ name: 'report', type: 'file', capacity: 1, settings: { path: 'reports/today.csv' } });
+    expect(card(view, 'report').querySelector('.settings dd')!.textContent).toBe('reports/today.csv');
+  });
+
+  test('says at the path that it is needed, and that the Engine refused one out of the resource root', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'file', 'report');
+    button(dialog(view), 'Define').click();
+    await tick();
+    expect(errorAt(view, 'resource-path')).toBe('Fill this in.');
+
+    type(field(view, 'resource-path'), '../etc/passwd');
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(errorAt(view, 'resource-path')).toContain('outside the resource root'));
+    expect(dialog(view).querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+describe('the form of a jdbc-pool', () => {
+  test('defines it with the database, the account and the alias of its password, its properties, connections per run and timeouts', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'orders-db');
+    const kinds = dialog(view).querySelector<HTMLSelectElement>('#jdbc-kind')!;
+    expect([...kinds.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([['postgresql', 'PostgreSQL']]);
+    type(field(view, 'jdbc-host'), 'db.internal');
+    type(field(view, 'jdbc-port'), '6543');
+    type(field(view, 'jdbc-database'), 'orders');
+    type(field(view, 'jdbc-username'), 'reader');
+    await vi.waitFor(() => expect(dialog(view).querySelectorAll('#resource-secret option').length).toBeGreaterThan(1));
+    choose(dialog(view).querySelector('#resource-secret')!, 'orders-pass');
+    button(dialog(view), 'Add a property').click();
+    await tick();
+    const pair = dialog(view).querySelector('#jdbc-properties .pair')!;
+    type(pair.querySelector<HTMLInputElement>('input.name')!, 'ApplicationName');
+    type(pair.querySelector<HTMLInputElement>('input.value')!, 'reports');
+    type(field(view, 'jdbc-per-run'), '3');
+    type(field(view, 'jdbc-statement-ms'), '30000');
+    type(field(view, 'resource-capacity'), '2');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST')).toEqual({
+      name: 'orders-db',
+      type: 'jdbc-pool',
+      capacity: 2,
+      settings: {
+        kind: 'postgresql',
+        host: 'db.internal',
+        port: 6543,
+        database: 'orders',
+        username: 'reader',
+        connectionsPerRun: 3,
+        timeouts: { statementMs: 30000 },
+        properties: { ApplicationName: 'reports' },
+      },
+      secretAlias: 'orders-pass',
+    });
+    expect(card(view, 'orders-db').querySelector('.secret .alias')!.textContent).toBe('orders-pass');
+  });
+
+  test('says that the pool is the capacity times the connections per run, as they are typed', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'orders-db');
+    const pool = () => dialog(view).querySelector('.pool-size')!.textContent!.replace(/\s+/g, ' ').trim();
+    expect(pool()).toContain('capacity × connections per run');
+    expect(pool()).toContain('1 × 1 = 1');
+
+    type(field(view, 'resource-capacity'), '4');
+    type(field(view, 'jdbc-per-run'), '2');
+    await tick();
+
+    expect(pool()).toContain('4 × 2 = 8');
+  });
+
+  test('asks for what it needs before it asks the Engine, and says what the Engine refused at its field', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'orders-db');
+    type(field(view, 'jdbc-port'), 'x');
+    button(dialog(view), 'Define').click();
+    await tick();
+    expect(errorAt(view, 'jdbc-host')).toBe('Fill this in.');
+    expect(errorAt(view, 'jdbc-database')).toBe('Fill this in.');
+    expect(errorAt(view, 'jdbc-username')).toBe('Fill this in.');
+    expect(errorAt(view, 'jdbc-port')).toBe('Enter a whole number.');
+
+    type(field(view, 'jdbc-port'), '');
+    type(field(view, 'jdbc-host'), 'db');
+    type(field(view, 'jdbc-database'), 'orders');
+    type(field(view, 'jdbc-username'), 'reader');
+    button(dialog(view), 'Add a property').click();
+    await tick();
+    type(dialog(view).querySelector<HTMLInputElement>('#jdbc-properties .pair input.name')!, 'password');
+    type(dialog(view).querySelector<HTMLInputElement>('#jdbc-properties .pair input.value')!, 'x');
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(errorAt(view, 'jdbc-properties')).toContain('not allowed'));
+    expect(cards(view)).toHaveLength(0);
+  });
+});
+
+describe('the form of an openai-compatible service', () => {
+  test('defines it with its address, the endpoints that are enabled, the request parameters and the alias of its key', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    type(field(view, 'openai-base-url'), 'http://llm.internal:8000/v1');
+    type(field(view, 'openai-organization'), 'org-1');
+    const endpoint = (id: string) => dialog(view).querySelector<HTMLInputElement>(`#openai-endpoints input[value="${id}"]`)!;
+    expect(
+      [...dialog(view).querySelectorAll<HTMLInputElement>('#openai-endpoints input:checked')].map((i) => i.value),
+    ).toEqual(['chat.completions', 'completions', 'embeddings', 'models.list', 'models.retrieve']);
+    expect(endpoint('audio.speech').closest('label')!.textContent).toContain('POST /audio/speech');
+    endpoint('completions').click();
+    endpoint('audio.speech').click();
+    type(field(view, 'openai-parameter-model'), 'small');
+    type(field(view, 'openai-allowed-models'), 'small, large');
+    field(view, 'openai-locked-temperature').click();
+    type(field(view, 'openai-max-max_tokens'), '4096');
+    type(field(view, 'openai-first-byte-ms'), '600000');
+    type(field(view, 'openai-per-run'), '2');
+    await vi.waitFor(() => expect(dialog(view).querySelectorAll('#resource-secret option').length).toBeGreaterThan(1));
+    choose(dialog(view).querySelector('#resource-secret')!, 'llm-key');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST')).toEqual({
+      name: 'llm',
+      type: 'openai-compatible',
+      capacity: 1,
+      settings: {
+        baseUrl: 'http://llm.internal:8000/v1',
+        organization: 'org-1',
+        endpoints: ['chat.completions', 'embeddings', 'models.list', 'models.retrieve', 'audio.speech'],
+        timeouts: { firstByteMs: 600000 },
+        requestsPerRun: 2,
+        defaults: { model: 'small' },
+        allowedModels: ['small', 'large'],
+        lockedParameters: ['temperature'],
+        maxValues: { max_tokens: 4096 },
+      },
+      secretAlias: 'llm-key',
+    });
+  });
+
+  test('says what locking a parameter and a ceiling mean, and that the limit of requests is the capacity times the requests per run', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    const parameters = dialog(view).querySelector('#openai-parameters')!.textContent!;
+    expect(parameters).toContain('A locked parameter');
+    expect(parameters).toContain('refused');
+    expect(parameters).toContain('ceiling');
+    expect(dialog(view).querySelector('.request-limit')!.textContent).toContain('1 × 1 = 1');
+    expect(field(view, 'openai-max-model')).toBeNull();
+  });
+
+  test('says what the Engine refused at the field it is about: a header that looks like a credential', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    type(field(view, 'openai-base-url'), 'http://llm/v1');
+    button(dialog(view), 'Add a header').click();
+    await tick();
+    type(dialog(view).querySelector<HTMLInputElement>('#openai-headers .pair input.name')!, 'X-Api-Key');
+    type(dialog(view).querySelector<HTMLInputElement>('#openai-headers .pair input.value')!, 'sk-123');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(errorAt(view, 'openai-headers')).toContain('credential'));
+    expect(errorAt(view, 'openai-base-url')).toBeNull();
+  });
+
+  test('asks for one endpoint at least, and for numbers where they are, before it asks the Engine', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    type(field(view, 'openai-base-url'), 'http://llm/v1');
+    for (const box of dialog(view).querySelectorAll<HTMLInputElement>('#openai-endpoints input:checked')) box.click();
+    type(field(view, 'openai-parameter-temperature'), 'hot');
+    button(dialog(view), 'Define').click();
+    await tick();
+    expect(errorAt(view, 'openai-endpoints')).toBe('Enable one endpoint at least.');
+    expect(errorAt(view, 'openai-parameters')).toContain('temperature');
+    expect(app.engine.received.some((entry) => entry.method === 'POST' && entry.path === '/api/v1/resources')).toBe(false);
+  });
+});
+
+describe('the alias of a secret in the form', () => {
+  test('is chosen among the secrets of the keystore, with whether each can be used; certificates are not offered; none is the default', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    const select = dialog(view).querySelector<HTMLSelectElement>('#resource-secret')!;
+    await vi.waitFor(() => expect(select.options.length).toBe(4));
+    expect([...select.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([
+      ['', 'No secret'],
+      ['broken', 'broken (not usable: not printable ASCII)'],
+      ['llm-key', 'llm-key'],
+      ['orders-pass', 'orders-pass'],
+    ]);
+    expect(select.value).toBe('');
+    expect(dialog(view).textContent).toContain('keytool');
+  });
+
+  test('says that the Engine has no keystore, and offers none to choose', async () => {
+    const { view } = await page();
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'orders-db');
+    await vi.waitFor(() => expect(dialog(view).querySelector('.secret-note')!.textContent).toContain('no keystore'));
+    expect([...dialog(view).querySelector<HTMLSelectElement>('#resource-secret')!.options].map((o) => o.value)).toEqual(['']);
+  });
+
+  test('says that the keystore has no secret to choose', async () => {
+    const { view } = await page({ seed: (b) => b.secrets.configure([{ alias: 'corporate-ca', type: 'trusted_certificate', status: 'found', fingerprint: 'd' }]) });
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    await vi.waitFor(() => expect(dialog(view).querySelector('.secret-note')!.textContent).toContain('no secret'));
+  });
+});
+
+describe('changing a resource of a type', () => {
+  const seeded = (backend: TestApp['engine']['backend']) => {
+    keystore(backend);
+    backend.resources.define('orders-db', {
+      type: 'jdbc-pool',
+      capacity: 2,
+      settings: {
+        kind: 'postgresql',
+        host: 'db.internal',
+        port: 5432,
+        database: 'orders',
+        username: 'reader',
+        connectionsPerRun: 1,
+        timeouts: { connectMs: 10000, statementMs: 300000, quotaWaitMs: 60000 },
+        maxRows: 500,
+        maxResponseBytes: 8388608,
+      },
+      secretAlias: 'orders-pass',
+      lastCheck: { ok: true, failure: null, checkedAt: '2026-10-07T01:02:03Z' },
+    });
+  };
+
+  test('starts from its settings, with the name and the type fixed, and its alias chosen', async () => {
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+    button(card(view, 'orders-db'), 'Change').click();
+    await tick();
+    expect([...dialog(view).querySelectorAll('.fixed dd')].map((d) => d.textContent!.trim())).toEqual(['orders-db', 'Database pool (JDBC)']);
+    expect(field(view, 'jdbc-host').value).toBe('db.internal');
+    expect(field(view, 'jdbc-port').value).toBe('5432');
+    expect(field(view, 'jdbc-statement-ms').value).toBe('300000');
+    await vi.waitFor(() => expect(dialog(view).querySelector<HTMLSelectElement>('#resource-secret')!.value).toBe('orders-pass'));
+    expect([...dialog(view).querySelector<HTMLSelectElement>('#resource-secret')!.options].map((o) => o.value)).not.toContain('');
+  });
+
+  test('sends the settings as a whole when they change, keeping those without a field; the last check is then forgotten', async () => {
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+    button(card(view, 'orders-db'), 'Change').click();
+    await tick();
+    type(field(view, 'jdbc-host'), 'db2.internal');
+
+    button(dialog(view), 'Save').click();
+
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+    expect(sent('PATCH')).toEqual({
+      settings: {
+        kind: 'postgresql',
+        host: 'db2.internal',
+        port: 5432,
+        database: 'orders',
+        username: 'reader',
+        connectionsPerRun: 1,
+        timeouts: { connectMs: 10000, statementMs: 300000, quotaWaitMs: 60000 },
+        maxRows: 500,
+        maxResponseBytes: 8388608,
+      },
+    });
+    await vi.waitFor(() => expect(card(view, 'orders-db').querySelector('.last-check')!.textContent).toContain('Never checked'));
+  });
+
+  test('sends only the capacity when only it changes, and the alias when only it changes: the last check stays for a capacity', async () => {
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+    button(card(view, 'orders-db'), 'Change').click();
+    await tick();
+    type(field(view, 'resource-capacity'), '3');
+    button(dialog(view), 'Save').click();
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+    expect(sent('PATCH')).toEqual({ capacity: 3 });
+    expect(card(view, 'orders-db').querySelector('.last-check')!.textContent).toContain('Passed');
+
+    button(card(view, 'orders-db'), 'Change').click();
+    await tick();
+    await vi.waitFor(() => expect(dialog(view).querySelectorAll('#resource-secret option').length).toBeGreaterThan(1));
+    choose(dialog(view).querySelector('#resource-secret')!, 'llm-key');
+    button(dialog(view), 'Save').click();
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+    expect(sent('PATCH')).toEqual({ secretAlias: 'llm-key' });
+  });
+
+  test('says there is nothing to change when the fields are as they were', async () => {
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+    button(card(view, 'orders-db'), 'Change').click();
+    await tick();
+    button(dialog(view), 'Save').click();
+    await tick();
+    expect(dialog(view).querySelector('.rl-field-error')!.textContent).toBe('There is nothing to change.');
+    expect(sent('PATCH')).toBeUndefined();
+  });
+});
+
+describe('the use of a resource of its own type, on its card', () => {
+  const used = (backend: TestApp['engine']['backend']) => {
+    backend.resources.define('orders-db', {
+      type: 'jdbc-pool',
+      capacity: 2,
+      settings: { kind: 'postgresql', host: 'db', port: 5432, database: 'orders', username: 'reader', connectionsPerRun: 2 },
+      usage: { activeConnections: 1 },
+    });
+    backend.resources.define('llm', {
+      type: 'openai-compatible',
+      capacity: 1,
+      settings: { baseUrl: 'http://llm/v1', requestsPerRun: 1 },
+      usage: { inFlightRequests: 0 },
+    });
+    backend.defineResource('printer');
+  };
+
+  test('the connections that runs hold of a jdbc-pool and the requests in flight to a service, out of their limit; nothing for a counter', async () => {
+    const { view } = await page({ seed: used });
+    await loaded(view);
+    expect(card(view, 'orders-db').querySelector('.type-usage')!.textContent!.trim()).toBe('Connections in use: 1 of 4');
+    expect(card(view, 'llm').querySelector('.type-usage')!.textContent!.trim()).toBe('Requests in flight: 0 of 1');
+    expect(card(view, 'printer').querySelector('.type-usage')).toBeNull();
+  });
+
+  test('is read again with the page, and no check is made for it', async () => {
+    const { view, clock } = await page({ seed: used });
+    await loaded(view);
+    app.engine.backend.resources.setUsage('llm', { inFlightRequests: 1 });
+    clock.advance(3000);
+    await vi.waitFor(() => expect(card(view, 'llm').querySelector('.type-usage')!.textContent!.trim()).toBe('Requests in flight: 1 of 1'));
+    expect(app.engine.log.some((entry) => entry.path.includes('/check'))).toBe(false);
+  });
+
+  test('in zh-TW', async () => {
+    const { view } = await page({ languages: ['zh-TW'], seed: used });
+    await loaded(view);
+    expect(card(view, 'orders-db').querySelector('.type-usage')!.textContent!.trim()).toBe('使用中的連線：1 / 4');
+    expect(card(view, 'llm').querySelector('.type-usage')!.textContent!.trim()).toBe('進行中的請求：0 / 1');
+  });
+});
+
+describe('the forms in zh-TW', () => {
+  test('speak the language of the screen', async () => {
+    const { view } = await page({ languages: ['zh-TW'] });
+    await loaded(view);
+    button(view, '定義資源').click();
+    await tick();
+    choose(dialog(view).querySelector('#resource-type')!, 'jdbc-pool');
+    await tick();
+    expect(dialog(view).querySelector('.pool-size')!.textContent).toContain('連線池大小');
+    choose(dialog(view).querySelector('#resource-type')!, 'openai-compatible');
+    await tick();
+    expect(dialog(view).querySelector('#openai-parameters')!.textContent).toContain('鎖定');
+    choose(dialog(view).querySelector('#resource-type')!, 'file');
+    await tick();
+    expect(dialog(view).textContent).toContain('資源根目錄');
   });
 });

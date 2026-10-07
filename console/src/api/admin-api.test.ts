@@ -405,6 +405,52 @@ describe('typed resources, checks, deleting and secrets', () => {
     });
   });
 
+  test('a resource has the limit of what its entity is asked at once and the use of its type; a counter has neither', async () => {
+    const api = await start();
+    app.engine.backend.resources.define('orders-db', {
+      type: 'jdbc-pool',
+      capacity: 3,
+      settings: { kind: 'postgresql', host: 'db', port: 5432, database: 'orders', username: 'reader', connectionsPerRun: 2 },
+      usage: { activeConnections: 4 },
+    });
+    app.engine.backend.resources.define('llm', {
+      type: 'openai-compatible',
+      capacity: 2,
+      settings: { baseUrl: 'http://llm/v1', requestsPerRun: 1 },
+      usage: { inFlightRequests: 1 },
+    });
+    app.engine.backend.defineResource('printer');
+
+    const byName = Object.fromEntries((await api.resources()).map((r) => [r.name, r]));
+
+    expect(byName['orders-db']).toMatchObject({ concurrencyLimit: 6, usage: { activeConnections: 4 } });
+    expect(byName.llm).toMatchObject({ concurrencyLimit: 2, usage: { inFlightRequests: 1 } });
+    expect(byName.printer).toMatchObject({ concurrencyLimit: null, usage: null });
+  });
+
+  test('a resource is defined with its settings and the alias of its secret, and they are changed; what is refused says its problem', async () => {
+    const api = await start();
+
+    const made = await api.createResource({
+      name: 'orders-db',
+      type: 'jdbc-pool',
+      capacity: 2,
+      settings: { kind: 'postgresql', host: 'db', database: 'orders', username: 'reader' },
+      secretAlias: 'orders-pass',
+    });
+    expect(made).toMatchObject({ settings: { host: 'db', port: 5432 }, secretAlias: 'orders-pass', concurrencyLimit: 2 });
+
+    const changed = await api.updateResource('orders-db', {
+      settings: { ...made.settings, host: 'db.internal' },
+      secretAlias: 'new-pass',
+    });
+    expect(changed).toMatchObject({ settings: { host: 'db.internal' }, secretAlias: 'new-pass' });
+
+    const refused = await api.createResource({ name: 'llm', type: 'openai-compatible', capacity: 1, settings: { baseUrl: 'ftp://x' } }).catch((e) => e);
+    expect(refused).toBeInstanceOf(ApiFailure);
+    expect((refused as ApiFailure).body).toMatchObject({ error: 'invalid_resource', problem: 'invalid_base_url' });
+  });
+
   test('a check gives its result, which is the last check of the resource from then on', async () => {
     const api = await start();
     app.engine.backend.resources.define('share', { type: 'file', settings: { path: 'out.txt' }, entityFailure: 'root_unavailable' });

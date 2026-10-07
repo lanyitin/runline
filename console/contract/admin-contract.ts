@@ -6,7 +6,7 @@
 // resource that cannot be deleted): every name is made new for the run, and a test that changes the
 // allow-list or a setting puts it back, so that the tests can run again on the same Engine.
 
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { uniqueJar } from '../test-support/zip';
 import type { PipelinesContractSetup } from './pipelines-contract';
 import type { ContractCaller } from './system-contract';
@@ -1194,6 +1194,251 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
         expect([method, path, asDeveloper.status, asDeveloper.body?.error]).toEqual([method, path, 403, 'forbidden']);
         expect([method, path, (await call(null, method, path, body)).status]).toEqual([method, path, 401]);
       }
+    });
+  });
+
+  describe(`the settings of each type of resource with ${name}`, () => {
+    // What the forms of the Console send (WI-50) and what they read back: the settings of each type
+    // as the Engine writes them, and the `problem` of what it refuses. Each resource is deleted at
+    // the end, so that the real Engine is left as it was.
+    const resourcePath = (resource: string) => `/api/v1/resources/${resource}`;
+    const create = (body: Record<string, unknown>) => call(root(), 'POST', '/api/v1/resources', body);
+    const change = (resourceName: string, body: unknown) => call(root(), 'PATCH', resourcePath(resourceName), body);
+    const made: string[] = [];
+    const defined = async (body: Record<string, unknown>) => {
+      const answer = await create(body);
+      if (answer.status === 201) made.push(body.name as string);
+      return answer;
+    };
+    afterEach(async () => {
+      for (const resourceName of made.splice(0)) await call(root(), 'DELETE', resourcePath(resourceName));
+    });
+    const refused = async (answer: Promise<Answer>, problem: string) => {
+      const { status, body } = await answer;
+      expect([status, body?.error, body?.problem]).toEqual([422, 'invalid_resource', problem]);
+    };
+
+    test('a file is defined with its path under the resource root, as it was given; it has no secret, no limit and no use of its own', async () => {
+      const resourceName = fresh('file');
+      const path = `${fresh('dir')}/out.txt`;
+      const answer = await defined({ name: resourceName, type: 'file', capacity: 1, settings: { path } });
+      expect(answer.status).toBe(201);
+      expect(answer.body).toMatchObject({
+        type: 'file',
+        settings: { path },
+        secretAlias: null,
+        secretStatus: 'not_set',
+        concurrencyLimit: null,
+        usage: null,
+      });
+    });
+
+    test('a file refuses a path out of the resource root as path_outside_root, no path as invalid_settings, and any secret alias', async () => {
+      const file = (settings: unknown, extra: Record<string, unknown> = {}) =>
+        defined({ name: fresh('file'), type: 'file', capacity: 1, settings, ...extra });
+      await refused(file({ path: '/etc/passwd' }), 'path_outside_root');
+      await refused(file({ path: '../outside.txt' }), 'path_outside_root');
+      await refused(file({ path: 'a/../../outside.txt' }), 'path_outside_root');
+      await refused(file({}), 'invalid_settings');
+      await refused(file({ path: '' }), 'invalid_settings');
+      await refused(file({ path: 'a.txt', mode: 'rw' }), 'invalid_settings');
+      await refused(file({ path: 'a.txt' }, { secretAlias: 'some-key' }), 'invalid_secret_alias');
+    });
+
+    const database = { kind: 'postgresql', host: '127.0.0.1', database: 'orders', username: 'reader' };
+
+    test('a jdbc-pool is written with every effective value; its pool is the capacity times the connections per run, none of which is in use', async () => {
+      const plain = await defined({ name: fresh('db'), type: 'jdbc-pool', capacity: 3, settings: database });
+      expect(plain.status).toBe(201);
+      expect(plain.body).toMatchObject({
+        type: 'jdbc-pool',
+        settings: {
+          ...database,
+          port: 5432,
+          connectionsPerRun: 1,
+          timeouts: { connectMs: 10000, statementMs: 300000, quotaWaitMs: 60000 },
+          maxRows: 10000,
+          maxResponseBytes: 8388608,
+        },
+        secretAlias: null,
+        secretStatus: 'not_set',
+        concurrencyLimit: 3,
+        usage: { activeConnections: 0 },
+      });
+      expect(plain.body.settings.properties).toBeUndefined();
+
+      const full = {
+        ...database,
+        port: 6543,
+        connectionsPerRun: 2,
+        timeouts: { connectMs: 2000, statementMs: 30000, quotaWaitMs: 5000 },
+        properties: { ApplicationName: 'reports', currentSchema: 'sales,public', tcpKeepAlive: 'true' },
+      };
+      const given = await defined({
+        name: fresh('db'),
+        type: 'jdbc-pool',
+        capacity: 2,
+        settings: full,
+        secretAlias: 'Orders-Pass',
+      });
+      expect(given.status).toBe(201);
+      expect(given.body).toMatchObject({
+        settings: { ...full, maxRows: 10000, maxResponseBytes: 8388608 },
+        secretAlias: 'orders-pass',
+        concurrencyLimit: 4,
+      });
+    });
+
+    test('a jdbc-pool says what it refuses: the kind of database, a property that is not allowed, a limit, a timeout, an address, a missing field, any other field', async () => {
+      const pool = (settings: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+        defined({ name: fresh('db'), type: 'jdbc-pool', capacity: 1, settings, ...extra });
+      await refused(pool({ ...database, kind: 'mysql' }), 'unsupported_database');
+      await refused(pool({ ...database, kind: 'PostgreSQL' }), 'unsupported_database');
+      await refused(pool({ ...database, properties: { password: 'x' } }), 'property_not_allowed');
+      await refused(pool({ ...database, properties: { sslmode: 'disable' } }), 'property_not_allowed');
+      await refused(pool({ ...database, properties: { tcpKeepAlive: 'maybe' } }), 'invalid_settings');
+      await refused(pool({ ...database, connectionsPerRun: 65 }), 'invalid_limit');
+      await refused(pool({ ...database, connectionsPerRun: 0 }), 'invalid_limit');
+      await refused(pool({ ...database, timeouts: { statementMs: 0 } }), 'invalid_timeout');
+      await refused(pool({ ...database, timeouts: { idleMs: 10 } }), 'invalid_timeout');
+      await refused(pool({ ...database, host: 'db/other' }), 'invalid_settings');
+      await refused(pool({ ...database, host: 'db:5432' }), 'invalid_settings');
+      await refused(pool({ ...database, port: 70000 }), 'invalid_settings');
+      await refused(pool({ kind: 'postgresql', host: 'db', database: 'orders' }), 'invalid_settings');
+      await refused(pool({ ...database, url: 'jdbc:postgresql://db/orders' }), 'invalid_settings');
+      await refused(pool({ ...database }, { secretAlias: '-bad' }), 'invalid_secret_alias');
+    });
+
+    const DEFAULT_ENDPOINTS = ['chat.completions', 'completions', 'embeddings', 'models.list', 'models.retrieve'];
+
+    test('an openai-compatible service is written with every effective value, its endpoints in the order of the catalog; its limit is the capacity times the requests per run, none of which is in flight', async () => {
+      const plain = await defined({
+        name: fresh('llm'),
+        type: 'openai-compatible',
+        capacity: 2,
+        settings: { baseUrl: 'http://127.0.0.1:9/api/v1/' },
+      });
+      expect(plain.status).toBe(201);
+      expect(plain.body).toMatchObject({
+        type: 'openai-compatible',
+        settings: {
+          baseUrl: 'http://127.0.0.1:9/api/v1',
+          endpoints: DEFAULT_ENDPOINTS,
+          timeouts: { connectMs: 10000, firstByteMs: 900000, idleMs: 300000, quotaWaitMs: 60000 },
+          requestsPerRun: 1,
+          maxRequestBytes: 33554432,
+          maxResponseBytes: 8388608,
+          maxDownloadBytes: 268435456,
+        },
+        secretStatus: 'not_set',
+        concurrencyLimit: 2,
+        usage: { inFlightRequests: 0 },
+      });
+      for (const absent of ['organization', 'project', 'headers', 'defaults', 'allowedModels', 'lockedParameters', 'maxValues']) {
+        expect([absent, plain.body.settings[absent]]).toEqual([absent, undefined]);
+      }
+      expect(plain.body.settings.timeouts.totalMs).toBeUndefined();
+
+      const full = {
+        baseUrl: 'https://llm.internal/v1',
+        organization: 'org-1',
+        project: 'proj-2',
+        headers: { 'X-Team': 'reports' },
+        endpoints: ['audio.speech', 'models.list', 'chat.completions'],
+        timeouts: { connectMs: 1000, firstByteMs: 2000, idleMs: 3000, totalMs: 4000, quotaWaitMs: 5000 },
+        requestsPerRun: 3,
+        defaults: { model: 'small', temperature: 0.2, max_tokens: 512, stop: ['END'], response_format: { type: 'json_object' } },
+        allowedModels: ['small', 'large'],
+        lockedParameters: ['temperature'],
+        maxValues: { max_tokens: 4096 },
+      };
+      const given = await defined({ name: fresh('llm'), type: 'openai-compatible', capacity: 2, settings: full });
+      expect(given.status).toBe(201);
+      expect(given.body).toMatchObject({
+        settings: { ...full, endpoints: ['chat.completions', 'models.list', 'audio.speech'] },
+        concurrencyLimit: 6,
+      });
+    });
+
+    test('an openai-compatible service says what it refuses: the address, a header, an endpoint, the request defaults, a timeout, a limit, any other field', async () => {
+      const service = (settings: Record<string, unknown>) =>
+        defined({ name: fresh('llm'), type: 'openai-compatible', capacity: 1, settings });
+      const at = { baseUrl: 'http://127.0.0.1:9/v1' };
+      for (const baseUrl of ['ftp://llm/v1', 'http://user:pw@llm/v1', 'http://llm/v1?x=1', 'http://llm/v1/../v2', 'llm/v1']) {
+        await refused(service({ baseUrl }), 'invalid_base_url');
+      }
+      await refused(service({}), 'invalid_settings');
+      await refused(service({ ...at, apiKey: 'x' }), 'invalid_settings');
+      await refused(service({ ...at, headers: { 'X-Api-Key': 'x' } }), 'invalid_header');
+      await refused(service({ ...at, headers: { Authorization: 'Bearer x' } }), 'invalid_header');
+      await refused(service({ ...at, headers: { 'Content-Type': 'text/plain' } }), 'invalid_header');
+      await refused(service({ ...at, headers: { 'X-Team': 'a\nb' } }), 'invalid_header');
+      await refused(service({ ...at, organization: 'org\r\nX: y' }), 'invalid_header');
+      await refused(service({ ...at, endpoints: [] }), 'invalid_endpoint');
+      await refused(service({ ...at, endpoints: ['chat.completions', 'shell.exec'] }), 'invalid_endpoint');
+      await refused(service({ ...at, defaults: { messages: [] } }), 'invalid_request_defaults');
+      await refused(service({ ...at, defaults: { temperature: 'hot' } }), 'invalid_request_defaults');
+      await refused(service({ ...at, defaults: { model: 'large' }, allowedModels: ['small'] }), 'invalid_request_defaults');
+      await refused(service({ ...at, defaults: { max_tokens: 9000 }, maxValues: { max_tokens: 4096 } }), 'invalid_request_defaults');
+      await refused(service({ ...at, lockedParameters: ['stream'] }), 'invalid_request_defaults');
+      await refused(service({ ...at, maxValues: { model: 3 } }), 'invalid_request_defaults');
+      await refused(service({ ...at, timeouts: { firstByteMs: 0 } }), 'invalid_timeout');
+      await refused(service({ ...at, timeouts: { readMs: 10 } }), 'invalid_timeout');
+      await refused(service({ ...at, requestsPerRun: 0 }), 'invalid_limit');
+      await refused(service({ ...at, requestsPerRun: 257 }), 'invalid_limit');
+      const unlimited = await service({ ...at, timeouts: { totalMs: null } });
+      expect([unlimited.status, unlimited.body.settings.timeouts.totalMs]).toEqual([201, undefined]);
+    });
+
+    test('the settings are changed as a whole and written out again, which forgets the last check; the alias is changed to another; who changed it is the one who did', async () => {
+      const resourceName = fresh('db');
+      await defined({ name: resourceName, type: 'jdbc-pool', capacity: 2, settings: database, secretAlias: 'old-pass' });
+      await call(root(), 'POST', `${resourcePath(resourceName)}/check`);
+      expect((await call(root(), 'GET', resourcePath(resourceName))).body.lastCheck).not.toBeNull();
+
+      const settings = { ...database, host: 'db.internal', connectionsPerRun: 3 };
+      const changed = await change(resourceName, { settings });
+      expect(changed.status).toBe(200);
+      expect(changed.body).toMatchObject({
+        settings: { ...settings, port: 5432, maxRows: 10000 },
+        secretAlias: 'old-pass',
+        concurrencyLimit: 6,
+        lastCheck: null,
+        updatedBy: root().name,
+      });
+
+      const aliased = await change(resourceName, { secretAlias: 'New-Pass' });
+      expect(aliased.body).toMatchObject({ secretAlias: 'new-pass', settings: { host: 'db.internal' } });
+
+      const both = await change(resourceName, { capacity: 1, settings: database, secretAlias: 'other-pass' });
+      expect(both.body).toMatchObject({ capacity: 1, settings: { host: '127.0.0.1' }, secretAlias: 'other-pass', concurrencyLimit: 1 });
+    });
+
+    test('a change that is not valid changes nothing and says why: the settings, the alias, the name or the type', async () => {
+      const resourceName = fresh('file');
+      const path = `${fresh('dir')}/out.txt`;
+      await defined({ name: resourceName, type: 'file', capacity: 1, settings: { path } });
+      await refused(change(resourceName, { settings: { path: '../out.txt' } }), 'path_outside_root');
+      await refused(change(resourceName, { settings: {} }), 'invalid_settings');
+      await refused(change(resourceName, { secretAlias: 'some-key' }), 'invalid_secret_alias');
+      await refused(change(resourceName, { name: fresh('file') }), 'immutable_name');
+      await refused(change(resourceName, { type: 'file' }), 'immutable_type');
+      await refused(change(resourceName, { capacity: 2, type: 'counter' }), 'immutable_type');
+      expect((await call(root(), 'GET', resourcePath(resourceName))).body).toMatchObject({
+        name: resourceName,
+        type: 'file',
+        capacity: 1,
+        settings: { path },
+      });
+
+      const llm = fresh('llm');
+      await defined({ name: llm, type: 'openai-compatible', capacity: 1, settings: { baseUrl: 'http://127.0.0.1:9/v1' } });
+      await refused(change(llm, { settings: { baseUrl: 'ftp://x' } }), 'invalid_base_url');
+      await refused(change(llm, { secretAlias: '-bad' }), 'invalid_secret_alias');
+      expect((await call(root(), 'GET', resourcePath(llm))).body).toMatchObject({
+        settings: { baseUrl: 'http://127.0.0.1:9/v1' },
+        secretAlias: null,
+      });
     });
   });
 

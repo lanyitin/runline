@@ -158,6 +158,16 @@ export interface Resource {
   secretAlias: string | null;
   /** `not_set`, `found`, `missing` or `invalid_secret`. */
   secretStatus: string;
+  /**
+   * The most requests its entity is asked at once: the capacity times what one holder may do at
+   * once (`jdbc-pool`: the size of the pool); null for the types that cannot say.
+   */
+  concurrencyLimit: number | null;
+  /**
+   * The use of the type's own, as numbers by name: `activeConnections` of a `jdbc-pool`,
+   * `inFlightRequests` of an `openai-compatible` service; null for the other types.
+   */
+  usage: Record<string, number> | null;
   lastCheck: CheckResult | null;
   declaredBy: { count: number; triggers: number; definitions: DeclaringDefinition[] };
   createdBy: string;
@@ -376,6 +386,16 @@ export function parseResource(json: unknown): Resource {
     settings: obj(r.settings, 'resource settings'),
     secretAlias: strOrNull(r.secretAlias, 'resource secretAlias'),
     secretStatus: str(r.secretStatus, 'resource secretStatus'),
+    concurrencyLimit:
+      r.concurrencyLimit === null || r.concurrencyLimit === undefined
+        ? null
+        : num(r.concurrencyLimit, 'resource concurrencyLimit'),
+    usage:
+      r.usage === null || r.usage === undefined
+        ? null
+        : Object.fromEntries(
+            Object.entries(obj(r.usage, 'resource usage')).map(([key, value]) => [key, num(value, 'resource usage')]),
+          ),
     lastCheck: r.lastCheck === null || r.lastCheck === undefined ? null : parseCheck(r.lastCheck),
     declaredBy: readDeclaredBy(r.declaredBy),
     createdBy: str(r.createdBy, 'resource createdBy'),

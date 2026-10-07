@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { formTypes, settingsSummary, takesSecret } from './resource-types';
+import { formTypes, settingsSummary, takesSecret, usageLines } from './resource-types';
 
 describe('the summary of the settings of a resource', () => {
   test('of a counter is nothing: it has no settings', () => {
@@ -50,8 +50,8 @@ describe('the summary of the settings of a resource', () => {
 });
 
 describe('the types of resources', () => {
-  test('a form is offered for a counter only, until the forms of the other types come (WI-50)', () => {
-    expect(formTypes).toEqual(['counter']);
+  test('a form is offered for every type of the closed set', () => {
+    expect(formTypes).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible']);
   });
 
   test('the types that refer to a secret are jdbc-pool and openai-compatible', () => {
@@ -59,5 +59,23 @@ describe('the types of resources', () => {
       'jdbc-pool',
       'openai-compatible',
     ]);
+  });
+});
+
+describe('the use of a resource of its own type', () => {
+  test('of a jdbc-pool is the connections that runs hold, out of the size of the pool', () => {
+    expect(usageLines({ usage: { activeConnections: 3 }, concurrencyLimit: 8 })).toEqual([
+      { measure: 'activeConnections', count: 3, limit: 8 },
+    ]);
+  });
+
+  test('of an openai-compatible service is the requests in flight, out of its limit', () => {
+    expect(usageLines({ usage: { inFlightRequests: 1 }, concurrencyLimit: 2 })).toEqual([
+      { measure: 'inFlightRequests', count: 1, limit: 2 },
+    ]);
+  });
+
+  test('of the other types is nothing', () => {
+    expect(usageLines({ usage: null, concurrencyLimit: null })).toEqual([]);
   });
 });

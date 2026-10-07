@@ -80,6 +80,8 @@ export class FakeEngine {
   requests = 0;
   /** The paths asked, in order, with the Authorization and X-Session-Code header each had (or null). */
   readonly log: Array<{ path: string; authorization: string | null; sessionCode: string | null }> = [];
+  /** What was asked, in order: the method, the path and the body as text (empty for none). */
+  readonly received: Array<{ method: string; path: string; body: string }> = [];
   /** Who is known by token; a token removed from here is refused from then on (an expired session). */
   callers: FakeCaller[] = [];
   /** What the API of the pipelines keeps and does: see fake-backend.ts. */
@@ -121,6 +123,7 @@ export class FakeEngine {
         sessionCode: typeof sessionCode === 'string' ? sessionCode : null,
       });
       const body = await readBody(request);
+      engine.received.push({ method: request.method ?? 'GET', path: request.url ?? '', body: body.toString('utf8') });
 
       const json = (status: number, payload: string, headers: Record<string, string> = {}) => {
         response.writeHead(status, {

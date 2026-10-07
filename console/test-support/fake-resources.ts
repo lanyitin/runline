@@ -6,6 +6,7 @@
 // (contract/admin-contract.ts) hold it to the Engine.
 
 import { answer, failure, jsonObject, type ApiAnswer, type ApiRequest, type FakeRoute } from './fake-api';
+import { TYPE_RULES } from './fake-resource-settings';
 
 export interface FakeResource {
   name: string;
@@ -25,6 +26,12 @@ export interface FakeResource {
    * there. A counter has no entity.
    */
   entityFailure: string | null;
+  /**
+   * The use of the type's own (08-api `usage`): connections held by runs of a `jdbc-pool`, requests
+   * in flight to an `openai-compatible` service; null for the other types. The Fake has no pool and
+   * no service: a test says how much is in use.
+   */
+  usage: Record<string, number> | null;
   createdBy: string;
   createdAt: string;
   updatedBy: string;
@@ -74,11 +81,23 @@ export interface ResourceSecrets {
   statusOf(alias: string): string | undefined;
 }
 
-const jsonObjectOf = (value: unknown): Record<string, unknown> | null =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+/** The closed set of types (ADR-019). */
+const TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible'];
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The use of each type that has one, while nothing uses it. */
+const USAGE: Record<string, Record<string, number>> = {
+  'jdbc-pool': { activeConnections: 0 },
+  'openai-compatible': { inFlightRequests: 0 },
+};
+
+/** The setting that says what one holder may do at once, of each type that has a limit of it. */
+const PER_RUN: Record<string, string> = {
+  'jdbc-pool': 'connectionsPerRun',
+  'openai-compatible': 'requestsPerRun',
+};
 
 const seconds = (since: string) => Math.max(0, Date.now() - Date.parse(since)) / 1000;
 
@@ -113,18 +132,21 @@ export class FakeResources {
       secretAlias?: string | null;
       entityFailure?: string | null;
       lastCheck?: CheckResult | null;
+      usage?: Record<string, number>;
     } = {},
   ) {
+    const type = options.type ?? 'counter';
     const at = new Date().toISOString();
     const by = options.by ?? 'root';
     this.resources.set(name, {
       name,
-      type: options.type ?? 'counter',
+      type,
       capacity: options.capacity ?? 1,
       settings: options.settings ?? {},
       secretAlias: options.secretAlias?.toLowerCase() ?? null,
       lastCheck: options.lastCheck ?? null,
       entityFailure: options.entityFailure ?? null,
+      usage: options.usage ?? USAGE[type] ?? null,
       enabled: options.enabled ?? true,
       createdBy: by,
       createdAt: at,
@@ -139,6 +161,11 @@ export class FakeResources {
       .filter((r) => r.secretAlias === alias)
       .map((r) => r.name)
       .sort();
+  }
+
+  /** What is in use of [name] now, as its entity would say (the Fake has none). */
+  setUsage(name: string, usage: Record<string, number>) {
+    this.resources.get(name)!.usage = usage;
   }
 
   /** A run that holds [name] as it is, for the screens that must show every state. */
@@ -276,8 +303,7 @@ export class FakeResources {
     return {
       ...shown,
       secretStatus: this.secretStatusOf(resource),
-      concurrencyLimit: null,
-      usage: null,
+      concurrencyLimit: this.concurrencyLimitOf(resource),
       declaredBy: this.declaredBy(resource.name),
       holders: (this.holders.get(resource.name) ?? []).map((h) => ({
         runId: h.runId,
@@ -295,6 +321,14 @@ export class FakeResources {
           waitedSeconds: seconds(w.since),
         })),
     };
+  }
+
+  /** The capacity times what one holder may do at once (1 unless set), for the types that say. */
+  private concurrencyLimitOf(resource: FakeResource): number | null {
+    const perRun = PER_RUN[resource.type];
+    if (perRun === undefined) return null;
+    const value = resource.settings[perRun];
+    return resource.capacity * (typeof value === 'number' ? value : 1);
   }
 
   private declaredBy(name: string) {
@@ -317,28 +351,25 @@ export class FakeResources {
     if (!request || typeof request.name !== 'string' || typeof request.capacity !== 'number') {
       return failure(400, 'bad_request', 'The body needs a name and a capacity.');
     }
-    const type = request.type ?? 'counter';
-    if (type !== 'counter' && type !== 'openai-compatible') {
-      // The Engine makes every type of the closed set (WI-43, WI-46, WI-48); the Fake makes counters
-      // and the plainest `openai-compatible` through the API, and a test that needs more seeds it.
-      return failure(422, 'invalid_resource', 'The Fake defines counters and openai-compatible.', {
-        problem: 'unsupported_type',
-      });
-    }
-    const settings = jsonObjectOf(request.settings);
-    const alias = request.secretAlias;
-    if (type === 'counter' && (request.settings !== undefined || alias !== undefined)) {
-      return this.invalid('A counter has no settings and no secret alias.', 'invalid_settings');
-    }
-    if (type === 'openai-compatible' && typeof settings?.baseUrl !== 'string') {
-      return this.invalid('An openai-compatible resource needs a baseUrl.', 'invalid_settings');
-    }
-    if (alias !== undefined && (typeof alias !== 'string' || !NAME.test(alias))) {
-      return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
-    }
-    if (!NAME.test(request.name)) return this.invalid('The name is not valid.');
+    if (!NAME.test(request.name)) return this.invalid('The name is not valid.', 'name');
     if (!Number.isInteger(request.capacity) || request.capacity < 1) {
-      return this.invalid('The capacity must be an integer of one or more.');
+      return this.invalid('The capacity must be an integer of one or more.', 'capacity');
+    }
+    const type = request.type ?? 'counter';
+    if (typeof type !== 'string' || !TYPES.includes(type)) {
+      return this.invalid('The type is not one of the closed set.', 'unknown_type');
+    }
+    const rules = TYPE_RULES[type];
+    if (rules === undefined) {
+      // The Engine makes every type of the closed set (WI-43, WI-46, WI-48); a type the Fake has no
+      // rules for is one a test seeds.
+      return this.invalid(`The Fake does not define ${type} through the API.`, 'unsupported_type');
+    }
+    const settings = rules.settings(request.settings);
+    if ('problem' in settings) return this.invalid('The settings are not valid.', settings.problem);
+    const alias = request.secretAlias;
+    if (alias !== undefined && (!rules.takesSecret || typeof alias !== 'string' || !NAME.test(alias))) {
+      return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
     }
     if (this.resources.has(request.name)) {
       return failure(409, 'resource_exists', `The resource ${request.name} exists.`);
@@ -347,7 +378,7 @@ export class FakeResources {
       capacity: request.capacity,
       by: caller.name,
       type,
-      settings: settings ?? {},
+      settings: settings.settings,
       secretAlias: (alias as string | undefined) ?? null,
     });
     return answer(201, this.doc(this.resources.get(request.name)!), {
@@ -365,25 +396,41 @@ export class FakeResources {
   }
 
   private update({ caller, body }: ApiRequest, name: string): ApiAnswer {
-    const resource = this.resources.get(name);
-    if (!resource) return this.notFound();
     const request = jsonObject(body);
     if (
       !request ||
       (request.capacity !== undefined && typeof request.capacity !== 'number') ||
-      (request.enabled !== undefined && typeof request.enabled !== 'boolean')
+      (request.enabled !== undefined && typeof request.enabled !== 'boolean') ||
+      (request.name !== undefined && typeof request.name !== 'string') ||
+      (request.type !== undefined && typeof request.type !== 'string') ||
+      (request.settings !== undefined &&
+        (typeof request.settings !== 'object' || request.settings === null || Array.isArray(request.settings))) ||
+      (request.secretAlias !== undefined && typeof request.secretAlias !== 'string')
     ) {
-      return failure(400, 'bad_request', 'The body may have capacity and enabled.');
+      return failure(400, 'bad_request', 'The body may have capacity, enabled, settings and secretAlias.');
     }
-    if (request.capacity === undefined && request.enabled === undefined) {
-      return this.invalid('Give a capacity or enabled.');
+    if (request.name !== undefined) return this.invalid('The name cannot be changed.', 'immutable_name');
+    if (request.type !== undefined) return this.invalid('The type cannot be changed.', 'immutable_type');
+    const { capacity, enabled, settings, secretAlias } = request;
+    if ([capacity, enabled, settings, secretAlias].every((value) => value === undefined)) {
+      return this.invalid('Give something to change.', 'nothing_to_change');
     }
-    if (
-      request.capacity !== undefined &&
-      (!Number.isInteger(request.capacity) || (request.capacity as number) < 1)
-    ) {
-      return this.invalid('The capacity must be an integer of one or more.');
+    if (capacity !== undefined && (!Number.isInteger(capacity) || (capacity as number) < 1)) {
+      return this.invalid('The capacity must be an integer of one or more.', 'capacity');
     }
+    const resource = this.resources.get(name);
+    if (!resource) return this.notFound();
+    // The settings replace the stored ones as a whole, and are checked as when it was defined; so is
+    // the alias, against the type.
+    const rules = TYPE_RULES[resource.type];
+    const written = settings === undefined || rules === undefined ? undefined : rules.settings(settings);
+    if (written !== undefined && 'problem' in written) return this.invalid('The settings are not valid.', written.problem);
+    if (secretAlias !== undefined && (rules?.takesSecret !== true || !NAME.test(secretAlias as string))) {
+      return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
+    }
+    if (written !== undefined) resource.settings = written.settings;
+    if (secretAlias !== undefined) resource.secretAlias = (secretAlias as string).toLowerCase();
+    if (settings !== undefined || secretAlias !== undefined) resource.lastCheck = null;
     if (request.capacity !== undefined) resource.capacity = request.capacity as number;
     if (request.enabled !== undefined) resource.enabled = request.enabled as boolean;
     resource.updatedBy = caller.name;

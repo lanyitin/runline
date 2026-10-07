@@ -1,6 +1,6 @@
 # WI-46 `openai-compatible` 型別資源（一次完整回傳）
 
-本文回答：管理員如何把一個 OpenAI 相容服務定義為共享資源，pipeline 如何在版本化的端點目錄與受管理的請求參數下呼叫它。狀態：已核可（2026-10-06）；端點目錄、整體並行與逾時為 2026-10-07 修訂，待使用者確認。相依：WI-41、WI-43（含檢查端點）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「`openai-compatible`」與決定 13、14。串流在 [WI-47](WI-47-openai-compatible-streaming.md)（必要，緊接本項）；多部分上傳與二進位回應的端點在 [WI-53](WI-53-openai-compatible-multipart-and-binary.md)。
+本文回答：管理員如何把一個 OpenAI 相容服務定義為共享資源，pipeline 如何在版本化的端點目錄與受管理的請求參數下呼叫它。狀態：已核可（2026-10-06）；端點目錄、整體並行與逾時為 2026-10-07 修訂；逾時與大小上限的數值已由使用者確認採決定 14 的建議預設（2026-10-07）；已實作（2026-10-07，見「實作結果」；對真實服務的手動實測尚未執行）。相依：WI-41、WI-43（含檢查端點）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「`openai-compatible`」與決定 13、14。串流在 [WI-47](WI-47-openai-compatible-streaming.md)（必要，緊接本項）；多部分上傳與二進位回應的端點在 [WI-53](WI-53-openai-compatible-multipart-and-binary.md)。
 
 ## 背景
 
@@ -75,3 +75,29 @@
 - 存取端契約預留串流與多部分、二進位（WI-47、WI-53），加入時不改變既有呼叫的行為與簽章語意（以回歸測試驗證）；逾時機制從本項起就是首位元組、閒置、選填總時間三種，不以單一整體逾時為基礎。
 - 端點為版本化目錄加管理員啟用；不提供通用 HTTP 轉送，pipeline 不能自選主機、路徑、方法或標頭；邊界只傳 JDK 內建型別。
 - 測試使用 Fake 服務端與真實 PostgreSQL（Testcontainers），不使用 Stub 或 Mock；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。
+
+## 實作結果（2026-10-07）
+
+程式：契約在 `core`（`Accessors.openAiCompatible`、`OpenAiAccessor`、`OpenAiRequest`、`OpenAiTimeouts`、`OpenAiResponse`，`ResourceFailure` 新增的類別，`ResourceAccessException.status`）；Engine 與開發入口共用的主機側程式在 `accessors/src/main/kotlin/openai/`（端點目錄 `OpenAiEndpoints`、設定 `OpenAiSettings`、請求規則 `OpenAiRequestPlan`、傳送與逾時與取消 `OpenAiBinding`、額度 `RequestQuota`、檢查 `OpenAiProbe`、觀察介面 `OpenAiObserver`）；Engine 側在 `engine/src/main/kotlin/resource/`（`OpenAiCompatibleBehavior`、`OpenAiTelemetry`、`OpenAiUsage`，以及 `ResourceCatalog`、`ResourceAdmin`、`ResourceWarnings` 的擴充）；開發入口在 `devkit/src/main/kotlin/LocalResources.kt`。測試：Fake 服務端與其契約在 `accessors/src/testFixtures/kotlin/`（`FakeOpenAiServer`、`OpenAiServerContract`、`BlackHole`、`OpenAiBehaviorSuite`）；各測試在 `accessors/src/test/kotlin/openai/`、`engine/src/test/kotlin/resource/OpenAi*`、`devkit/src/test/kotlin/`。
+
+實作時的決定與細節（超出條文之處，供審閱）：
+
+- **設定欄位與單位**（08-api 有完整表）：`baseUrl`、`organization`、`project`、`headers`、`endpoints`、`timeouts`（`connectMs`、`firstByteMs`、`idleMs`、`totalMs`、`quotaWaitMs`，毫秒，以便測試用短值）、`requestsPerRun`、`maxRequestBytes`、`maxResponseBytes`、`defaults`、`allowedModels`、`lockedParameters`、`maxValues`。寫入資料庫的是正規化形式（每個有效值都明寫，`endpoints` 依目錄順序），所以新版 Engine 新增的條目與改變的預設值不影響既有資源。
+- **回應大小**：本項只有「記憶體內回應上限」（預設 8 MiB，超過為 `RESPONSE_TOO_LARGE`）；決定 14 的「回應總上限 256 MiB」用於寫入檔案的二進位回應，隨 WI-53 加入，本項沒有放一個沒有用處的欄位。
+- **預設參數的範圍**：只有模型與取樣、長度相關的參數（清單見 08-api）可以設為預設、鎖定或上限；`model` 套用到有模型的條目，取樣參數只套用到對話、補全與 responses 的建立，不會被加到嵌入請求。訊息、工具等本文完全由 pipeline 提供。鎖定的參數 pipeline 一提供就被拒絕（即使值相同）；允許的模型清單不空時，沒有模型（含預設）的請求也被拒絕。
+- **`stream`**：`"stream": true`、非 `false` 的值與 `stream_options` 被拒絕為 `STREAM_NOT_SUPPORTED`；`"stream": false` 原樣送出。
+- **逾時的縮短**：pipeline 要求的值比資源的長時，取資源的值（不是拒絕）；資源沒設總時間上限時，pipeline 可以設一個。非正數與不認得的項目是 `INVALID_ARGUMENT`。
+- **重新導向**：根位址之內（同協定、主機、埠，路徑在根路徑之下，先正規化 `..`）的重新導向被跟隨，最多 5 次，307 與 308 保留方法與本文，303 與對 POST 的 301、302 改為 GET；其餘與沒有 `Location` 的重新導向為 `REDIRECT_BLOCKED`，且不對其他位址送出任何請求（以第二個真實服務端驗證）。固定使用 HTTP/1.1。
+- **路徑參數的字元集**：`A-Za-z0-9._:-`、1 至 256 字元、不是 `.` 與 `..`。含 `/` 的模型識別碼（例如 `Qwen/Qwen3-8B`）因此不能經 `models.retrieve` 取得（`models.list` 不受影響）；需要時以條目為單位放寬，放寬前須重新證明不能改變路徑。
+- **金鑰別名**：存成小寫的正規化形式，格式同資源名稱；`PATCH` 可以換別名，沒有「清除別名」的修改（要去掉金鑰須刪除後重建）。別名在金鑰庫缺失或不可用時，run 仍能取得資源，呼叫以 `SECRET_UNAVAILABLE` 失敗且不送出請求；檢查則為 `alias_missing`、`alias_invalid`。資源回應新增 `secretStatus`（`not_set`、`found`、`missing`、`invalid_secret`）、`concurrencyLimit`（容量乘以 `requestsPerRun`）與 `usage`（`inFlightRequests`）。
+- **世代**：每個 run 的存取端各有自己的設定與金鑰快照與自己的 HTTP 用戶端（每種連線逾時一個），存取端失效後立即關閉；因此「舊世代的用戶端在其持有者全部結束後關閉」成立，不共用跨 run 的用戶端池，也不保留跨 run 的連線。
+- **取消**：存取端失效時先呼叫綁定的 `abort`（取消進行中的請求、喚醒等待額度者、之後的呼叫立即失敗），再等進行中的操作結束；run 的 thread 被中斷時，等待額度與請求同樣立即中止（`CANCELLED`，且 thread 維持中斷狀態）。`ResourceBinding` 新增 `close`，失效時呼叫一次。
+- **檢查**：啟用了 `models.list` 時讀它（非 2xx 為 `unexpected_response`），否則對根位址發一個 GET（任何不是 401、403、5xx 的回應都算通過）；用 `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS` 當連線、首位元組與閒置的上限，不用資源自己的逾時；新增的失敗類別：`connection_failed`、`rejected`、`server_error`、`unexpected_response`、`redirect_blocked`、`alias_missing`、`alias_invalid`。
+- **`network` 警告**：新增警告種類 `network_host_has_resource`（`network` 的主機，不分大小寫，與某個 `openai-compatible` 資源的根位址主機相同）；查詢時重新計算，不影響判定。`jdbc-pool` 的主機比對隨 WI-48。
+- **可觀測**：metric 名稱 `runline.resources.openai.*`（`requests.in_flight`、`requests`、`request.duration`、`quota_wait.duration`、`generation.duration`、`timeouts`、`tokens`），標籤只有 `resource`、`type`、`endpoint`、`outcome`、`kind`；每個請求一個 span（`runline.resource.openai.call`），帶 `openai.endpoint`、`openai.outcome`、`openai.quota_wait_ms`、`openai.first_byte_ms`；log 與 trace 不含位址、模型、提示與回應。
+- **既有行為的修正**：`PATCH` 只改容量或啟用狀態時，原本對 `file` 資源也會以 `invalid_settings` 被拒絕（修改的檢查把「沒有給設定」當成「設定不合規」）；已改為只檢查有給的欄位，並以測試鎖定。`openai-compatible` 不再是 `unsupported_type`。
+- **已知限度**：服務端若把金鑰回射到成功回應的本文，pipeline 會拿到它（ADR-019 接受的限度；Engine 不處理本文）；pipeline 的 thread 在 run 結束後才第一次使用的類別，因 class loader 已關閉可能得到 `NoClassDefFoundError` 而不是 `ENDED`（run 內先用過一次的類別不受影響）。串流（`stream`）、多部分上傳與二進位回應不在本項；`responses` 與 `batches` 的串流相關與檔案內容條目隨 WI-47、WI-53。
+- **測試與環境**：Fake 服務端是在真實 socket 上說 HTTP/1.1 的小型實作（每條連線一個請求），契約測試（`OpenAiServerContract`）同時跑在 Fake 上，並在設定了 `RUNLINE_OPENAI_CONTRACT_URL` 時跑在真實服務上（未設定時回報為略過，不是通過）。連線逾時的測試需要一個封包被丟棄的位址（TEST-NET-1，由 `BlackHole` 先探測；網路立即回應時該測試回報為略過）；「連線佇列滿」的做法在 macOS 會被重設而不是丟棄，已放棄。Console 沒有新增錯誤碼（只有 `problem` 值與欄位），`consoleApiDocCheck` 不需要新的翻譯；Console 畫面屬 WI-49、WI-50。
+
+**尚未驗證（需要真實的 lemonade 與另一個 OpenAI 相容服務，本機手動；服務不可用時回報未執行，不得宣稱已驗證）**：以 `RUNLINE_OPENAI_VERIFY_URL=<根位址> RUNLINE_OPENAI_VERIFY_MODEL=<模型> ./gradlew :accessors:verifyOpenAiService` 執行（不屬於 `check`，報告在 `accessors/build/reports/openai-verification.txt`；位址設為 `fake` 時量測 Fake，用來試跑這支腳本本身）：(1) 各條目的實際可用性，含 `rerank` 與 `reranking` 哪個有效；(2) 容量 1 的整體並行是否為 1（腳本量測服務端是否一次只服務一個請求；Fake 驗證的是 Engine 側的上限）；(3) run 取消（連線中斷）後服務端是否停止生成；(4) 長 context 或 thinking 下實際的首位元組時間；另外 `RealOpenAiServerContractTest`（`RUNLINE_OPENAI_CONTRACT_URL`）驗證 Fake 與真實服務的協定一致。
+

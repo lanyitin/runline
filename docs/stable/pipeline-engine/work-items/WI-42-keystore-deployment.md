@@ -1,6 +1,6 @@
 # WI-42 金鑰庫的部署掛載與維運手冊
 
-本文回答：金鑰庫與其密碼如何在 Docker 與 systemd 部署中提供，以及維運如何新增、更新、刪除機密並讓 Engine 重載。狀態：已核可（2026-10-06）。相依：WI-39、WI-41。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 6 點「部署掛載」。
+本文回答：金鑰庫與其密碼如何在 Docker 與 systemd 部署中提供，以及維運如何新增、更新、刪除機密並讓 Engine 重載。狀態：已核可（2026-10-06），已實作（2026-10-07，見「實作結果」）。相依：WI-39、WI-41。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 6 點「部署掛載」。
 
 ## 背景
 
@@ -34,3 +34,10 @@ WI-41 完成 Engine 側機制與前置驗證。本項把掛載方式與維運步
 - 只新增或修改 `deploy/` 與部署文件；不修改應用程式碼（需要時回報，由 WI-41 處理）。
 - 不納入任何真實機密；不新增 CI。
 - 測試使用真實 Docker，不使用 Stub 或 Mock。
+
+## 實作結果（2026-10-07）
+
+- 檔案：`deploy/docker/compose.keystore.yaml`（選用的疊加檔：唯讀掛載金鑰庫目錄、Docker secret 提供密碼檔）、`deploy/systemd/runline-engine-keystore.conf`（選用的 drop-in：`LoadCredential=`）、`deploy/README.md`（維運手冊）、`deploy/.gitignore`、`.env.example`；兩份平台指南與 04 總覽已更新。
+- 與條文的差異：條文說「Compose 範例」掛載；實作為疊加檔而不是寫進 `compose.yaml`，因為沒有金鑰庫是允許的狀態，且 `compose.yaml` 若要求金鑰庫檔案存在，沒有它就無法啟動。金鑰庫以**目錄**而非單一檔案掛載：原子替換換掉 inode，單一檔案的掛載會繼續顯示舊檔（實測）。
+- 測試：`DockerKeystoreMountTest`（真實 Docker、真實 PostgreSQL、真實 `keytool`）。systemd 在特權容器內實測，結果在 04-deployment-systemd.md。迭代次數的屬性與行為在維運手冊，皆實測。
+- 未驗證：Linux 宿主機上的 uid 10001 檔案權限語意（驗證環境為 Colima）；沒有 drop-in 的 systemd 預設情形未重新驗證；`LoadCredential=` 與 `Type=simple` 加 `ExecStartPost=` 的 `systemd-analyze verify` 警告。

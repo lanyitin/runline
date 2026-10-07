@@ -39,7 +39,22 @@
 
 ## 金鑰庫（機密與憑證）
 
-金鑰庫內容與維運規則（機密限可列印 ASCII、以密碼檔參數操作、更新為先刪後建加原子替換、憑證項目不受 ASCII 限制）見 [04](04-deployment.md)「組態與密鑰」與 [ADR-019](adr/ADR-019-typed-shared-resources.md)；Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD_FILE`、`RUNLINE_KEYSTORE_PASSWORD`）與失敗類別見 [04](04-deployment.md)「組態與密鑰」；掛載與維運步驟由 [WI-42](work-items/WI-42-keystore-deployment.md) 落入本文，目前 `deploy/` 的檔案尚未掛載金鑰庫（不設定即沒有金鑰庫）。
+Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD_FILE`、`RUNLINE_KEYSTORE_PASSWORD`）與失敗類別見 [04](04-deployment.md)「組態與密鑰」；金鑰庫的內容與日常維運（建立、新增、更新、刪除、憑證、迭代次數、備份）見[維運手冊](../../../deploy/README.md)。不設定金鑰庫是允許的，所以掛載放在選用的疊加檔 `deploy/docker/compose.keystore.yaml`，不在 `compose.yaml` 內：
+
+```
+docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.keystore.yaml up -d
+```
+
+| 項目 | 內容 |
+|---|---|
+| 金鑰庫 | 宿主機目錄（預設 `deploy/docker/keystore/`，以 `.env` 的 `KEYSTORE_HOST_DIR` 改）**唯讀**掛到容器的 `/etc/runline/keystore`，`RUNLINE_KEYSTORE_PATH=/etc/runline/keystore/runline.p12` |
+| 密碼 | Docker secret，來源是宿主機的密碼檔（預設 `deploy/docker/secrets/keystore-password`，以 `.env` 的 `KEYSTORE_PASSWORD_HOST_FILE` 改），在容器內是 `/run/secrets/runline_keystore_password`（唯讀），`RUNLINE_KEYSTORE_PASSWORD_FILE` 指向它；不經環境變數 |
+| 為什麼掛目錄 | 更新是以更名覆蓋原子替換檔案；只掛單一檔案時，容器會繼續看到被取代的舊檔（實測）。更名在宿主機上做，Engine 的掛載保持唯讀 |
+| 映像 | 不含金鑰庫與密碼；`docker history`、映像各層與容器的環境變數都找不到金鑰庫密碼（由測試驗證） |
+| 宿主機權限 | 兩個檔案只有 Engine 的帳號（uid 10001）讀得到：目錄與檔案屬於 10001 或其群組，檔案權限 `0400` 或 `0440`；其他使用者可讀時 Engine 啟動記錄警告。這是 Linux 宿主機的檔案權限語意，本專案的驗證在 Colima（macOS）上做，該環境不呈現 Linux 的擁有者與權限，**沒有在 Linux 宿主機上實測** |
+| 版本庫 | 兩個預設目錄列在 `deploy/.gitignore`；版本庫沒有真實金鑰庫與密碼，`.env.example` 只有佔位值 |
+
+以真實 Docker 驗證：`./gradlew :engine:packagedTest --tests '*DockerKeystoreMountTest*'` 用 `compose.yaml`、`compose.keystore.yaml`、Dockerfile 與以真實 `keytool` 做的金鑰庫建立整組服務：(1) Engine 啟動、`GET /api/v1/secrets` 列出別名；(2) 在容器內寫入金鑰庫目錄失敗，兩個掛載（金鑰庫與密碼 secret）的 `RW` 都是 `false`；(3) 容器環境變數、映像歷史與映像各層（`docker save` 的位元組）都找不到密碼；(4) 在宿主機以副本加更名原子替換金鑰庫後，`POST /api/v1/secrets/reload` 回報新別名；(5) 密碼錯誤時 Engine 容器以非 0 結束，log 含 `wrong_password` 而不含任何密碼。
 
 ## 已接受的限度
 

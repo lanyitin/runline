@@ -141,6 +141,8 @@ val packagedTest by
       systemProperty("runline.consoleDir", rootProject.file("console").absolutePath)
       systemProperty("runline.repoRoot", rootProject.projectDir.absolutePath)
       systemProperty("runline.gradlew", rootProject.file("gradlew").absolutePath)
+      // The tests that run the real Compose files rerun when those change.
+      inputs.dir(rootProject.file("deploy/docker")).withPropertyName("dockerDeployFiles")
       inputs
           .file(rootProject.file("gradle/build-info.gradle.kts"))
           .withPropertyName("buildInfoScript")

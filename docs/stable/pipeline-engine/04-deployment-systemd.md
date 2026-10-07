@@ -37,7 +37,23 @@
 
 ## 金鑰庫（機密與憑證）
 
-金鑰庫內容與維運規則（機密限可列印 ASCII、以密碼檔參數操作、更新為先刪後建加原子替換、憑證項目不受 ASCII 限制）見 [04](04-deployment.md)「組態與密鑰」與 [ADR-019](adr/ADR-019-typed-shared-resources.md)；Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD_FILE`、`RUNLINE_KEYSTORE_PASSWORD`）與失敗類別見 [04](04-deployment.md)「組態與密鑰」；掛載與維運步驟由 [WI-42](work-items/WI-42-keystore-deployment.md) 落入本文，目前 `deploy/` 的檔案尚未掛載金鑰庫（不設定即沒有金鑰庫）。
+Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD_FILE`、`RUNLINE_KEYSTORE_PASSWORD`）與失敗類別見 [04](04-deployment.md)「組態與密鑰」；金鑰庫的內容與日常維運見[維運手冊](../../../deploy/README.md)。不設定金鑰庫是允許的，所以組態放在選用的 drop-in `deploy/systemd/runline-engine-keystore.conf`（安裝為 `/etc/systemd/system/runline-engine.service.d/keystore.conf`），不在單元檔內：
+
+| 項目 | 內容 |
+|---|---|
+| 金鑰庫 | `/etc/runline/keystore/runline.p12`；目錄 `root:runline` `0750`，檔案 `root:runline` `0640`：服務帳號（群組）可讀，其他使用者不可讀（群組可讀不觸發 Engine 的警告）。不在共享、資源與 run 私有目錄之下 |
+| 密碼 | systemd 憑證：`LoadCredential=keystore-password:/etc/runline/keystore-password`，來源檔 `root:root` `0600`（服務帳號讀不到它）；systemd 在服務的憑證目錄提供，`RUNLINE_KEYSTORE_PASSWORD_FILE=%d/keystore-password`（實測為 `/run/credentials/runline-engine.service/keystore-password`，只有該服務的行程讀得到）。密碼不在環境檔，也不在行程環境變數 |
+| 替換金鑰庫 | `cp -p` 保留擁有者與權限（沒有 `-p` 時副本的擁有者與權限取決於 root 的 umask，服務帳號可能讀不到；此點未實測），改副本後 `mv -f`，再呼叫重載端點；見維運手冊 |
+| 密碼輪替 | 更新 `/etc/runline/keystore-password` 後 `systemctl restart runline-engine`（憑證在服務啟動時載入） |
+
+驗證（2026-10-07，Colima 上的特權容器內執行 systemd 259，JDK 25，另一個容器是 PostgreSQL 17，用 README 的安裝步驟加上述兩個檔案）：
+
+- `systemd-analyze verify` 對 `runline-engine.service` 與 drop-in 只有一則警告：`Service uses a combination of Type=simple, ExecStartPost=, and credentials. This could lead to race conditions. Continuing.`；服務照常啟動，實測沒有問題，但警告存在。
+- 啟動成功：`GET /api/v1/secrets` 以管理員 token 列出別名；`/etc/runline/keystore-password` 服務帳號讀不到（Permission denied），`runline` 帳號讀得到金鑰庫，`nobody` 讀不到；服務行程的環境變數有 `RUNLINE_KEYSTORE_PATH` 與 `RUNLINE_KEYSTORE_PASSWORD_FILE`，沒有密碼。
+- 以 `cp -p`、`keytool`、`mv -f` 原子替換後 `POST /api/v1/secrets/reload` 回報新別名；刪除別名後再重載亦然。
+- 密碼錯誤：主行程以結束代碼 1 結束，log 為 `KeystoreOpenException: The keystore cannot be opened: wrong_password`，log 中沒有該密碼。**因為 `ExecStartPost` 的就緒等待最多 60 秒，單元在主行程失敗後仍維持 `activating`，約 60 秒後才以 `exit-code` 失敗**；這是既有的單元設計，不是金鑰庫特有，已知而未修改。
+- 金鑰庫檔案權限 `0644` 時，啟動記錄警告 `The keystore file is readable by other users; restrict it to the service account`。
+- 沒有掛上 drop-in 的預設情形（不設金鑰庫）沒有在本次重新驗證；drop-in 之外沒有改動單元檔。
 
 ## 已接受的限度
 

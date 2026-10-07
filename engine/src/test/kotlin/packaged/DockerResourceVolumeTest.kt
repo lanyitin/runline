@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.engine.support.ComposeProject
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.RunHarness
 import dev.lawlan.runline.engine.support.TestTimeouts
@@ -10,7 +11,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.TimeUnit
 import kotlin.test.*
 import kotlinx.serialization.json.*
 
@@ -31,37 +31,17 @@ class DockerResourceVolumeTest {
   private val admin = "tok-admin-for-the-volume-test"
   private val developer = "tok-dev-for-the-volume-test"
 
-  private fun compose(vararg args: String, timeoutMinutes: Long = 10): String {
-    val command =
-        listOf(
-            "docker",
-            "compose",
-            "-p",
-            project,
-            "--env-file",
-            work.resolve("env").toString(),
-            "-f",
-            repo.resolve("deploy/docker/compose.yaml").toString(),
-            "-f",
-            work.resolve("override.yaml").toString(),
-        ) + args
-    val builder = ProcessBuilder(command).redirectErrorStream(true).directory(work.toFile())
-    // The Dockerfile is outside the build context (as the real file says); the build is done by
-    // Docker without the extra permission prompt of bake for reading it.
-    builder.environment()["COMPOSE_BAKE"] = "false"
-    builder.environment()["BUILDX_BAKE_ENTITLEMENTS_FS"] = "0"
-    val process = builder.start()
-    val output = StringBuilder()
-    val reader = Thread { output.append(process.inputStream.readAllBytes().decodeToString()) }
-    reader.start()
-    if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES)) {
-      process.destroyForcibly()
-      fail("${command.joinToString(" ")} did not finish within $timeoutMinutes minutes:\n$output")
-    }
-    reader.join()
-    assertEquals(0, process.exitValue(), "${command.joinToString(" ")}:\n$output")
-    return output.toString()
+  private val stack by lazy {
+    ComposeProject(
+        work,
+        project,
+        work.resolve("env"),
+        listOf(repo.resolve("deploy/docker/compose.yaml"), work.resolve("override.yaml")),
+    )
   }
+
+  private fun compose(vararg args: String, timeoutMinutes: Long = 10): String =
+      stack.compose(*args, timeoutMinutes = timeoutMinutes)
 
   @BeforeTest
   fun configure() {

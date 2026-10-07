@@ -44,6 +44,8 @@ internal class OpenAiCompatibleBehavior(
   override fun concurrencyLimit(resource: SharedResource): Int? =
       settingsOf(resource)?.let { resource.capacity * it.requestsPerRun }
 
+  override fun hostOf(resource: SharedResource): String? = settingsOf(resource)?.baseUrl?.host
+
   override fun bind(resource: SharedResource): ResourceBinding {
     val settings = settingsOf(resource) ?: throw ResourceUnavailable(resource.name)
     return OpenAiBinding(resource.name, settings, credentialOf(resource), observer)

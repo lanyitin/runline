@@ -49,6 +49,12 @@ interface ResourceBehavior {
   fun concurrencyLimit(resource: SharedResource): Int? = null
 
   /**
+   * The host of the entity behind [resource], where it has one: what a pipeline's `network` must
+   * not need to name to use the resource (it is warned if it does). Null for a type without one.
+   */
+  fun hostOf(resource: SharedResource): String? = null
+
+  /**
    * The accessor for a run that holds [resource], bound to its settings as they are now; null for a
    * type that has no accessor. Fails with [ResourceUnavailable] when the entity cannot be used.
    */

@@ -48,6 +48,8 @@ internal class JdbcPoolBehavior(
   override fun concurrencyLimit(resource: SharedResource): Int? =
       settingsOf(resource)?.let { resource.capacity * it.connectionsPerRun }
 
+  override fun hostOf(resource: SharedResource): String? = settingsOf(resource)?.host
+
   override fun bind(resource: SharedResource): ResourceBinding {
     val settings = settingsOf(resource) ?: throw ResourceUnavailable(resource.name)
     return pools.bind(resource.name, settings, credentialOf(resource), resource.capacity, observer)

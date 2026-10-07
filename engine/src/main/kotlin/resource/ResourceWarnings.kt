@@ -1,7 +1,5 @@
 package dev.lawlan.runline.engine.resource
 
-import dev.lawlan.runline.accessors.openai.OpenAiSettings
-import dev.lawlan.runline.accessors.openai.SettingsResult
 import dev.lawlan.runline.engine.artifact.AccessLimitDoc
 import dev.lawlan.runline.engine.artifact.ArtifactRecord
 import dev.lawlan.runline.engine.artifact.DefinitionRecord
@@ -21,6 +19,7 @@ import kotlinx.serialization.Serializable
 class ResourceWarnings(
     private val availability: ResourceAvailability,
     private val store: ResourceStore,
+    private val behaviors: ResourceBehaviors,
 ) {
   /** A function giving the warnings of any definition of [artifacts], from one lookup. */
   fun lookup(artifacts: List<ArtifactRecord>): (DefinitionRecord) -> List<WarningDoc> {
@@ -41,16 +40,11 @@ class ResourceWarnings(
     }
   }
 
-  /** The host of each resource that has one (the `openai-compatible` ones), in lower case. */
+  /** The host of each resource that has one (`openai-compatible`, `jdbc-pool`), in lower case. */
   private fun resourceHosts(): List<Pair<String, String>> =
-      store
-          .list()
-          .filter { it.type == ResourceType.OPENAI_COMPATIBLE }
-          .mapNotNull { resource ->
-            val settings =
-                (OpenAiSettings.parse(resource.settings) as? SettingsResult.Valid)?.settings
-            settings?.baseUrl?.host?.lowercase()?.let { resource.name to it }
-          }
+      store.list().mapNotNull { resource ->
+        behaviors.of(resource.type)?.hostOf(resource)?.lowercase()?.let { resource.name to it }
+      }
 
   private fun networkHostsOfResources(
       network: AccessLimitDoc,

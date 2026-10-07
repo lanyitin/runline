@@ -244,5 +244,72 @@ class RealServiceVerificationTest {
     assertTrue(report.isNotEmpty())
   }
 
+  @Test
+  fun `when the first event comes and how long the waits between events are, with a long context`() {
+    val b = binding()
+    val filler =
+        "The quick brown fox jumps over the lazy dog. ".repeat(longChars / 45 + 1).take(longChars)
+    val prompt = "$filler\nSummarise the text above in three sentences."
+    val start = System.nanoTime()
+    var firstAt: Long? = null
+    var last = start
+    var longest = 0L
+    var events = 0
+    val outcome =
+        try {
+          val opened =
+              b.execute(
+                  "openai.stream.open",
+                  mapOf(
+                      "endpoint" to "chat.completions",
+                      "body" to chat(256, prompt),
+                      "timeoutsMillis" to mapOf("firstByte" to 3_600_000L, "idle" to 3_600_000L),
+                  ),
+              ) as Map<*, *>
+          while (true) {
+            b.execute("openai.stream.next", mapOf("stream" to opened["stream"])) ?: break
+            val now = System.nanoTime()
+            if (firstAt == null) firstAt = (now - start) / 1_000_000
+            longest = maxOf(longest, (now - last) / 1_000_000)
+            last = now
+            events++
+          }
+          "ok"
+        } catch (e: ResourceOperationFailure) {
+          "${e.failure}|${e.status}"
+        }
+    say(
+        "stream: a context of about $longChars characters, $outcome, $events events, first event after $firstAt ms, " +
+            "the longest wait between two events $longest ms, took ${(System.nanoTime() - start) / 1_000_000} ms; " +
+            "set idleMs well above the longest wait seen (a service that does not stream its thinking waits long), and firstByteMs above the first event time"
+    )
+    assertTrue(report.isNotEmpty())
+  }
+
+  @Test
+  fun `whether the service stops generating when a stream is closed`() {
+    val b = binding()
+    val opened =
+        b.execute(
+            "openai.stream.open",
+            mapOf(
+                "endpoint" to "chat.completions",
+                "body" to chat(2000, "Write a very long story."),
+            ),
+        ) as Map<*, *>
+    try {
+      b.execute("openai.stream.next", mapOf("stream" to opened["stream"]))
+      b.execute("openai.stream.close", mapOf("stream" to opened["stream"]))
+      val (after, afterMillis) = timed { call(binding(), "chat.completions", chat(1)) }
+      say(
+          "stream close: a short request right after closing a long stream took $afterMillis ms ($after); " +
+              "compare with the idle time under `cancel`: a large difference means the service goes on generating after the stream is closed"
+      )
+    } finally {
+      b.abort()
+    }
+    assertTrue(report.isNotEmpty())
+  }
+
   @Suppress("unused") private val unused: JsonObject? = null
 }

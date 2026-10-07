@@ -85,10 +85,17 @@ println(answer.body)
 ```
 
 - `OpenAiRequest(endpoint, body, pathParameters, query, timeouts)`：`endpoint` 是目錄條目的名稱（`chat.completions`、`completions`、`embeddings`、`models.list`、`models.retrieve` 預設啟用，其他由管理員逐條啟用；完整目錄見 [08-api](pipeline-engine/08-api.md) 的「`openai-compatible` 型別」）；`body` 是該條目的 JSON 本文，資源的預設（模型、取樣與長度參數）在先，你提供的同名值蓋過它；`pathParameters`、`query` 只填條目列出者。你不能指定主機、路徑、方法或標頭；金鑰、organization、project 與額外標頭由資源注入，你提供的標頭不存在這條路。
-- 管理員可以鎖定參數、限制可用的模型、給數值參數上限；違反時得到 `ResourceAccessException`，`failure` 為 `PARAMETER_LOCKED`、`MODEL_NOT_ALLOWED`、`VALUE_ABOVE_LIMIT`，且不送出請求。`stream` 由資源管理，目前要求串流會得到 `STREAM_NOT_SUPPORTED`（串流隨後加入）。
+- 管理員可以鎖定參數、限制可用的模型、給數值參數上限；違反時得到 `ResourceAccessException`，`failure` 為 `PARAMETER_LOCKED`、`MODEL_NOT_ALLOWED`、`VALUE_ABOVE_LIMIT`，且不送出請求。`stream` 由資源管理：`call` 的本文帶 `stream` 得到 `STREAM_NOT_SUPPORTED`，要串流請用 `stream(...)`（見下）。
 - 錯誤只含類別與（服務有回應時的）HTTP 狀態碼 `e.status`，沒有服務回的訊息或本文：`DENIED`（401、403）、`RATE_LIMITED`（429）、`SERVER_ERROR`（5xx）、`REQUEST_REJECTED`（其他 4xx）、`CONNECTION_FAILED`、`REDIRECT_BLOCKED`、`RESPONSE_TOO_LARGE`、`CANCELLED`、`SECRET_UNAVAILABLE`，以及五種逾時各自的類別（`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT`、`QUOTA_WAIT_TIMEOUT`）。**不會自動重試**，要不要重試由你決定。
 - `OpenAiTimeouts(connect, firstByte, idle, total, quotaWait)` 可以縮短任何一種逾時，不能放寬。預設的首位元組逾時很長（15 分鐘）：非串流呼叫在生成結束前收不到任何位元組，它實質上就是整體生成上限。
-- 同一個 run 同時進行的請求數受資源的 `requestsPerRun`（預設 1）限制；用盡時 `call` 等待額度（受 `quotaWait` 與 run 的取消約束）。用多條 thread 呼叫時，超過額度的呼叫會排隊，不會同時送出。串流（隨後加入）進行中時，同一條 thread 在拉取串流時再發請求會等不到額度，須先結束或關閉串流。
+- 同一個 run 同時進行的請求數受資源的 `requestsPerRun`（預設 1）限制；用盡時 `call` 等待額度（受 `quotaWait` 與 run 的取消約束）。用多條 thread 呼叫時，超過額度的呼叫會排隊，不會同時送出。串流進行中時，同一條 thread 在拉取串流時再發請求會等不到額度，須先結束或關閉串流。
+- 串流（[WI-47](pipeline-engine/work-items/WI-47-openai-compatible-streaming.md)）：`stream(OpenAiRequest(...))` 對可串流的條目（`chat.completions`、`completions`、`responses.create`）回傳 `OpenAiStream`，以 `next()` 逐個事件拉取（每次是一個事件的 `data` 文字，結束時為 `null`），用完以 `close()` 或 `use` 關閉。你不設 `stream`，由資源設定；要用量就在本文帶 `"stream_options":{"include_usage":true}`。
+  ```kotlin
+  lemon.stream(OpenAiRequest("chat.completions", """{"messages":[{"role":"user","content":"hi"}]}""")).use { s ->
+      while (true) println(s.next() ?: break)
+  }
+  ```
+  首位元組逾時涵蓋到第一個事件，之後 `idle` 涵蓋兩個事件之間，持續送出資料的串流不因整體時間逾時（`total` 選填）；斷線為 `CONNECTION_FAILED`，已拉到的事件在你手上，之後的拉取得到同一個類別。串流佔用額度直到結束或關閉。
 - 回應標頭已剝除憑證（名稱含 `auth`、`key`、`token`、`secret`、`cookie`），值中的金鑰以 `***` 取代；回應本文不被處理。
 
 本機設定（開發入口不連 Engine，也沒有金鑰庫）：`RUNLINE_RESOURCES` 的 `lemon=openai-compatible:openai/lemon.json` 指向專案內的 JSON 檔，內容是管理員給 Engine 的同一份 `settings`（欄位見 08-api），另可加 `"secretAlias": "lemon-key"`；金鑰從環境變數 `RUNLINE_SECRET_LEMON_KEY` 讀取。設定檔不合規、讀不到或別名不合規時啟動即失敗，只說類別，不顯示值；別名設定了但環境沒有金鑰時，呼叫得到 `SECRET_UNAVAILABLE`，不會送出請求。開發入口可以連真實服務。使用存取端不改變 safe 或 unsafe 的判定，也不需要在 `network` 宣告服務的主機。錄製時只記錄資源名稱、型別與動作類別，不記錄端點、本文或位址。

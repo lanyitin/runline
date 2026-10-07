@@ -5,6 +5,7 @@ import dev.lawlan.runline.accessors.ResourceOperationFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
 import java.io.ByteArrayOutputStream
+import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import java.net.URI
@@ -18,6 +19,7 @@ import java.time.Duration
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -289,6 +291,13 @@ class OpenAiBinding(
     @Volatile var stream: InputStream? = null
     @Volatile var total: ScheduledFuture<*>? = null
 
+    /** What the call has open besides the connection: the files an upload reads from. */
+    private val holdings: MutableList<Closeable> = CopyOnWriteArrayList()
+
+    fun holding(closeable: Closeable) {
+      holdings += closeable
+    }
+
     /** The stream this call has become, which is over as soon as the call is stopped. */
     @Volatile var owner: OpenStream? = null
 
@@ -300,6 +309,7 @@ class OpenAiBinding(
     fun release() {
       if (!released.compareAndSet(false, true)) return
       total?.cancel(false)
+      holdings.forEach { runCatching { it.close() } }
       live -= this
       quota.release()
     }
@@ -326,11 +336,17 @@ class OpenAiBinding(
     var uri = plan.uri
     var method = plan.method
     var body = plan.body
+    var upload = plan.upload
     var hops = 0
     while (true) {
       val client = clientFor(call.limits.connectMillis)
+      val content = upload?.open(settings.maxRequestBytes)?.also { call.holding(it) }
       val response =
-          awaitHeaders(call, client, request(uri, method, body, call.limits, plan.streaming))
+          awaitHeaders(
+              call,
+              client,
+              request(uri, method, body, content, call.limits, plan.streaming),
+          )
       val status = response.statusCode()
       call.stream = response.body()
       report.status = status
@@ -342,6 +358,7 @@ class OpenAiBinding(
         if (status == 303 || (status != 307 && status != 308 && method == "POST")) {
           method = "GET"
           body = null
+          upload = null
         }
         uri = next
         continue
@@ -523,12 +540,14 @@ class OpenAiBinding(
       uri: URI,
       method: String,
       body: ByteArray?,
+      upload: OpenedUpload?,
       limits: OpenAiLimits,
       streaming: Boolean,
   ): HttpRequest {
     val builder = HttpRequest.newBuilder(uri).timeout(Duration.ofMillis(limits.firstByteMillis))
     builder.header("Accept", if (streaming) "text/event-stream" else "application/json")
     if (body != null) builder.header("Content-Type", "application/json")
+    if (upload != null) builder.header("Content-Type", upload.contentType)
     (credential as? OpenAiCredential.Key)?.let {
       builder.header("Authorization", "Bearer ${it.value}")
     }
@@ -537,8 +556,15 @@ class OpenAiBinding(
     settings.headers.forEach { (name, value) -> builder.header(name, value) }
     builder.method(
         method,
-        if (body == null) HttpRequest.BodyPublishers.noBody()
-        else HttpRequest.BodyPublishers.ofByteArray(body),
+        when {
+          upload != null ->
+              HttpRequest.BodyPublishers.fromPublisher(
+                  HttpRequest.BodyPublishers.ofInputStream { upload.stream },
+                  upload.length,
+              )
+          body != null -> HttpRequest.BodyPublishers.ofByteArray(body)
+          else -> HttpRequest.BodyPublishers.noBody()
+        },
     )
     return builder.build()
   }

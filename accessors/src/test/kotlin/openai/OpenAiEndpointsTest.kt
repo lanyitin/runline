@@ -71,10 +71,10 @@ class OpenAiEndpointsTest {
   }
 
   @Test
-  fun `an entry is delivered when its request is JSON or empty and its answer is JSON`() {
+  fun `an entry the catalog names but this version cannot carry out yet is not delivered`() {
     val undelivered = OpenAiEndpoints.all.filterNot { it.delivered }.map { it.id }.toSet()
 
-    // Multipart requests and binary answers are WI-53, event streams are WI-47.
+    // Entries come in as they are carried out (WI-53): what is left here cannot be enabled.
     assertEquals(
         setOf(
             "images.edits",
@@ -82,15 +82,10 @@ class OpenAiEndpointsTest {
             "audio.speech",
             "audio.transcriptions",
             "audio.translations",
-            "files.create",
             "files.content",
         ),
         undelivered,
     )
-    for (entry in OpenAiEndpoints.all.filter { it.delivered }) {
-      assertTrue(entry.body != BodyKind.MULTIPART, entry.id)
-      assertTrue(entry.response != ResponseKind.BINARY, entry.id)
-    }
   }
 
   @Test

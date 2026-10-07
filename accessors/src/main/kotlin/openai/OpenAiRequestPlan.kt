@@ -1,8 +1,10 @@
 package dev.lawlan.runline.accessors.openai
 
 import dev.lawlan.runline.accessors.ResourceOperationFailure
+import dev.lawlan.runline.accessors.ScopeDirectory
 import dev.lawlan.runline.core.ResourceFailure
 import java.net.URI
+import java.nio.file.Path
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -26,6 +28,8 @@ private constructor(
     val limits: OpenAiLimits,
     /** Whether the answer is a stream of events, which the resource asks the service for. */
     val streaming: Boolean = false,
+    /** The multipart form to send instead of a JSON body, for the entries that take one. */
+    internal val upload: UploadForm? = null,
 ) {
   val method: String
     get() = endpoint.method
@@ -34,6 +38,8 @@ private constructor(
     /** A request for the base address itself, with [settings]' limits; for checks only. */
     internal fun root(settings: OpenAiSettings): OpenAiRequestPlan =
         OpenAiRequestPlan(OpenAiEndpoints.ROOT, settings.baseUrl, null, settings.timeouts)
+
+    private val FILE_NAME = Regex("[A-Za-z0-9._ -]{1,128}")
 
     private val TIMEOUT_NAMES = setOf("connect", "firstByte", "idle", "total", "quotaWait")
 
@@ -58,19 +64,50 @@ private constructor(
       val path = endpoint.pathFor(stringMap(arguments["pathParameters"]))
       val query = endpoint.queryFor(stringMap(arguments["query"]))
       val limits = limitsOf(settings.timeouts, arguments["timeoutsMillis"])
+      val upload = if (endpoint.body == BodyKind.MULTIPART) uploadOf(endpoint, arguments) else null
       val text = arguments["body"]
       if (text != null && text !is String) throw invalid()
-      val body = bodyOf(settings, endpoint, text as String?, streaming)
+      val body =
+          if (upload != null) null else bodyOf(settings, endpoint, text as String?, streaming)
       return OpenAiRequestPlan(
           endpoint,
           URI.create(settings.baseUrl.toString() + path + query),
           body,
           limits,
           streaming,
+          upload,
       )
     }
 
     private fun invalid() = ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
+
+    /** The form a pipeline asked for: its text fields and the file parts it gave. */
+    private fun uploadOf(endpoint: OpenAiEndpoint, arguments: Map<String, Any?>): UploadForm {
+      val parts =
+          (arguments["files"] as? List<*> ?: emptyList<Any?>()).map { given ->
+            val part = given as Map<*, *>
+            val source =
+                if (part["bytes"] != null) UploadSource.Bytes(part["bytes"] as ByteArray)
+                else
+                    UploadSource.Scoped(
+                        ScopeDirectory.at(part["root"] as String),
+                        part["path"] as String,
+                    )
+            val name =
+                part["filename"] as String? ?: Path.of(part["path"] as String).fileName.toString()
+            // One rule: a plain name, so that nothing in it can end a header line or a quoted
+            // value.
+            if (!FILE_NAME.matches(name) || name == "." || name == "..") throw invalid()
+            UploadPart(part["field"] as String, name, source)
+          }
+      if (!parts.all { part -> endpoint.fileParts.any { it.field == part.field } }) throw invalid()
+      if (parts.map { it.field }.toSet().size != parts.size) throw invalid()
+      val given = parts.map { it.field }.toSet()
+      if (!endpoint.fileParts.all { !it.required || it.field in given }) throw invalid()
+      val fields = stringMap(arguments["fields"])
+      if (!endpoint.fields.containsAll(fields.keys)) throw invalid()
+      return UploadForm(fields, parts)
+    }
 
     private fun stringMap(value: Any?): Map<String, String> {
       if (value == null) return emptyMap()

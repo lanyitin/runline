@@ -1,11 +1,8 @@
 package dev.lawlan.runline.accessors
 
 import dev.lawlan.runline.core.ResourceFailure
-import java.io.IOException
-import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.LinkOption
-import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
@@ -27,7 +24,7 @@ class FileEntity(
     private val relative: String,
     private val maxReadBytes: Long = DEFAULT_MAX_READ_BYTES,
 ) {
-  fun readBytes(): ByteArray = io {
+  fun readBytes(): ByteArray = Confinement.io {
     val file = Confinement.locate(root, relative, createParents = false)
     Files.newByteChannel(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use {
       // One byte more than the limit is read, so a file over it is told from one exactly at it.
@@ -46,7 +43,7 @@ class FileEntity(
   fun appendBytes(bytes: ByteArray) = put(bytes, StandardOpenOption.APPEND)
 
   private fun put(bytes: ByteArray, mode: StandardOpenOption) {
-    io {
+    Confinement.io {
       val file = Confinement.locate(root, relative, createParents = true)
       Files.newByteChannel(
               file,
@@ -63,29 +60,4 @@ class FileEntity(
     /** The most one read returns unless the host says otherwise: 10 MiB. */
     const val DEFAULT_MAX_READ_BYTES = 10L * 1024 * 1024
   }
-
-  /** What went wrong on the file system, as a category; the exception goes along for the log. */
-  private fun <T> io(body: () -> T): T =
-      try {
-        body()
-      } catch (e: ResourceOperationFailure) {
-        throw e
-      } catch (e: NoSuchFileException) {
-        throw ResourceOperationFailure(ResourceFailure.NOT_FOUND, e)
-      } catch (e: FileSystemException) {
-        // Opening a link with NOFOLLOW_LINKS: it was put there after the check above.
-        throw ResourceOperationFailure(
-            if (
-                e.reason?.contains("symbolic", ignoreCase = true) == true ||
-                    e.reason?.contains("too many levels", ignoreCase = true) == true
-            ) {
-              ResourceFailure.PATH_REJECTED
-            } else {
-              ResourceFailure.FAILED
-            },
-            e,
-        )
-      } catch (e: IOException) {
-        throw ResourceOperationFailure(ResourceFailure.FAILED, e)
-      }
 }

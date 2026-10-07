@@ -17,6 +17,11 @@ enum class ResponseKind {
 }
 
 /**
+ * A file part of a multipart entry: the form field it goes in, and whether the request needs it.
+ */
+class FilePart(val field: String, val required: Boolean = true)
+
+/**
  * One entry of the endpoint catalog (ADR-019 decision 13): a request a pipeline may ask an
  * `openai-compatible` resource to make. Method, path, body and answer are fixed here; a pipeline
  * names the entry by [id] and can only fill the parameters the entry lists.
@@ -37,17 +42,20 @@ class OpenAiEndpoint(
     val takesModel: Boolean = false,
     /** Whether the body takes sampling and length parameters, which the resource may default. */
     val takesSampling: Boolean = false,
+    /** For a multipart entry: the text fields a request may have; nothing else is let through. */
+    val fields: Set<String> = emptySet(),
+    /** For a multipart entry: the file parts a request may have, each at most once. */
+    val fileParts: List<FilePart> = emptyList(),
+    /**
+     * Whether this version of the Engine can carry the entry out. An entry the catalog names that
+     * is not delivered cannot be enabled for a resource; it is how a version adds an entry before
+     * it works.
+     */
+    val delivered: Boolean = body != BodyKind.MULTIPART && response != ResponseKind.BINARY,
 ) {
   /** The names in braces in [path], in order. */
   val pathParameters: List<String> =
       Regex("\\{([a-z_]+)}").findAll(path).map { it.groupValues[1] }.toList()
-
-  /**
-   * Whether this version of the Engine can carry the entry out: a request that is JSON or empty
-   * with an answer that is JSON. Multipart requests and binary answers come with WI-53.
-   */
-  val delivered: Boolean
-    get() = body != BodyKind.MULTIPART && response != ResponseKind.BINARY
 
   /**
    * The path with the parameters in it, each one checked and nothing but a plain identifier let
@@ -129,8 +137,25 @@ object OpenAiEndpoints {
       default: Boolean = false,
   ) = OpenAiEndpoint(id, method, path, BodyKind.NONE, ResponseKind.JSON, false, query, default)
 
-  private fun upload(id: String, path: String) =
-      OpenAiEndpoint(id, "POST", path, BodyKind.MULTIPART, ResponseKind.JSON)
+  private fun upload(
+      id: String,
+      path: String,
+      fields: Set<String>,
+      files: List<FilePart>,
+      model: Boolean = false,
+      delivered: Boolean = false,
+  ) =
+      OpenAiEndpoint(
+          id,
+          "POST",
+          path,
+          BodyKind.MULTIPART,
+          ResponseKind.JSON,
+          takesModel = model,
+          fields = fields,
+          fileParts = files,
+          delivered = delivered,
+      )
 
   val all: List<OpenAiEndpoint> =
       listOf(
@@ -169,8 +194,8 @@ object OpenAiEndpoints {
           json("rerank", "POST", "/rerank", model = true),
           json("reranking", "POST", "/reranking", model = true),
           json("images.generations", "POST", "/images/generations", model = true),
-          upload("images.edits", "/images/edits"),
-          upload("images.variations", "/images/variations"),
+          upload("images.edits", "/images/edits", emptySet(), emptyList()),
+          upload("images.variations", "/images/variations", emptySet(), emptyList()),
           OpenAiEndpoint(
               "audio.speech",
               "POST",
@@ -180,9 +205,15 @@ object OpenAiEndpoints {
               true,
               takesModel = true,
           ),
-          upload("audio.transcriptions", "/audio/transcriptions"),
-          upload("audio.translations", "/audio/translations"),
-          upload("files.create", "/files"),
+          upload("audio.transcriptions", "/audio/transcriptions", emptySet(), emptyList()),
+          upload("audio.translations", "/audio/translations", emptySet(), emptyList()),
+          upload(
+              "files.create",
+              "/files",
+              setOf("purpose"),
+              listOf(FilePart("file")),
+              delivered = true,
+          ),
           plain("files.list", "GET", "/files", setOf("purpose", "limit", "after", "order")),
           plain("files.retrieve", "GET", "/files/{id}"),
           plain("files.delete", "DELETE", "/files/{id}"),

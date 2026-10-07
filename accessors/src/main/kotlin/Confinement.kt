@@ -1,9 +1,12 @@
 package dev.lawlan.runline.accessors
 
 import dev.lawlan.runline.core.ResourceFailure
+import java.io.IOException
+import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
 /**
@@ -47,4 +50,29 @@ internal object Confinement {
   }
 
   private fun rejected() = ResourceOperationFailure(ResourceFailure.PATH_REJECTED)
+
+  /** What went wrong on the file system, as a category; the exception goes along for the log. */
+  fun <T> io(body: () -> T): T =
+      try {
+        body()
+      } catch (e: ResourceOperationFailure) {
+        throw e
+      } catch (e: NoSuchFileException) {
+        throw ResourceOperationFailure(ResourceFailure.NOT_FOUND, e)
+      } catch (e: FileSystemException) {
+        // Opening a link with NOFOLLOW_LINKS: it was put there after the check of the path.
+        throw ResourceOperationFailure(
+            if (
+                e.reason?.contains("symbolic", ignoreCase = true) == true ||
+                    e.reason?.contains("too many levels", ignoreCase = true) == true
+            ) {
+              ResourceFailure.PATH_REJECTED
+            } else {
+              ResourceFailure.FAILED
+            },
+            e,
+        )
+      } catch (e: IOException) {
+        throw ResourceOperationFailure(ResourceFailure.FAILED, e)
+      }
 }

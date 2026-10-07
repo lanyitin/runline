@@ -41,6 +41,7 @@ const jars = (): DemoJars => ({
   failing: jar('demo-failing'),
   unsafe: jar('demo-unsafe'),
   resource: jar('demo-resource'),
+  typed: jar('demo-typed'),
   noPipeline: storedZip({ 'hello.txt': 'there is no pipeline here' }),
   junk: new TextEncoder().encode('this is not a jar'),
 });

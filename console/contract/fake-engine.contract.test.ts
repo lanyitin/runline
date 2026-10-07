@@ -18,7 +18,14 @@ beforeAll(async () => {
       commitHash: 'a3f9c1e2d93e4f5a6b7c8d9e0f1a2b3c4d5e6f70',
       dirty: false,
     },
-    { callers, maxUploadBytes: uploadLimitBytes },
+    {
+      callers,
+      maxUploadBytes: uploadLimitBytes,
+      keystore: [
+        { alias: 'openai-key', type: 'secret', status: 'found', fingerprint: 'f1' },
+        { alias: 'corporate-ca', type: 'trusted_certificate', status: 'found', fingerprint: 'f2' },
+      ],
+    },
   );
 });
 afterAll(() => engine.stop());

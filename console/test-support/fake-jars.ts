@@ -34,6 +34,8 @@ export interface FakePipeline {
   networkUnrestricted?: boolean;
   processesUnrestricted?: boolean;
   resources?: string[];
+  /** The type expected of a declared resource, by its name; only those declared with a type. */
+  resourceTypes?: Record<string, string>;
   reasons?: FakeReason[];
   /** Classes the pipeline refers to: UNSAFE for as long as no allow-list entry covers one. */
   references?: string[];
@@ -87,11 +89,21 @@ const resource: FakePipeline = {
   references: ['java.io.PrintStream'],
 };
 
+const typed: FakePipeline = {
+  name: 'demo-typed',
+  className: 'samples.typed.TypedPipeline',
+  resources: ['demo-printer'],
+  resourceTypes: { 'demo-printer': 'file' },
+  references: ['java.io.PrintStream'],
+};
+
 export interface DemoJars {
   slow: Uint8Array;
   failing: Uint8Array;
   unsafe: Uint8Array;
   resource: Uint8Array;
+  /** `demo-typed`: declares `demo-printer` and expects it to be a `file`. */
+  typed: Uint8Array;
   /** A zip file with nothing in it that is a pipeline. */
   noPipeline: Uint8Array;
   /** Bytes that are no zip file at all. */
@@ -104,6 +116,7 @@ export function demoJars(): DemoJars {
     failing: fakeJar([failing]),
     unsafe: fakeJar([unsafe]),
     resource: fakeJar([resource]),
+    typed: fakeJar([typed]),
     noPipeline: storedZip({ 'hello.txt': 'there is no pipeline here' }),
     junk: new TextEncoder().encode('this is not a jar'),
   };

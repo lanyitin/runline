@@ -873,6 +873,102 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       expect(listed.find((r: any) => r.name === resourceName)).toMatchObject({ capacity: 2 });
     });
 
+    test('a resource defined with a name and a capacity is a counter: no settings, no secret alias, no limit or use of its own, never checked, and declared by nobody', async () => {
+      const resourceName = fresh('res');
+      const answer = await create({ name: resourceName, capacity: 1 });
+      const expected = {
+        type: 'counter',
+        settings: {},
+        secretAlias: null,
+        secretStatus: 'not_set',
+        concurrencyLimit: null,
+        usage: null,
+        lastCheck: null,
+        declaredBy: { count: 0, triggers: 0, definitions: [] },
+      };
+      expect(answer.body).toMatchObject(expected);
+      expect(await resource(resourceName)).toMatchObject(expected);
+      const typed = await create({ name: fresh('res'), capacity: 1, type: 'counter' });
+      expect([typed.status, typed.body.type]).toEqual([201, 'counter']);
+    });
+
+    test('a resource names the definitions that declare it, by version and pipeline, with the type each expects and the triggers bound to it', async () => {
+      const { contentHash } = await uploaded(setup.jars().resource);
+      await printer(1);
+      const declaring = (body: any) =>
+        body.declaredBy.definitions.find(
+          (d: any) => d.contentHash === contentHash && d.uploader === ada().name && d.pipeline === 'demo-resource',
+        );
+      const before = await resource('demo-printer');
+      expect(declaring(before)).toMatchObject({ declaredType: null });
+      expect(before.declaredBy.count).toBe(before.declaredBy.definitions.length);
+
+      const trigger = fresh('cron');
+      const made = await call(root(), 'POST', '/api/v1/triggers', {
+        name: trigger,
+        kind: 'cron',
+        contentHash,
+        uploader: ada().name,
+        pipeline: 'demo-resource',
+        cron: '0 3 1 1 *',
+        enabled: false,
+      });
+      expect(made.status).toBe(201);
+      try {
+        const after = await resource('demo-printer');
+        expect(declaring(after).triggers).toBe(declaring(before).triggers + 1);
+        expect(after.declaredBy.triggers).toBe(before.declaredBy.triggers + 1);
+      } finally {
+        await call(root(), 'DELETE', `/api/v1/triggers/${trigger}`);
+      }
+    });
+
+    test('a definition that expects a type is named with that type, and its pipeline says when the type is not the resource\'s', async () => {
+      const typedVersion = await uploaded(setup.jars().typed);
+      const plainVersion = await uploaded(setup.jars().resource);
+      await printer(1);
+      const typed = (await resource('demo-printer')).declaredBy.definitions.find(
+        (d: any) => d.contentHash === typedVersion.contentHash && d.uploader === ada().name,
+      );
+      expect(typed).toMatchObject({ pipeline: 'demo-typed', declaredType: 'file' });
+
+      const pipelineOf = async (contentHash: string, pipeline: string) =>
+        (await call(ada(), 'GET', `/api/v1/artifacts/${contentHash}`)).body.pipelines.find(
+          (p: any) => p.name === pipeline,
+        );
+      const typedPipeline = await pipelineOf(typedVersion.contentHash, 'demo-typed');
+      expect(typedPipeline.metadata.resources).toEqual(['demo-printer']);
+      expect(typedPipeline.metadata.resourceTypes).toEqual({ 'demo-printer': 'file' });
+      expect(typedPipeline.warnings).toContainEqual(
+        expect.objectContaining({ kind: 'resource_type_mismatch', resource: 'demo-printer' }),
+      );
+      const plainPipeline = await pipelineOf(plainVersion.contentHash, 'demo-resource');
+      expect(plainPipeline.metadata.resourceTypes).toEqual({});
+      expect(plainPipeline.warnings).toEqual([]);
+    });
+
+    test('a check of a counter passes, and is kept as the last check, which a change of capacity or of being enabled keeps; a resource that is not there is a 404', async () => {
+      const resourceName = fresh('res');
+      await create({ name: resourceName, capacity: 1 });
+      const checked = await call(root(), 'POST', `${resourcePath(resourceName)}/check`);
+      expect(checked.status).toBe(200);
+      expect(checked.body).toMatchObject({ ok: true, failure: null });
+      expect(checked.body.checkedAt).toMatch(ISO);
+      // The Engine answers the time of the check to the nanosecond and keeps it to the microsecond:
+      // the same check, at the same instant as far as a millisecond can tell.
+      const sameCheck = (kept: any) => {
+        expect({ ok: kept.ok, failure: kept.failure }).toEqual({ ok: true, failure: null });
+        expect(Math.abs(Date.parse(kept.checkedAt) - Date.parse(checked.body.checkedAt))).toBeLessThanOrEqual(1);
+      };
+      sameCheck((await resource(resourceName)).lastCheck);
+
+      await call(root(), 'PATCH', resourcePath(resourceName), { capacity: 2, enabled: false });
+      sameCheck((await resource(resourceName)).lastCheck);
+
+      const missing = await call(root(), 'POST', `${resourcePath(fresh('missing'))}/check`);
+      expect([missing.status, missing.body.error]).toEqual([404, 'resource_not_found']);
+    });
+
     test('a name in use is a 409 resource_exists; a name or capacity that is not valid is a 422 invalid_resource; a body that is not JSON is a 400', async () => {
       const resourceName = fresh('res');
       await create({ name: resourceName, capacity: 1 });
@@ -1014,6 +1110,73 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       }
     });
 
+    test('a preview of deleting a resource says what declares it and whether it is in use, and changes nothing; deleting it then leaves it nowhere', async () => {
+      const resourceName = fresh('res');
+      await create({ name: resourceName, capacity: 1 });
+      const preview = await call(root(), 'DELETE', `${resourcePath(resourceName)}?preview=true`);
+      expect(preview.status).toBe(200);
+      expect(preview.body).toEqual({
+        resource: resourceName,
+        definitions: 0,
+        triggers: 0,
+        holders: 0,
+        waiters: 0,
+        inUse: false,
+      });
+      expect((await call(root(), 'GET', resourcePath(resourceName))).status).toBe(200);
+
+      const deleted = await call(root(), 'DELETE', resourcePath(resourceName));
+      expect(deleted.status).toBe(204);
+      const gone = await call(root(), 'GET', resourcePath(resourceName));
+      expect([gone.status, gone.body.error]).toEqual([404, 'resource_not_found']);
+      const listed = (await call(root(), 'GET', '/api/v1/resources')).body.resources;
+      expect(listed.some((r: any) => r.name === resourceName)).toBe(false);
+      const again = await create({ name: resourceName, capacity: 2 });
+      expect(again.status).toBe(201);
+    });
+
+    test('deleting a resource that is not there is a 404, previewed or not; a preview that is not true or false is a 400', async () => {
+      const missing = fresh('missing');
+      for (const path of [resourcePath(missing), `${resourcePath(missing)}?preview=true`]) {
+        const answer = await call(root(), 'DELETE', path);
+        expect([path, answer.status, answer.body.error]).toEqual([path, 404, 'resource_not_found']);
+      }
+      const resourceName = fresh('res');
+      await create({ name: resourceName, capacity: 1 });
+      const bad = await call(root(), 'DELETE', `${resourcePath(resourceName)}?preview=maybe`);
+      expect([bad.status, bad.body.error]).toEqual([400, 'bad_request']);
+      expect((await call(root(), 'GET', resourcePath(resourceName))).status).toBe(200);
+    });
+
+    test('a resource that a run holds is not deleted: the preview says it is in use and counts what declares it, and the delete is a 409 resource_in_use with the holders and waiters', async () => {
+      const { contentHash } = await uploaded(setup.jars().resource);
+      await printer(1);
+      await untilPrinter(0, 0);
+      const run = await startPrinterRun(contentHash);
+      const held = await untilPrinter(1, 0);
+      try {
+        const preview = await call(root(), 'DELETE', `${resourcePath('demo-printer')}?preview=true`);
+        expect(preview.body).toEqual({
+          resource: 'demo-printer',
+          definitions: held.declaredBy.count,
+          triggers: held.declaredBy.triggers,
+          holders: 1,
+          waiters: 0,
+          inUse: true,
+        });
+        const refused = await call(root(), 'DELETE', resourcePath('demo-printer'));
+        expect([refused.status, refused.body.error, refused.body.holders, refused.body.waiters]).toEqual([
+          409,
+          'resource_in_use',
+          1,
+          0,
+        ]);
+        expect((await resource('demo-printer')).holders).toHaveLength(1);
+      } finally {
+        await cancelAll([run]);
+      }
+    });
+
     test('only an admin: a developer is a 403 forbidden and nobody is a 401, for every call', async () => {
       const resourceName = fresh('res');
       await create({ name: resourceName, capacity: 1 });
@@ -1023,10 +1186,78 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
         ['GET', resourcePath(resourceName), undefined],
         ['PATCH', resourcePath(resourceName), { capacity: 2 }],
         ['POST', `${resourcePath(resourceName)}/holders/00000000-0000-4000-8000-000000000000/release`, undefined],
+        ['POST', `${resourcePath(resourceName)}/check`, undefined],
+        ['DELETE', `${resourcePath(resourceName)}?preview=true`, undefined],
+        ['DELETE', resourcePath(resourceName), undefined],
       ] as const) {
         const asDeveloper = await call(ada(), method, path, body);
         expect([method, path, asDeveloper.status, asDeveloper.body?.error]).toEqual([method, path, 403, 'forbidden']);
         expect([method, path, (await call(null, method, path, body)).status]).toEqual([method, path, 401]);
+      }
+    });
+  });
+
+  describe(`secrets with ${name}`, () => {
+    test('only an admin: a developer is a 403 forbidden and nobody is a 401, to list and to reload', async () => {
+      for (const [method, path] of [
+        ['GET', '/api/v1/secrets'],
+        ['POST', '/api/v1/secrets/reload'],
+      ] as const) {
+        const asDeveloper = await call(ada(), method, path);
+        expect([path, asDeveloper.status, asDeveloper.body?.error]).toEqual([path, 403, 'forbidden']);
+        expect([path, (await call(null, method, path)).status]).toEqual([path, 401]);
+      }
+    });
+
+    test('the aliases of the keystore are listed in order, each with its type, its status and the resources that use it; a reload says how many there are, and that none changed since the last one', async () => {
+      const listed = await call(root(), 'GET', '/api/v1/secrets');
+      if (listed.status === 409) {
+        // An Engine without a keystore says so to both.
+        expect(listed.body.error).toBe('secret_store_not_configured');
+        const reload = await call(root(), 'POST', '/api/v1/secrets/reload');
+        expect([reload.status, reload.body.error]).toEqual([409, 'secret_store_not_configured']);
+        return;
+      }
+      expect(listed.status).toBe(200);
+      const secrets = listed.body.secrets as any[];
+      const aliases = secrets.map((secret) => secret.alias);
+      expect(aliases).toEqual([...aliases].sort());
+      for (const secret of secrets) {
+        expect(Object.keys(secret).sort()).toEqual(['alias', 'status', 'type', 'usedBy']);
+        expect(secret.alias).toBe(secret.alias.toLowerCase());
+        expect(['secret', 'trusted_certificate', 'private_key']).toContain(secret.type);
+        expect(['found', 'invalid_secret']).toContain(secret.status);
+        expect(secret.usedBy).toEqual([...secret.usedBy].sort());
+      }
+
+      await call(root(), 'POST', '/api/v1/secrets/reload');
+      const reload = await call(root(), 'POST', '/api/v1/secrets/reload');
+      expect(reload.status).toBe(200);
+      expect(reload.body).toEqual({ aliases: secrets.length, changed: [] });
+    });
+
+    test('a resource that refers to an alias the keystore does not have keeps the alias in lower case, says it is missing, and its check fails as alias_missing without asking the service', async () => {
+      const resourceName = fresh('res');
+      const alias = `${fresh('Key')}`.toUpperCase();
+      const made = await call(root(), 'POST', '/api/v1/resources', {
+        name: resourceName,
+        capacity: 1,
+        type: 'openai-compatible',
+        settings: { baseUrl: 'http://127.0.0.1:9/v1' },
+        secretAlias: alias,
+      });
+      try {
+        expect(made.status).toBe(201);
+        expect(made.body).toMatchObject({
+          type: 'openai-compatible',
+          secretAlias: alias.toLowerCase(),
+          secretStatus: 'missing',
+        });
+        expect(made.body.settings.baseUrl).toBe('http://127.0.0.1:9/v1');
+        const checked = await call(root(), 'POST', `/api/v1/resources/${resourceName}/check`);
+        expect(checked.body).toMatchObject({ ok: false, failure: 'alias_missing' });
+      } finally {
+        await call(root(), 'DELETE', `/api/v1/resources/${resourceName}`);
       }
     });
   });

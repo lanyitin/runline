@@ -26,7 +26,8 @@ import {
   ambiguousVersion,
 } from './fake-api';
 import { FakeAllowList, judge } from './fake-allowlist';
-import { FakeResources } from './fake-resources';
+import { FakeResources, type DeclaringDefinition } from './fake-resources';
+import { FakeSecrets, type FakeKeystoreEntry } from './fake-secrets';
 import { FakeTriggers, type FakeTrigger } from './fake-triggers';
 
 export type { ApiAnswer, ApiRequest, FakeCallerRef } from './fake-api';
@@ -93,6 +94,7 @@ export interface Definition {
     network: { unrestricted: boolean; allow: string[] };
     processes: { unrestricted: boolean; allow: string[] };
     resources: string[];
+    resourceTypes: Record<string, string>;
   };
   verdict: 'SAFE' | 'UNSAFE';
   reasons: Array<Required<FakeReason>>;
@@ -118,6 +120,8 @@ interface Artifact {
 const LIMITATIONS =
   'The analysis only checks the class references of the compiled classes (a Fake).';
 
+/** The closed set of the types of shared resources (ADR-019). */
+const RESOURCE_TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible'];
 const RESOURCE_NAME = /^[A-Za-z0-9._-]+$/;
 const PIPELINE_NAME = /^(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -131,6 +135,8 @@ export interface FakeBackendOptions {
   startDelayMs?: number;
   /** How long `demo-resource` holds its shared resource (the sample holds it for 20 seconds). */
   resourceHoldMs?: number;
+  /** The keystore the Engine is started with; none when left out. */
+  keystore?: FakeKeystoreEntry[];
 }
 
 export class FakeBackend {
@@ -138,7 +144,12 @@ export class FakeBackend {
   readonly artifacts = new Map<string, Artifact>();
   readonly runs: FakeRun[] = [];
   /** The shared resources that are defined, who holds them and who waits. */
-  readonly resources = new FakeResources();
+  readonly resources: FakeResources = new FakeResources(
+    { declarersOf: (name) => this.declarersOf(name) },
+    { statusOf: (alias) => this.secrets.statusOf(alias) },
+  );
+  /** The keystore: none until a test configures one, as an Engine without RUNLINE_KEYSTORE_PATH. */
+  readonly secrets: FakeSecrets = new FakeSecrets({ usersOf: (alias) => this.resources.usersOf(alias) });
   maxUploadBytes: number;
   autoRun: boolean;
   startDelayMs: number;
@@ -153,6 +164,7 @@ export class FakeBackend {
     ...this.triggers.routes,
     ...this.allowList.routes,
     ...this.resources.routes,
+    ...this.secrets.routes,
     {
       method: 'DELETE',
       pattern: /^\/api\/v1\/artifacts\/([^/]+)$/,
@@ -175,6 +187,7 @@ export class FakeBackend {
     this.autoRun = options.autoRun ?? true;
     this.startDelayMs = options.startDelayMs ?? 5;
     this.resourceHoldMs = options.resourceHoldMs ?? 20_000;
+    if (options.keystore) this.secrets.configure(options.keystore);
   }
 
   stop() {
@@ -323,24 +336,40 @@ export class FakeBackend {
       reasons: d.reasons,
       allowListVersion: d.allowListVersion,
       allowUnsafeExecution: d.allowUnsafeExecution,
-      warnings: d.metadata.resources.flatMap((resource) => {
-        const enabled = this.resources.enabledOf(resource);
-        if (enabled === true) return [];
-        return [
-          enabled === undefined
-            ? {
-                kind: 'resource_unknown',
-                resource,
-                message: `The resource ${resource} is not defined.`,
-              }
-            : {
-                kind: 'resource_disabled',
-                resource,
-                message: `The resource ${resource} is disabled.`,
-              },
-        ];
-      }),
+      warnings: this.warningsOf(d.metadata),
     };
+  }
+
+  /** As the Engine warns: one problem of each declared resource, and a declared type out of the set. */
+  private warningsOf(metadata: Definition['metadata']) {
+    const warning = (kind: string, resource: string, message: string) => ({ kind, resource, message });
+    const outsideTheSet = (resource: string) => {
+      const declared = metadata.resourceTypes[resource];
+      return declared !== undefined && !RESOURCE_TYPES.includes(declared);
+    };
+    return [
+      ...metadata.resources.flatMap((resource) => {
+        const enabled = this.resources.enabledOf(resource);
+        const declared = metadata.resourceTypes[resource];
+        if (enabled === undefined) {
+          return [warning('resource_unknown', resource, `The resource ${resource} is not defined.`)];
+        }
+        if (!enabled) {
+          return [warning('resource_disabled', resource, `The resource ${resource} is disabled.`)];
+        }
+        if (declared !== undefined && !outsideTheSet(resource) && declared !== this.resources.typeOf(resource)) {
+          return [
+            warning('resource_type_mismatch', resource, `The resource ${resource} is not of the declared type.`),
+          ];
+        }
+        return [];
+      }),
+      ...Object.keys(metadata.resourceTypes)
+        .filter(outsideTheSet)
+        .map((resource) =>
+          warning('resource_type_unknown', resource, `The type declared for ${resource} is not one of the set.`),
+        ),
+    ];
   }
 
   private artifactDoc(a: Artifact) {
@@ -872,6 +901,7 @@ export class FakeBackend {
         network: { unrestricted: pipeline.networkUnrestricted ?? false, allow: [] },
         processes: { unrestricted: pipeline.processesUnrestricted ?? false, allow: [] },
         resources: pipeline.resources ?? [],
+        resourceTypes: pipeline.resourceTypes ?? {},
       },
       verdict: 'SAFE',
       reasons: [],
@@ -890,6 +920,21 @@ export class FakeBackend {
     definition.reasons = [...given, ...uncovered];
     definition.verdict = definition.reasons.length > 0 ? 'UNSAFE' : 'SAFE';
     return definition;
+  }
+
+  /** The definitions that declare the shared resource [name], with the triggers bound to each. */
+  private declarersOf(name: string): DeclaringDefinition[] {
+    return this.allDefinitions()
+      .filter(({ definition }) => definition.metadata.resources.includes(name))
+      .map(({ contentHash, uploader, definition }) => ({
+        contentHash,
+        uploader,
+        pipeline: definition.name,
+        declaredType: definition.metadata.resourceTypes[name] ?? null,
+        triggers: [...this.triggers.triggers.values()].filter(
+          (t) => t.contentHash === contentHash && t.uploader === uploader && t.pipeline === definition.name,
+        ).length,
+      }));
   }
 
   /** Every pipeline of every version, with the hash of the version. */

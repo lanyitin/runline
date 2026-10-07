@@ -327,7 +327,8 @@ class OpenAiBinding(
         response.body().close()
         throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
       }
-      if (plan.streaming) return startStream(call, response, status, report, plan.endpoint.id)
+      if (plan.streaming)
+          return startStream(call, response, status, report, plan.endpoint.id, sentAt)
       val readStart = System.nanoTime()
       val text = readBody(call, response.body(), status)
       report.generationMillis = millisSince(readStart)
@@ -340,19 +341,28 @@ class OpenAiBinding(
     }
   }
 
-  private fun startStream(
-      call: Call,
-      response: HttpResponse<InputStream>,
-      status: Int,
-      report: Report,
-      endpoint: String,
-  ): Map<String, Any?> {
-    val input = response.body()
-    val id = streamIds.incrementAndGet()
-    val events = ServerSentEvents {
-      val read =
+  /** The bytes of a stream as they come, under the limits on time and open to being cut. */
+  private inner class Wire(
+      private val call: Call,
+      private val input: InputStream,
+      private val sentAt: Long,
+  ) {
+    private var begun = false
+
+    fun read(buffer: ByteArray): Int {
+      // Until the first byte of the answer it is the first byte limit that counts, from the
+      // request.
+      val first =
+          if (begun) null
+          else
+              TIMERS.schedule(
+                  { call.stop(ResourceFailure.FIRST_BYTE_TIMEOUT) },
+                  maxOf(call.limits.firstByteMillis - millisSince(sentAt), 0),
+                  TimeUnit.MILLISECONDS,
+              )
+      val count =
           try {
-            input.read(it)
+            input.read(buffer)
           } catch (e: IOException) {
             throw stopped(call)
                 ?: if (Thread.currentThread().isInterrupted || e.cause is InterruptedException) {
@@ -360,10 +370,26 @@ class OpenAiBinding(
                 } else {
                   classifyIo(e)
                 }
+          } finally {
+            first?.cancel(false)
           }
-      stopped(call)?.let { stop -> throw stop }
-      read
+      stopped(call)?.let { throw it }
+      if (count > 0) begun = true
+      return count
     }
+  }
+
+  private fun startStream(
+      call: Call,
+      response: HttpResponse<InputStream>,
+      status: Int,
+      report: Report,
+      endpoint: String,
+      sentAt: Long,
+  ): Map<String, Any?> {
+    val wire = Wire(call, response.body(), sentAt)
+    val id = streamIds.incrementAndGet()
+    val events = ServerSentEvents { wire.read(it) }
     streams[id] = OpenStream(call, report, endpoint, events)
     call.keptOpen = true
     report.handedOver = true

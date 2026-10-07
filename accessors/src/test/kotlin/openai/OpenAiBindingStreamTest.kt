@@ -235,4 +235,43 @@ class OpenAiBindingStreamTest {
     server.script = null
     assertEquals(200, callWithQuotaWait(b, 200)["status"], "the share is free again")
   }
+
+  /** A service that answers at once and then takes [firstMillis] to send the first event. */
+  private fun prefill(firstMillis: Long) {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.pause(firstMillis)
+      response.event("""{"n":1}""")
+      response.endChunked()
+      true
+    }
+  }
+
+  @Test
+  fun `the first byte limit covers the time to the first event, not only to the headers`() {
+    prefill(2000)
+    val b = binding("\"timeouts\":{\"firstByteMs\":300}")
+
+    val start = System.nanoTime()
+    val opened = open(b)
+    val opening = (System.nanoTime() - start) / 1_000_000
+    val e = failure { next(b, opened) }
+    val took = (System.nanoTime() - start) / 1_000_000
+
+    assertTrue(opening < 250, "the headers are there at once: $opening ms")
+    assertEquals(ResourceFailure.FIRST_BYTE_TIMEOUT, e.failure)
+    assertTrue(took in 250..1500, "took $took ms")
+    await("the service to see the connection go") { server.clientsGone == 1 }
+  }
+
+  @Test
+  fun `a first event within the first byte limit is delivered, however long the idle limit is not`() {
+    prefill(600)
+    val b = binding("\"timeouts\":{\"firstByteMs\":5000,\"idleMs\":200}")
+
+    val opened = open(b)
+
+    assertEquals("""{"n":1}""", next(b, opened))
+    assertNull(next(b, opened))
+  }
 }

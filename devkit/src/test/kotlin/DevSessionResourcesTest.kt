@@ -88,4 +88,65 @@ class DevSessionResourcesTest {
     assertTrue("log" in output && "cannot be used" in output, output)
     assertTrue("[stdout]" !in output)
   }
+
+  // ---- openai-compatible ----
+
+  private val typedOpenAi =
+      """, typedResources = {@TypedResource(name = "lemon", type = "openai-compatible")}"""
+
+  private fun executeOpenAi(settingsFile: String?, env: Map<String, String> = emptyMap()): Int {
+    val project = tmp.resolve("project")
+    settingsFile?.let {
+      java.nio.file.Files.createDirectories(project.resolve("openai"))
+      java.nio.file.Files.writeString(project.resolve("openai/lemon.json"), it)
+    }
+    val jar =
+        PipelineJars.build(
+            tmp,
+            "Q.jar",
+            mapOf(
+                "Q" to
+                    PipelineJars.pipeline(
+                        "Q",
+                        "q",
+                        """context.getFiles().writeText(FileScope.PIPELINE_SHARED, "entered", "x");""",
+                        "",
+                        typedOpenAi,
+                    )
+            ),
+        )
+    val all =
+        mapOf(
+            "RUNLINE_ALLOW_LIST" to "java.lang,java.util,java.io",
+            "RUNLINE_RESOURCES" to "lemon=openai-compatible:openai/lemon.json",
+        ) + env
+    val config = DevConfig.fromEnvironment(all, project).copy(waitLimit = Duration.ofSeconds(30))
+    return DevSession(config, PrintStream(buffer, true, Charsets.UTF_8))
+        .execute(DevArguments(jar, "Q", emptyMap()), "dev-2")
+  }
+
+  @Test
+  fun `a settings file that is missing, not JSON or not valid is said by category and nothing runs`() {
+    val cases =
+        mapOf(
+            null to "cannot be read",
+            "not json" to "not a JSON object",
+            """{"baseUrl":"ftp://x"}""" to "invalid_base_url",
+            """{"baseUrl":"http://x/v1","apiKey":"sk-in-the-file"}""" to "invalid_settings",
+            """{"baseUrl":"http://x/v1","secretAlias":"no good"}""" to "invalid_secret_alias",
+        )
+    for ((file, said) in cases) {
+      buffer.reset()
+
+      val code = executeOpenAi(file, mapOf("RUNLINE_SECRET_LEMON_KEY" to "sk-local-123"))
+
+      assertEquals(DevSession.EXIT_NOT_STARTED, code, "$file")
+      assertTrue(
+          "lemon" in output && "RUNLINE_RESOURCES" in output && said in output,
+          "$file: $output",
+      )
+      assertTrue("[stdout]" !in output)
+      assertTrue("sk-local-123" !in output && "sk-in-the-file" !in output, output)
+    }
+  }
 }

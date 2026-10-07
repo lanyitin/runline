@@ -14,6 +14,18 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** What the key of an `openai-compatible` resource is, as a test says it. */
+sealed interface RigKey {
+  /** The resource names no key: the service needs none. */
+  data object None : RigKey
+
+  /** The resource names a key and the host has it. */
+  class Value(val text: String) : RigKey
+
+  /** The resource names a key that the host does not have. */
+  data object Missing : RigKey
+}
+
 /** What one execution of a pipeline came to, as the host that ran it reports it. */
 class RigOutcome(
     val succeeded: Boolean,
@@ -44,6 +56,12 @@ interface AccessorRig : AutoCloseable {
 
   /** Defines a `file` resource whose file is [path] below [resourceRoot]. */
   fun defineFile(name: String, path: String)
+
+  /**
+   * Defines an `openai-compatible` resource with [settings] (the JSON an administrator gives,
+   * without the alias of the key) and [key], which the host keeps where it keeps secrets.
+   */
+  fun defineOpenAi(name: String, settings: String, key: RigKey = RigKey.None)
 
   /**
    * Compiles the pipeline whose `run` executes [body], declaring [typed] (name to type) and [named]

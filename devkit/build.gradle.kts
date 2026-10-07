@@ -8,6 +8,8 @@ dependencies {
   implementation(project(":analyzer"))
   implementation(project(":core"))
   implementation(project(":runner"))
+  // The settings file of an `openai-compatible` resource is JSON, as the administrator's is.
+  implementation(libs.kotlinx.serialization.json)
 
   testImplementation(kotlin("test"))
   testImplementation(testFixtures(project(":accessors")))

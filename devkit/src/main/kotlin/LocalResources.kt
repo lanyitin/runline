@@ -7,12 +7,21 @@ import dev.lawlan.runline.accessors.FileProbe
 import dev.lawlan.runline.accessors.Invalidation
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceObserver
+import dev.lawlan.runline.accessors.openai.OpenAiBinding
+import dev.lawlan.runline.accessors.openai.OpenAiCredential
+import dev.lawlan.runline.accessors.openai.OpenAiSettings
+import dev.lawlan.runline.accessors.openai.SettingsResult
 import dev.lawlan.runline.analyzer.PipelineMetadata
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
 import dev.lawlan.runline.runner.ResourceHost
+import java.io.IOException
 import java.io.PrintStream
 import java.nio.file.Files
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A resource the pipeline declared that this development project does not (rightly) define. */
 internal class LocalResourceProblem(message: String) : RuntimeException(message)
@@ -76,8 +85,61 @@ internal class LocalResources(
         }
         bindings[name] = FileBinding(FileEntity(settings.root, path))
       }
+      if (type == ResourceTypes.OPENAI_COMPATIBLE) {
+        bindings[name] = openAi(name, checkNotNull(local.path))
+      }
     }
     return if (bindings.isEmpty()) null else BoundResources(bindings, ConsoleObserver(out))
+  }
+
+  /**
+   * The accessor of an `openai-compatible` resource: its settings are in a JSON file of the project
+   * (the same settings an administrator gives the Engine, and the alias of the key as
+   * `secretAlias`), the key is in the environment. What is wrong with the file is said by category;
+   * a value is never said.
+   */
+  private fun openAi(name: String, file: String): ResourceBinding {
+    fun problem(why: String): Nothing =
+        throw LocalResourceProblem(
+            "The openai-compatible resource '$name' (RUNLINE_RESOURCES) cannot be set up: $why."
+        )
+    val text =
+        try {
+          Files.readString(settings.projectDir.resolve(file))
+        } catch (e: IOException) {
+          problem("its settings file cannot be read")
+        }
+    val json =
+        try {
+          Json.parseToJsonElement(text) as? JsonObject
+        } catch (e: SerializationException) {
+          null
+        } ?: problem("its settings file is not a JSON object")
+    val alias =
+        when (val given = json["secretAlias"]) {
+          null -> null
+          is JsonPrimitive ->
+              given.takeIf { it.isString && ALIAS.matches(it.content) }?.content
+                  ?: problem("secretAlias is not a well formed alias (invalid_secret_alias)")
+          else -> problem("secretAlias is not a well formed alias (invalid_secret_alias)")
+        }
+    val parsed =
+        when (val result = OpenAiSettings.parse(JsonObject(json - "secretAlias"))) {
+          is SettingsResult.Invalid ->
+              problem("its settings are not valid (${result.problem.wire})")
+          is SettingsResult.Valid -> result.settings
+        }
+    val credential =
+        if (alias == null) OpenAiCredential.None
+        else
+            settings.secrets.lookup(alias)?.let { OpenAiCredential.Key(it) }
+                ?: OpenAiCredential.Unavailable
+    return OpenAiBinding(name, parsed, credential)
+  }
+
+  private companion object {
+    /** Written like the name of a resource, as the Engine wants it. */
+    val ALIAS = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
   }
 
   /** What went wrong is said on the console; here, unlike in the Engine, the log is the console. */

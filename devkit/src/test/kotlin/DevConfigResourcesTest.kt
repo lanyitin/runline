@@ -39,6 +39,41 @@ class DevConfigResourcesTest {
   }
 
   @Test
+  fun `an openai-compatible resource is defined by the settings file of the project`() {
+    val definitions =
+        config("RUNLINE_RESOURCES" to "lemon=openai-compatible:openai/lemon.json").definitions
+
+    assertEquals(
+        mapOf("lemon" to LocalResource("openai-compatible", "openai/lemon.json")),
+        definitions,
+    )
+    assertEquals(project, config("RUNLINE_RESOURCES" to "a=counter").projectDir)
+  }
+
+  @Test
+  fun `the secrets are the environment variables of the alias, and are never shown`() {
+    val secrets =
+        config(
+                "RUNLINE_SECRET_LEMON_KEY" to "sk-local-123",
+                "RUNLINE_SECRET_BAD" to "caf\u00e9",
+                "RUNLINE_SECRET_EMPTY" to "",
+                "OTHER" to "sk-other",
+            )
+            .secrets
+
+    assertEquals("sk-local-123", secrets.lookup("lemon-key"))
+    assertEquals("sk-local-123", secrets.lookup("Lemon.Key"))
+    assertEquals(null, secrets.lookup("bad"), "not printable ASCII")
+    assertEquals(null, secrets.lookup("empty"))
+    assertEquals(null, secrets.lookup("other"), "only RUNLINE_SECRET_ variables")
+    assertEquals(false, secrets.toString().contains("sk-local-123"))
+    assertEquals(
+        false,
+        config("RUNLINE_SECRET_LEMON_KEY" to "sk-local-123").toString().contains("sk-local-123"),
+    )
+  }
+
+  @Test
   fun `a definition that cannot be read fails fast naming the variable`() {
     listOf(
             "log",
@@ -47,6 +82,8 @@ class DevConfigResourcesTest {
             "log=file:",
             "log=tape:x",
             "log=counter:x",
+            "lemon=openai-compatible",
+            "lemon=openai-compatible:",
             "a=counter,a=counter",
             "=file:x",
         )

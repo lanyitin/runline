@@ -2,6 +2,7 @@ package dev.lawlan.runline.devkit
 
 import dev.lawlan.runline.accessors.suite.AccessorBehaviorSuite
 import dev.lawlan.runline.accessors.suite.AccessorRig
+import dev.lawlan.runline.accessors.suite.RigKey
 import dev.lawlan.runline.accessors.suite.RigOutcome
 import dev.lawlan.runline.devkit.support.PipelineJars
 import java.io.ByteArrayOutputStream
@@ -25,6 +26,7 @@ internal class DevRig(private val record: Boolean) : AccessorRig {
   private val tmp: Path = Files.createTempDirectory("dev-rig")
   private val project = tmp.resolve("project")
   private val definitions = LinkedHashMap<String, String>()
+  private val secretEnv = LinkedHashMap<String, String>()
   private var counter = 0
 
   override val resourceRoot: Path = project.resolve(".runline/resources").createDirectories()
@@ -32,6 +34,21 @@ internal class DevRig(private val record: Boolean) : AccessorRig {
 
   override fun defineFile(name: String, path: String) {
     definitions[name] = "file:$path"
+  }
+
+  override fun defineOpenAi(name: String, settings: String, key: RigKey) {
+    // The settings file of the project: the administrator's settings and the alias of the key,
+    // which the development entry looks for in the environment (RUNLINE_SECRET_<ALIAS>).
+    val alias = if (key is RigKey.None) null else "$name-key"
+    val text =
+        if (alias == null) settings else settings.removeSuffix("}") + ",\"secretAlias\":\"$alias\"}"
+    val file = project.resolve("openai/$name.json")
+    Files.createDirectories(file.parent)
+    Files.writeString(file, text)
+    definitions[name] = "openai-compatible:openai/$name.json"
+    if (key is RigKey.Value) {
+      secretEnv["RUNLINE_SECRET_" + alias!!.uppercase().replace(Regex("[^A-Z0-9]"), "_")] = key.text
+    }
   }
 
   override fun run(body: String, typed: Map<String, String>, named: Set<String>): RigOutcome {
@@ -59,7 +76,8 @@ internal class DevRig(private val record: Boolean) : AccessorRig {
             ),
         )
     val env = buildMap {
-      put("RUNLINE_ALLOW_LIST", "java.lang,java.util,java.io")
+      put("RUNLINE_ALLOW_LIST", "java.lang,java.util,java.io,java.time")
+      putAll(secretEnv)
       if (definitions.isNotEmpty()) {
         put("RUNLINE_RESOURCES", definitions.entries.joinToString(",") { "${it.key}=${it.value}" })
       }

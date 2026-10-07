@@ -16,14 +16,48 @@ data class RecordingConfig(
     val shownAs: String,
 )
 
-/** A shared resource as the development project defines it locally (no Engine to ask). */
+/**
+ * A shared resource as the development project defines it locally (no Engine to ask). [path] is a
+ * `file`'s path below the resource root, or the settings file of an `openai-compatible` resource,
+ * relative to the project.
+ */
 data class LocalResource(val type: String, val path: String?)
 
 /**
- * The typed shared resources of a development run (ADR-019): where the files of `file` resources
- * live and what the local resources are.
+ * The secrets of a development run: the environment variables `RUNLINE_SECRET_<ALIAS>`, where the
+ * alias is in upper case and everything that is not a letter or a digit is an underscore. The
+ * Engine keeps secrets in a keystore, which a development machine does not have; the alias of the
+ * resource's key is the same word in both. It never shows a value, not even when printed.
  */
-data class LocalResourceSettings(val root: Path, val definitions: Map<String, LocalResource>)
+class LocalSecrets(private val environment: Map<String, String> = emptyMap()) {
+  /** The secret of [alias], or null when it is not set or is not printable ASCII (ADR-019). */
+  fun lookup(alias: String): String? =
+      environment[variableFor(alias)]?.takeIf { v ->
+        v.isNotEmpty() && v.all { it.code in 0x20..0x7e }
+      }
+
+  override fun toString() = "LocalSecrets(***)"
+
+  companion object {
+    const val PREFIX = "RUNLINE_SECRET_"
+
+    fun variableFor(alias: String) = PREFIX + alias.uppercase().replace(Regex("[^A-Z0-9]"), "_")
+
+    fun fromEnvironment(env: Map<String, String>) =
+        LocalSecrets(env.filterKeys { it.startsWith(PREFIX) })
+  }
+}
+
+/**
+ * The typed shared resources of a development run (ADR-019): where the files of `file` resources
+ * live, what the local resources are, the project they are relative to, and the local secrets.
+ */
+data class LocalResourceSettings(
+    val root: Path,
+    val definitions: Map<String, LocalResource>,
+    val projectDir: Path = Path.of(""),
+    val secrets: LocalSecrets = LocalSecrets(),
+)
 
 /** Where the allow list used for a verdict came from. */
 enum class AllowListSource {
@@ -92,7 +126,8 @@ data class DevConfig(
 
     /**
      * `RUNLINE_RESOURCE_ROOT` (default `.runline/resources`) and `RUNLINE_RESOURCES`, a comma
-     * separated list of `name=type[:path]`: a `file` has its path below the root, a `counter` has
+     * separated list of `name=type[:path]`: a `file` has its path below the root, an
+     * `openai-compatible` the path of its settings file (relative to the project), a `counter`
      * nothing more.
      */
     private fun resources(env: Map<String, String>, projectDir: Path): LocalResourceSettings {
@@ -108,17 +143,18 @@ data class DevConfig(
             name.isNotEmpty() &&
                 name !in definitions &&
                 when (type) {
-                  "file" -> !path.isNullOrEmpty()
+                  "file",
+                  "openai-compatible" -> !path.isNullOrEmpty()
                   "counter" -> path == null
                   else -> false
                 }
         check(valid) {
-          "Environment variable $RESOURCES entry '$text' must be name=file:<path> or name=counter, " +
-              "with each name once"
+          "Environment variable $RESOURCES entry '$text' must be name=file:<path>, " +
+              "name=openai-compatible:<settings file> or name=counter, with each name once"
         }
         definitions[name] = LocalResource(type, path)
       }
-      return LocalResourceSettings(root, definitions)
+      return LocalResourceSettings(root, definitions, projectDir, LocalSecrets.fromEnvironment(env))
     }
 
     /** Recording is off unless `RUNLINE_RECORD` is `true`; the other two variables then tune it. */

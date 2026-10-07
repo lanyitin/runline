@@ -6,6 +6,8 @@ import java.sql.SQLException
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.test.*
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 class PostgresResourceStoreTest {
   private val dataSource = dataSourceOf(migratedDatabase())
@@ -96,5 +98,75 @@ class PostgresResourceStoreTest {
     assertFailsWith<SQLException> { store.insert(resource("lemonade", capacity = 0)) }
     store.insert(resource("ok"))
     assertFailsWith<SQLException> { store.update("ok", 0, null, "ops", t0) }
+  }
+
+  @Test
+  fun `a stored resource keeps its type, settings and secret alias`() {
+    val typed =
+        resource("data")
+            .copy(
+                type = ResourceType.FILE,
+                settings = JsonObject(mapOf("path" to JsonPrimitive("out/report.csv"))),
+                secretAlias = "data-key",
+            )
+
+    assertTrue(store.insert(typed))
+
+    assertEquals(typed, store.find("data"))
+    assertEquals(typed, store.list().single())
+    assertEquals(typed, store.findAll(listOf("data")).getValue("data"))
+  }
+
+  @Test
+  fun `a resource without a type given is a counter with no settings and no alias`() {
+    store.insert(resource("lemonade"))
+
+    val found = store.find("lemonade")!!
+
+    assertEquals(ResourceType.COUNTER, found.type)
+    assertEquals(JsonObject(emptyMap()), found.settings)
+    assertNull(found.secretAlias)
+  }
+
+  @Test
+  fun `an update keeps type, settings and alias`() {
+    val typed =
+        resource("data")
+            .copy(
+                type = ResourceType.FILE,
+                settings = JsonObject(mapOf("path" to JsonPrimitive("a"))),
+                secretAlias = "k",
+            )
+    store.insert(typed)
+
+    val updated = store.update("data", capacity = 2, enabled = null, by = "ops", at = t0)!!
+
+    assertEquals(ResourceType.FILE, updated.type)
+    assertEquals(typed.settings, updated.settings)
+    assertEquals("k", updated.secretAlias)
+  }
+
+  @Test
+  fun `delete removes the definition and says whether there was one`() {
+    store.insert(resource("lemonade"))
+    store.insert(resource("other"))
+
+    assertTrue(store.delete("lemonade"))
+
+    assertNull(store.find("lemonade"))
+    assertEquals(listOf("other"), store.list().map { it.name })
+    assertFalse(store.delete("lemonade"))
+    assertFalse(store.delete("never-was"))
+  }
+
+  @Test
+  fun `a deleted name can be defined again, as another type`() {
+    store.insert(resource("lemonade"))
+    store.delete("lemonade")
+
+    assertTrue(store.insert(resource("lemonade", capacity = 5).copy(type = ResourceType.FILE)))
+
+    assertEquals(ResourceType.FILE, store.find("lemonade")!!.type)
+    assertEquals(5, store.find("lemonade")!!.capacity)
   }
 }

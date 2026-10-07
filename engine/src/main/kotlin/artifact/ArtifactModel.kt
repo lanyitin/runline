@@ -15,7 +15,10 @@ data class MetadataDoc(
     val files: List<FileAccessDoc>,
     val network: AccessLimitDoc,
     val processes: AccessLimitDoc,
+    /** Every declared resource name, typed or not. */
     val resources: List<String>,
+    /** The type the pipeline expects for some of [resources], by name (ADR-019). */
+    val resourceTypes: Map<String, String> = emptyMap(),
 )
 
 @Serializable

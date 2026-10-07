@@ -96,7 +96,8 @@ class RunService(
           CreateRunResult.UnsafeNotAllowed(definition.name),
       )
     }
-    val unavailable = resources.problems(definition.metadata.resources)
+    val unavailable =
+        resources.problems(definition.metadata.resources, definition.metadata.resourceTypes)
     if (unavailable.isNotEmpty()) {
       log.warn(
           "Run of {} (version {}) refused for {}: shared resources {} cannot be used",
@@ -132,6 +133,7 @@ class RunService(
             definition.name,
             parameters,
             definition.metadata.resources,
+            definition.metadata.resourceTypes,
         )
     )
     return CreateRunResult.Accepted(run)

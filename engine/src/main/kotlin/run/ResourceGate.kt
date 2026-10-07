@@ -2,8 +2,16 @@ package dev.lawlan.runline.engine.run
 
 import java.util.UUID
 
-/** A run waiting to start, with the shared resources its pipeline declares (ADR-007). */
-data class PendingRun(val id: UUID, val pipelineName: String, val resources: List<String>)
+/**
+ * A run waiting to start, with the shared resources its pipeline declares (ADR-007) and the types
+ * it expects some of them to have (ADR-019).
+ */
+data class PendingRun(
+    val id: UUID,
+    val pipelineName: String,
+    val resources: List<String>,
+    val resourceTypes: Map<String, String> = emptyMap(),
+)
 
 sealed interface GateDecision {
   /** Everything the run needs is held for it; it may start. */

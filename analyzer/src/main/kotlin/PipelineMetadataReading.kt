@@ -10,15 +10,19 @@ import java.lang.classfile.AnnotationValue
  * unless it says otherwise, and a file scope is read-only unless it says otherwise. Throws a
  * [RuntimeException] when the annotation does not have the expected shape.
  */
-internal fun Annotation.toMetadata() =
-    PipelineMetadata(
-        name = string("name"),
-        parameters = annotations("parameters").map { it.toParameter() },
-        files = annotations("files").map { it.toFileAccess() },
-        network = limit("network"),
-        processes = limit("processes"),
-        resources = strings("resources"),
-    )
+internal fun Annotation.toMetadata(): PipelineMetadata {
+  val named = strings("resources")
+  val typed = annotations("typedResources").map { it.string("name") to it.string("type") }
+  return PipelineMetadata(
+      name = string("name"),
+      parameters = annotations("parameters").map { it.toParameter() },
+      files = annotations("files").map { it.toFileAccess() },
+      network = limit("network"),
+      processes = limit("processes"),
+      resources = named + typed.map { it.first }.filterNot { it in named }.distinct(),
+      resourceTypes = typed.toMap(),
+  )
+}
 
 internal fun Annotation.element(name: String): AnnotationValue? =
     elements().firstOrNull { it.name().stringValue() == name }?.value()

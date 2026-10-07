@@ -152,6 +152,41 @@ class UploadServiceTest {
   }
 
   @Test
+  fun `stores the declared resource types with the names and a name only declaration stays as before`() {
+    val path =
+        jar(
+            "demo.Typed" to
+                PipelineJars.pipeline(
+                    "demo.Typed",
+                    "typed",
+                    definition =
+                        "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+                            "resources = {\"db-lock\"}, typedResources = { " +
+                            "@TypedResource(name = \"data\", type = ResourceTypes.FILE), " +
+                            "@TypedResource(name = \"odd\", type = \"not-a-type\") }",
+                ),
+            "demo.Plain" to
+                PipelineJars.pipeline(
+                    "demo.Plain",
+                    "plain",
+                    definition =
+                        "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+                            "resources = {\"db-lock\"}",
+                ),
+        )
+
+    val created = assertIs<UploadResult.Created>(upload(path)).artifact
+    val typed = created.definitions.single { it.name == "typed" }
+    val plain = created.definitions.single { it.name == "plain" }
+
+    assertEquals(listOf("db-lock", "data", "odd"), typed.metadata.resources)
+    assertEquals(mapOf("data" to "file", "odd" to "not-a-type"), typed.metadata.resourceTypes)
+    assertEquals(Verdict.SAFE, typed.verdict)
+    assertEquals(emptyMap(), plain.metadata.resourceTypes)
+    assertEquals(created, store.findByHash(created.contentHash))
+  }
+
+  @Test
   fun `stores unrestricted limits and empty lists for members that are not declared`() {
     val path = jar("demo.Bare" to PipelineJars.pipeline("demo.Bare", "bare", definition = ""))
 

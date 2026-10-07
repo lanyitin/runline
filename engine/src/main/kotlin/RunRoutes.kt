@@ -6,7 +6,6 @@ import dev.lawlan.runline.engine.artifact.visibility
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.auth.authorized
 import dev.lawlan.runline.engine.resource.ResourceProblemDoc
-import dev.lawlan.runline.engine.resource.ResourceProblemKind
 import dev.lawlan.runline.engine.resource.ResourcesUnavailableResponse
 import dev.lawlan.runline.engine.run.*
 import io.ktor.http.*
@@ -251,22 +250,9 @@ private fun CreateRunResult.ResourcesUnavailable.toResponse() =
     ResourcesUnavailableResponse(
         "resources_unavailable",
         "pipeline 宣告的共享資源目前無法使用：" +
-            problems.joinToString("；") {
-              when (it.kind) {
-                ResourceProblemKind.UNKNOWN -> "${it.name}（尚未定義）"
-                ResourceProblemKind.DISABLED -> "${it.name}（已停用）"
-              }
-            } +
+            problems.joinToString("；") { "${it.name}（${it.kind.label}）" } +
             "。請管理員定義或啟用後再建立 run。",
-        problems.map {
-          ResourceProblemDoc(
-              it.name,
-              when (it.kind) {
-                ResourceProblemKind.UNKNOWN -> "unknown"
-                ResourceProblemKind.DISABLED -> "disabled"
-              },
-          )
-        },
+        problems.map { ResourceProblemDoc(it.name, it.kind.wire) },
     )
 
 private fun CreateRunResult.InvalidParameters.toResponse() =

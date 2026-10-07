@@ -10,6 +10,8 @@ import dev.lawlan.runline.engine.support.migratedDatabase
 import io.opentelemetry.api.OpenTelemetry
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
@@ -339,6 +341,31 @@ class ResourceCoordinatorTest {
   }
 
   @Test
+  fun `a run that expects another type than the resource has is refused as unavailable and holds nothing`() {
+    define("a")
+    define("b")
+    val c = coordinator()
+    val mismatched =
+        PendingRun(UUID.randomUUID(), "p", listOf("a", "b"), mapOf("a" to "file", "b" to "counter"))
+
+    val failure = assertIs<GateDecision.Refused>(c.tryAcquire(mismatched)).failure
+
+    assertEquals(ResourceFailures.UNAVAILABLE, failure.type)
+    assertTrue(failure.message!!.contains("a"), failure.message)
+    assertTrue(failure.message!!.contains("型別不符"), failure.message)
+    assertEquals(emptyList(), c.activity("a").holders)
+    assertEquals(emptyList(), c.activity("b").holders)
+  }
+
+  @Test
+  fun `a run that expects the type the resource has is granted`() {
+    define("a")
+    val c = coordinator()
+
+    c.granted(PendingRun(UUID.randomUUID(), "p", listOf("a"), mapOf("a" to "counter")))
+  }
+
+  @Test
   fun `a refusal grants nothing, not even the resources that are fine`() {
     define("a")
     val c = coordinator()
@@ -506,5 +533,161 @@ class ResourceCoordinatorTest {
     assertEquals(480, done.get())
     assertTrue(peak.get() in 1..3, "peak was ${peak.get()}")
     assertEquals(emptyList(), c.activity("a").holders)
+  }
+
+  // ---- removal (WI-40) ----
+
+  private fun ResourceCoordinator.removed(name: String) =
+      removeWhenUnused(name) { store.delete(name) }
+
+  @Test
+  fun `a resource nobody holds or waits for is removed`() {
+    define("a")
+    define("b")
+    val c = coordinator()
+
+    assertEquals(RemovalOutcome.Removed, c.removed("a"))
+
+    assertNull(store.find("a"))
+    assertNotNull(store.find("b"))
+  }
+
+  @Test
+  fun `removing a resource that does not exist says so`() {
+    assertEquals(RemovalOutcome.NotFound, coordinator().removed("ghost"))
+  }
+
+  @Test
+  fun `a resource that a run holds is not removed and nothing changes`() {
+    define("a")
+    val c = coordinator()
+    val holder = run("a")
+    c.granted(holder)
+
+    assertEquals(RemovalOutcome.InUse(holders = 1, waiters = 0), c.removed("a"))
+
+    assertNotNull(store.find("a"))
+    assertEquals(listOf(holder.id), c.activity("a").holders.map { it.runId })
+  }
+
+  @Test
+  fun `a resource a run waits for is not removed, even when it is free`() {
+    define("a")
+    define("b")
+    val c = coordinator()
+    c.granted(run("b"))
+    val waiter = run("a", "b")
+    c.waits(waiter)
+
+    assertEquals(RemovalOutcome.InUse(holders = 0, waiters = 1), c.removed("a"))
+
+    assertNotNull(store.find("a"))
+    assertEquals(listOf(waiter.id), c.activity("a").waiters.map { it.runId })
+  }
+
+  @Test
+  fun `a resource can be removed once its holder has released it`() {
+    define("a")
+    val c = coordinator()
+    val holder = run("a")
+    c.granted(holder)
+    c.release(holder.id)
+
+    assertEquals(RemovalOutcome.Removed, c.removed("a"))
+  }
+
+  @Test
+  fun `after removal a run that declares the resource is refused as undefined`() {
+    define("a")
+    val c = coordinator()
+    c.removed("a")
+
+    val failure = assertIs<GateDecision.Refused>(c.tryAcquire(run("a"))).failure
+
+    assertEquals(ResourceFailures.UNAVAILABLE, failure.type)
+    assertTrue(failure.message!!.contains("未定義"), failure.message)
+  }
+
+  @Test
+  fun `a removed name can be defined again as another type, and a run declaring the old type is refused`() {
+    define("a")
+    val c = coordinator()
+    c.removed("a")
+    store.insert(
+        SharedResource(
+            "a",
+            1,
+            true,
+            "root",
+            java.time.Instant.now(),
+            "root",
+            java.time.Instant.now(),
+            ResourceType.FILE,
+        )
+    )
+
+    val failure =
+        assertIs<GateDecision.Refused>(
+                c.tryAcquire(
+                    PendingRun(UUID.randomUUID(), "p", listOf("a"), mapOf("a" to "counter"))
+                )
+            )
+            .failure
+
+    assertTrue(failure.message!!.contains("型別不符"), failure.message)
+    c.granted(PendingRun(UUID.randomUUID(), "p", listOf("a"), mapOf("a" to "file")))
+  }
+
+  /**
+   * The removal and the acquisition race for the same resource, many times with both started at the
+   * same moment. However they interleave, the result is consistent: a removed resource has no
+   * holder and is not granted, and a granted one is not removed.
+   */
+  @Test
+  fun `removal and acquisition racing for one resource always end consistently`() {
+    val c = coordinator()
+    val pool = Executors.newFixedThreadPool(2)
+    try {
+      repeat(RACES) { round ->
+        val name = "race-$round"
+        define(name)
+        val contender = run(name)
+        val barrier = CyclicBarrier(2)
+        val acquiring =
+            pool.submit<GateDecision> {
+              barrier.await()
+              c.tryAcquire(contender)
+            }
+        val removing =
+            pool.submit<RemovalOutcome> {
+              barrier.await()
+              c.removed(name)
+            }
+
+        val decision = acquiring.get()
+        val outcome = removing.get()
+
+        when (outcome) {
+          RemovalOutcome.Removed -> {
+            assertIs<GateDecision.Refused>(decision, "removed, yet the run was $decision ($name)")
+            assertNull(store.find(name))
+            assertEquals(emptyList(), c.activity(name).holders, name)
+          }
+          is RemovalOutcome.InUse -> {
+            assertEquals(GateDecision.GRANTED, decision, name)
+            assertNotNull(store.find(name))
+            assertEquals(listOf(contender.id), c.activity(name).holders.map { it.runId })
+          }
+          RemovalOutcome.NotFound -> fail("the resource $name existed")
+        }
+        c.release(contender.id)
+      }
+    } finally {
+      pool.shutdownNow()
+    }
+  }
+
+  private companion object {
+    const val RACES = 300
   }
 }

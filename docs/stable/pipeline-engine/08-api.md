@@ -114,8 +114,12 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 |---|---|
 | `contentHash` | 內容的 SHA-256（十六進位），版本的識別 |
 | `sizeBytes`、`uploadedBy`、`uploadedAt` | 大小、上傳者名稱、上傳時間 |
-| `pipelines[]` | 找到的 pipeline：`className`、`name`、`metadata`（`parameters[]`、`files[]`、`network`、`processes`、`resources[]`）、`verdict`（`SAFE` 或 `UNSAFE`）、`reasons[]`（`kind`、`category`、`className`、`member`、`path[]`、`detail`）、`allowListVersion`（判定所用的白名單版本，見「白名單」）、`allowUnsafeExecution`、`warnings[]`（例如宣告了尚未定義的共享資源） |
+| `pipelines[]` | 找到的 pipeline：`className`、`name`、`metadata`（`parameters[]`、`files[]`、`network`、`processes`、`resources[]`、`resourceTypes`）、`verdict`（`SAFE` 或 `UNSAFE`）、`reasons[]`（`kind`、`category`、`className`、`member`、`path[]`、`detail`）、`allowListVersion`（判定所用的白名單版本，見「白名單」）、`allowUnsafeExecution`、`warnings[]`（例如宣告了尚未定義的共享資源；見下） |
 | `limitations` | 判定未涵蓋的範圍 |
+
+`metadata.resources[]` 是 pipeline 宣告的全部共享資源名稱；`metadata.resourceTypes` 是名稱到「期望型別」的對照，只含另外宣告了型別的名稱（型別取自 `counter`、`file`、`jdbc-pool`、`openai-compatible`，即使該型別尚未實作也可宣告），只宣告名稱者不在其中，沒有任何型別宣告時為 `{}`。型別宣告不影響 safe 或 unsafe 判定。
+
+`warnings[].kind` 的值（只是警告，不影響判定與上傳結果；資源之後被定義或改變時，查詢時重新計算）：`resource_unknown`（宣告的資源尚未定義）、`resource_disabled`（已停用）、`resource_type_mismatch`（資源的型別與宣告的型別不同）、`resource_type_unknown`（宣告的型別不在 `counter`、`file`、`jdbc-pool`、`openai-compatible` 之內；建立 run 時視為型別不符）。每項含 `kind`、`resource`、`message`。
 
 `reasons[].kind` 的值：`UNRESTRICTED_ACCESS`（網路或行程未設限，`category`）、`NOT_ALLOW_LISTED`（白名單外的類別，`className` 與 `path[]`）、`JVM_EXIT`（參照 JVM 結束成員，`member` 與 `path[]`）、`IO_SENSITIVE_MEMBER`（參照 IO 敏感成員：啟動外部行程、載入原生程式碼，或在基礎套件內可直接開啟檔案或網路的成員，`member` 為含描述子的成員名稱，`path[]` 為從 pipeline 到該參照的路徑，不受套件白名單豁免，[ADR-013](adr/ADR-013-io-sensitive-members.md)）、`UNREADABLE_CLASS`（類別檔無法解析，`className`、`path[]`、`detail`）、`LIMIT_EXCEEDED`（分析超出時間或大小預算，`detail`）。新增 `IO_SENSITIVE_MEMBER` 之前已儲存的判定仍照原樣讀取與顯示，不會被自動重判。
 
@@ -151,7 +155,7 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 | 400 `bad_request` | 本文不是預期的 JSON |
 | 404 `definition_not_found` | 沒有這個版本與 pipeline，或呼叫者不得使用 |
 | 409 `unsafe_not_allowed` | pipeline 被判為 unsafe，且管理員尚未允許它以 unsafe 執行 |
-| 409 `resources_unavailable` | pipeline 宣告的共享資源未定義或已停用；本文多一個 `problems[]`，每項 `{resource, problem}`，`problem` 為 `unknown` 或 `disabled` |
+| 409 `resources_unavailable` | pipeline 宣告的共享資源無法使用；本文多一個 `problems[]`，每項 `{resource, problem}`，`problem` 為 `unknown`（未定義，含已被刪除）、`disabled`（已停用）或 `type_mismatch`（pipeline 宣告了型別，而資源的型別不同，或宣告的型別不在封閉集合內）；多個問題一併回報，每個資源只報一項（`unknown`、`disabled` 優先於 `type_mismatch`） |
 | 422 `invalid_parameters` | 參數與宣告不符；本文多一個 `problems[]`，每項 `{name, problem}`，`problem` 為 `missing`（缺必填）或 `undeclared`（未宣告） |
 
 Run 的欄位：`runId`、`state`、`contentHash`、`pipeline`、`className`、`source`（`{kind: "MANUAL"|"TRIGGER", name}`）、`parameters`（含套用預設值後的結果）、`createdAt`、`startedAt`、`finishedAt`、`failure`（`{type, message, trace}`，失敗時）、`unsafeExecution`（`{setBy, setAt}`，以 unsafe 執行時）。`state` 的值：`QUEUED`、`WAITING_FOR_RESOURCES`、`INITIALIZING`、`RUNNING`、`TIMED_OUT_UNFINISHED`，終止狀態 `SUCCEEDED`、`FAILED`、`CANCELLED`、`INTERRUPTED`（Engine 停止或重啟時仍在進行的 run）、`TIMED_OUT`。
@@ -201,21 +205,37 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 ## 共享資源（管理員）
 
-資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱；規則見 [ADR-007](adr/ADR-007-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
+資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱，另可宣告期望的型別；規則見 [ADR-007](adr/ADR-007-shared-resources.md) 與 [ADR-019](adr/ADR-019-typed-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
-下列端點描述現行實作（全部資源等同 `counter` 型別）。資源型別化、刪除、檢查與機密端點的決策見 [ADR-019](adr/ADR-019-typed-shared-resources.md)；它們的路由、欄位與錯誤碼由 [WI-40](work-items/WI-40-typed-resources-and-deletion.md) 起的各工作項在實作時同步寫入本文，使本文與 `ApiDocumentationTest` 保持一致。
+資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別只有 `counter`（只有名稱與容量，也就是資源原本的語意）；其餘三種在各自的工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。檢查與機密相關的端點由後續工作項寫入本文。
+
+資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，沒有時為 `null`；機密值不會出現在任何回應）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
+
+`invalid_resource`（422）的本文多一個 `problem`，說明原因類別：
+
+| `problem` | 意義 |
+|---|---|
+| `name` | 名稱不合規 |
+| `capacity` | 容量小於 1 |
+| `nothing_to_change` | 修改沒有要改的欄位 |
+| `unknown_type` | 型別不在封閉集合內 |
+| `unsupported_type` | 型別在集合內，但尚未實作，還不能建立 |
+| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定） |
+| `invalid_secret_alias` | 這個型別沒有機密別名（`counter` 沒有），或別名不合規 |
+| `immutable_name` | 修改嘗試帶了 `name`；名稱不可修改 |
+| `immutable_type` | 修改嘗試帶了 `type`；型別不可修改，值相同也一樣被拒絕 |
 
 ### `POST /api/v1/resources`
 
 認證：Bearer（admin）
 
-定義資源。本文 `{"name": "...", "capacity": 1}`。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（名稱不合規，或容量小於 1）。
+定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、`counter` 帶有設定或機密別名）。
 
 ### `GET /api/v1/resources`
 
 認證：Bearer（admin）
 
-列出資源及其持有者與等待者。本文 `{"resources": [...]}`；每個資源含 `name`、`capacity`、`enabled`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`）。
+列出資源及其持有者、等待者與宣告者。本文 `{"resources": [...]}`，每個資源的欄位見上。
 
 ### `GET /api/v1/resources/{name}`
 
@@ -227,7 +247,23 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-修改容量或啟用狀態。本文 `{"capacity": 2, "enabled": false}`，至少一項。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1，或沒有要修改的欄位）。
+修改容量或啟用狀態。本文 `{"capacity": 2, "enabled": false}`，至少一項。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、`counter` 帶有設定或機密別名）。
+
+### `DELETE /api/v1/resources/{name}`
+
+認證：Bearer（admin）
+
+刪除資源。沒有持有者與等待者時刪除，仍有 pipeline 定義或 trigger 宣告它不阻擋刪除：之後這些 pipeline 建立 run 被拒絕為 `unknown`（與資源尚未定義相同）。刪除與 run 取得資源是互斥的決定：刪除成立後沒有 run 取得這個資源，有 run 持有或等待時不會刪除。刪除後可重新建立同名資源（可為不同型別）。刪除記錄管理員名稱於 log。
+
+查詢參數 `preview=true`（預設 false，沿用白名單的預覽慣例）：不改變任何東西，回應 200，本文 `{resource, definitions, triggers, holders, waiters, inUse}`：`definitions` 為宣告它的定義數，`triggers` 為綁在這些定義上的 trigger 數，`holders` 與 `waiters` 為目前的持有者與等待者數，`inUse` 表示目前會被拒絕刪除。使用中時預覽不失敗，由實際刪除回 `resource_in_use`。
+
+| 狀態 | 意義 |
+|---|---|
+| 204 | 已刪除 |
+| 200 | `preview=true`：預覽，什麼都沒改變 |
+| 400 `bad_request` | `preview` 不是 true 或 false |
+| 404 `resource_not_found` | 沒有這個資源（預覽也一樣） |
+| 409 `resource_in_use` | 有持有者或等待者，什麼都沒改變；本文多 `holders` 與 `waiters`（數量）。需等待結束、先停用資源讓等待者失敗，或強制釋放持有者 |
 
 ### `POST /api/v1/resources/{name}/holders/{runId}/release`
 

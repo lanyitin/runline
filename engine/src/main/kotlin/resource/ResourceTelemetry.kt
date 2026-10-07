@@ -12,13 +12,17 @@ enum class WaitOutcome {
   REFUSED,
 }
 
+/** What every metric of a resource is labelled with, and nothing else: its name and its type. */
+data class ResourceLabel(val name: String, val type: String)
+
 /** How many runs hold a resource and how many wait for it. */
 data class ResourceCounts(val holders: Int, val waiters: Int)
 
 /**
  * Metrics of shared resources (07-nfr-risks): the time runs wait, the time they hold, the queue
- * length and the number of holders, each per resource. A run that gets its resources at once is
- * recorded as having waited zero seconds.
+ * length and the number of holders, each per resource and labelled with the resource's type
+ * (ADR-019); a resource that is not defined has the type [UNDEFINED_TYPE]. A run that gets its
+ * resources at once is recorded as having waited zero seconds.
  */
 class ResourceTelemetry(openTelemetry: OpenTelemetry) {
   private val meter = openTelemetry.getMeter("runline.resources")
@@ -36,35 +40,41 @@ class ResourceTelemetry(openTelemetry: OpenTelemetry) {
           .build()
   private val forced = meter.counterBuilder("runline.resources.force_released").build()
 
-  fun waited(resource: String, outcome: WaitOutcome, seconds: Double) {
-    wait.record(seconds, Attributes.of(RESOURCE, resource, OUTCOME, outcome.name))
+  fun waited(resource: ResourceLabel, outcome: WaitOutcome, seconds: Double) {
+    wait.record(seconds, resource.attributes(OUTCOME, outcome.name))
   }
 
-  fun held(resource: String, seconds: Double, forced: Boolean) {
-    hold.record(
-        seconds,
-        Attributes.of(RESOURCE, resource, HOW, if (forced) "forced" else "released"),
-    )
-    if (forced) this.forced.add(1, Attributes.of(RESOURCE, resource))
+  fun held(resource: ResourceLabel, seconds: Double, forced: Boolean) {
+    hold.record(seconds, resource.attributes(HOW, if (forced) "forced" else "released"))
+    if (forced) this.forced.add(1, resource.attributes())
   }
 
   /** Reports the queue length and holders of every resource [snapshot] lists. */
-  fun observe(snapshot: () -> Map<String, ResourceCounts>) {
+  fun observe(snapshot: () -> Map<ResourceLabel, ResourceCounts>) {
     meter.gaugeBuilder("runline.resources.queue.length").ofLongs().buildWithCallback { m ->
-      snapshot().forEach { (name, counts) ->
-        m.record(counts.waiters.toLong(), Attributes.of(RESOURCE, name))
+      snapshot().forEach { (label, counts) ->
+        m.record(counts.waiters.toLong(), label.attributes())
       }
     }
     meter.gaugeBuilder("runline.resources.holders").ofLongs().buildWithCallback { m ->
-      snapshot().forEach { (name, counts) ->
-        m.record(counts.holders.toLong(), Attributes.of(RESOURCE, name))
+      snapshot().forEach { (label, counts) ->
+        m.record(counts.holders.toLong(), label.attributes())
       }
     }
   }
 
-  private companion object {
-    val RESOURCE = AttributeKey.stringKey("resource")
-    val OUTCOME = AttributeKey.stringKey("outcome")
-    val HOW = AttributeKey.stringKey("how")
+  private fun ResourceLabel.attributes(): Attributes = Attributes.of(RESOURCE, name, TYPE, type)
+
+  private fun ResourceLabel.attributes(key: AttributeKey<String>, value: String): Attributes =
+      Attributes.of(RESOURCE, name, TYPE, type, key, value)
+
+  companion object {
+    /** The type label of a resource that is not defined, so its type is not known. */
+    const val UNDEFINED_TYPE = "unknown"
+
+    private val RESOURCE = AttributeKey.stringKey("resource")
+    private val TYPE = AttributeKey.stringKey("type")
+    private val OUTCOME = AttributeKey.stringKey("outcome")
+    private val HOW = AttributeKey.stringKey("how")
   }
 }

@@ -17,7 +17,8 @@ object PipelineMetadataReader {
         files = def.files.associate { it.scope to it.mode },
         network = def.network.toPolicy(),
         processes = def.processes.toPolicy(),
-        resources = def.resources.toSet(),
+        resources = (def.resources.asList() + def.typedResources.map { it.name }).toSet(),
+        resourceTypes = def.typedResources.associate { it.name to it.type },
     )
   }
 

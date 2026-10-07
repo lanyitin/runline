@@ -1,7 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
 import dev.lawlan.runline.engine.artifact.Visibility
-import dev.lawlan.runline.engine.resource.ResourceProblemKind
 import dev.lawlan.runline.engine.run.CreateRun
 import dev.lawlan.runline.engine.run.CreateRunResult
 import dev.lawlan.runline.engine.run.ParameterProblemKind
@@ -106,12 +105,7 @@ class TriggerFirer(
             Refusal(
                 "resources_unavailable",
                 "pipeline 宣告的共享資源目前無法使用：" +
-                    result.problems.joinToString("；") {
-                      when (it.kind) {
-                        ResourceProblemKind.UNKNOWN -> "${it.name}（尚未定義）"
-                        ResourceProblemKind.DISABLED -> "${it.name}（已停用）"
-                      }
-                    },
+                    result.problems.joinToString("；") { "${it.name}（${it.kind.label}）" },
             )
       }
 

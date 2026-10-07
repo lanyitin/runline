@@ -143,6 +143,7 @@
   "error.not_a_webhook": "The trigger is not a webhook.",
   "error.not_found": "Not found.",
   "error.resource_exists": "A shared resource of this name exists already.",
+  "error.resource_in_use": "The shared resource is held by a run or a run waits for it, so it cannot be deleted.",
   "error.resource_not_found": "No such shared resource.",
   "error.resources_unavailable": "A shared resource the pipeline needs is not defined or is disabled.",
   "error.run_not_found": "No such run, or it is not yours to see.",

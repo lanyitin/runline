@@ -80,6 +80,28 @@ class PostgresArtifactStoreTest {
       }
 
   @Test
+  fun `metadata stored before resource types existed is read with no declared types`() {
+    val hash = (store.saveIfAbsent(artifact("legacy")) as SaveResult.Created).artifact.contentHash
+    dataSource.connection.use { c ->
+      c.createStatement().use {
+        it.executeUpdate(
+            "UPDATE pipeline_definition SET metadata = '{\"parameters\":[],\"files\":[]," +
+                "\"network\":{\"unrestricted\":true,\"allow\":[]}," +
+                "\"processes\":{\"unrestricted\":true,\"allow\":[]}," +
+                "\"resources\":[\"db-lock\"]}'::jsonb"
+        )
+      }
+    }
+
+    val read = store.findByHash(hash)!!.definitions.single().metadata
+    val forRun = PostgresDefinitionStore(dataSource).find(hash, "one")!!.metadata
+
+    assertEquals(listOf("db-lock"), read.resources)
+    assertEquals(emptyMap(), read.resourceTypes)
+    assertEquals(read, forRun)
+  }
+
+  @Test
   fun `saves an artifact with its definitions and reads everything back`() {
     val new = artifact("a1", definitions = arrayOf(definition("one"), definition("two")))
 

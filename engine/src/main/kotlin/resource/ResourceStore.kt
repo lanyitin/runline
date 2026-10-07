@@ -1,11 +1,12 @@
 package dev.lawlan.runline.engine.resource
 
 import java.time.Instant
+import kotlinx.serialization.json.JsonObject
 
 /**
- * A shared resource an administrator has defined (ADR-007): a name, how many runs may hold it at
- * once, and whether pipelines may use it. Who holds it or waits for it is runtime state of the
- * Engine and is not part of the definition.
+ * A shared resource an administrator has defined (ADR-007, ADR-019): a name, its [type], how many
+ * runs may hold it at once, and whether pipelines may use it. Who holds it or waits for it is
+ * runtime state of the Engine and is not part of the definition.
  */
 data class SharedResource(
     val name: String,
@@ -16,6 +17,12 @@ data class SharedResource(
     val createdAt: Instant,
     val updatedBy: String,
     val updatedAt: Instant,
+    /** Fixed when the resource is created. */
+    val type: ResourceType = ResourceType.COUNTER,
+    /** The non-secret settings of the [type]; a counter has none. */
+    val settings: JsonObject = JsonObject(emptyMap()),
+    /** The keystore alias of the secret, never the secret itself. */
+    val secretAlias: String? = null,
 )
 
 /** Persistence of resource definitions. */
@@ -42,4 +49,7 @@ interface ResourceStore {
       by: String,
       at: Instant,
   ): SharedResource?
+
+  /** Removes the definition; false when there is no resource of that name. */
+  fun delete(name: String): Boolean
 }

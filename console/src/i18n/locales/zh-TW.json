@@ -143,6 +143,7 @@
   "error.not_a_webhook": "這個 trigger 不是 webhook。",
   "error.not_found": "找不到。",
   "error.resource_exists": "已有同名的共享資源。",
+  "error.resource_in_use": "共享資源有 run 持有或等待，不能刪除。",
   "error.resource_not_found": "沒有這個共享資源。",
   "error.resources_unavailable": "pipeline 需要的共享資源尚未定義或已停用。",
   "error.run_not_found": "沒有這個 run，或你無權查看。",

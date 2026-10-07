@@ -21,6 +21,16 @@ sealed interface AccessPolicy {
   data class Allow(val entries: Set<String>) : AccessPolicy
 }
 
+/** The closed set of shared resource types (ADR-019); usable in annotation values. */
+object ResourceTypes {
+  const val COUNTER = "counter"
+  const val FILE = "file"
+  const val JDBC_POOL = "jdbc-pool"
+  const val OPENAI_COMPATIBLE = "openai-compatible"
+
+  val ALL: Set<String> = setOf(COUNTER, FILE, JDBC_POOL, OPENAI_COMPATIBLE)
+}
+
 data class ParameterSpec(val name: String, val required: Boolean, val default: String?)
 
 data class PipelineMetadata(
@@ -29,7 +39,10 @@ data class PipelineMetadata(
     val files: Map<FileScope, FileMode>,
     val network: AccessPolicy,
     val processes: AccessPolicy,
+    /** Every declared resource name, typed or not. */
     val resources: Set<String>,
+    /** The type expected for some of [resources]; a name that is not here only needs capacity. */
+    val resourceTypes: Map<String, String> = emptyMap(),
 )
 
 /** Applies defaults and validates [supplied] against the declared parameters. */

@@ -18,6 +18,7 @@ static initializers.
 | Network | `network = AccessLimit(allow = [hosts])` | Allowed hosts, or `AccessLimit(unrestricted = true)`. Not provided means unrestricted |
 | External processes | `processes = AccessLimit(allow = [commands])` | Allowed executables (matched against the first command element), or unrestricted. Not provided means unrestricted |
 | Shared resources | `resources = [names]` | Names only; acquired by the Engine in the initialization phase, never through the context. Does not affect safe/unsafe |
+| Expected resource types | `typedResources = [TypedResource(name, type)]` | A name together with the type the pipeline expects (`ResourceTypes.COUNTER`, `FILE`, `JDBC_POOL`, `OPENAI_COMPATIBLE`; the set is closed). The name is also a declared resource name, so it is acquired like any other; a run is refused when the resource has another type. A name declared without a type fits any type. Does not affect safe/unsafe |
 
 Triggers are not part of the metadata; administrators bind them in the Engine.
 

@@ -29,6 +29,7 @@ data class RunPlan(
     val pipelineName: String,
     val parameters: Map<String, String>,
     val resources: List<String>,
+    val resourceTypes: Map<String, String> = emptyMap(),
 )
 
 data class SchedulerConfig(
@@ -194,7 +195,12 @@ class RunScheduler(
       val decision =
           try {
             gate.tryAcquire(
-                PendingRun(candidate.plan.id, candidate.plan.pipelineName, candidate.plan.resources)
+                PendingRun(
+                    candidate.plan.id,
+                    candidate.plan.pipelineName,
+                    candidate.plan.resources,
+                    candidate.plan.resourceTypes,
+                )
             )
           } catch (t: Throwable) {
             queue.remove(candidate)

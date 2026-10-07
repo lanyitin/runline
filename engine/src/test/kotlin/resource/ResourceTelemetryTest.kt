@@ -214,4 +214,148 @@ class ResourceTelemetryTest {
     )
     assertNull(histogramSum("runline.resources.wait.duration", "outcome" to "ACQUIRED"))
   }
+
+  // ---- the type label (WI-40) ----
+
+  private fun attributeKeys(name: String): Set<String> =
+      metric(name)!!
+          .let { m ->
+            (m.histogramData.points.map { it.attributes } +
+                m.longGaugeData.points.map { it.attributes } +
+                m.longSumData.points.map { it.attributes })
+          }
+          .flatMap { a -> a.asMap().keys.map { it.key } }
+          .toSet()
+
+  private fun defineFile(name: String) {
+    val now = java.time.Instant.now()
+    store.insert(SharedResource(name, 1, true, "root", now, "root", now, type = ResourceType.FILE))
+  }
+
+  @Test
+  fun `waiting and holding time carry the resource name and its type, and nothing else but the outcome`() {
+    val holder = run()
+    val waiter = run()
+    coordinator.tryAcquire(holder)
+    coordinator.tryAcquire(waiter)
+    coordinator.release(waiter.id)
+    coordinator.forceRelease("a", holder.id, root)
+    coordinator.tryAcquire(run())
+    coordinator.release(coordinator.activity("a").holders.single().runId)
+
+    assertEquals(
+        setOf("resource", "type", "outcome"),
+        attributeKeys("runline.resources.wait.duration"),
+    )
+    assertEquals(
+        setOf("resource", "type", "how"),
+        attributeKeys("runline.resources.hold.duration"),
+    )
+    assertEquals(
+        0.0,
+        histogramSum(
+            "runline.resources.wait.duration",
+            "resource" to "a",
+            "type" to "counter",
+            "outcome" to "ACQUIRED",
+        ),
+    )
+    assertNotNull(
+        histogramSum(
+            "runline.resources.hold.duration",
+            "resource" to "a",
+            "type" to "counter",
+            "how" to "forced",
+        )
+    )
+  }
+
+  @Test
+  fun `the queue length, the holders and the forced releases carry the type too`() {
+    val holder = run()
+    coordinator.tryAcquire(holder)
+    coordinator.forceRelease("a", holder.id, root)
+
+    assertEquals(setOf("resource", "type"), attributeKeys("runline.resources.queue.length"))
+    assertEquals(setOf("resource", "type"), attributeKeys("runline.resources.holders"))
+    assertEquals(setOf("resource", "type"), attributeKeys("runline.resources.force_released"))
+    assertEquals(
+        "counter",
+        metric("runline.resources.holders")!!
+            .longGaugeData
+            .points
+            .single { it.attributes.asMap().values.contains("a") }
+            .attributes
+            .asMap()
+            .entries
+            .single { it.key.key == "type" }
+            .value,
+    )
+  }
+
+  @Test
+  fun `a resource of another type is labelled with its own type`() {
+    defineFile("data")
+    val r = PendingRun(UUID.randomUUID(), "p", listOf("data"))
+
+    coordinator.tryAcquire(r)
+
+    assertEquals(
+        0.0,
+        histogramSum(
+            "runline.resources.wait.duration",
+            "resource" to "data",
+            "type" to "file",
+            "outcome" to "ACQUIRED",
+        ),
+    )
+  }
+
+  @Test
+  fun `a refusal because of the type labels the resource with the type it really has`() {
+    defineFile("data")
+    val r = PendingRun(UUID.randomUUID(), "p", listOf("data"), mapOf("data" to "counter"))
+
+    assertIs<GateDecision.Refused>(coordinator.tryAcquire(r))
+
+    assertEquals(
+        0.0,
+        histogramSum(
+            "runline.resources.wait.duration",
+            "resource" to "data",
+            "type" to "file",
+            "outcome" to "REFUSED",
+        ),
+    )
+  }
+
+  @Test
+  fun `a resource that is not defined is labelled with the type unknown, not with a guess`() {
+    assertIs<GateDecision.Refused>(
+        coordinator.tryAcquire(PendingRun(UUID.randomUUID(), "p", listOf("ghost")))
+    )
+
+    assertEquals(
+        0.0,
+        histogramSum(
+            "runline.resources.wait.duration",
+            "resource" to "ghost",
+            "type" to "unknown",
+            "outcome" to "REFUSED",
+        ),
+    )
+  }
+
+  @Test
+  fun `a removed resource is no longer reported by the gauges`() {
+    val holder = run()
+    coordinator.tryAcquire(holder)
+    coordinator.release(holder.id)
+    assertEquals(0, gauge("runline.resources.holders", "a"))
+
+    coordinator.removeWhenUnused("a") { store.delete("a") }
+
+    assertNull(gauge("runline.resources.holders", "a"))
+    assertNull(gauge("runline.resources.queue.length", "a"))
+  }
 }

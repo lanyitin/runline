@@ -184,6 +184,7 @@ class UploadService(
           network = network.toDoc(),
           processes = processes.toDoc(),
           resources = resources,
+          resourceTypes = resourceTypes,
       )
 
   private fun AccessLimitMetadata.toDoc() = AccessLimitDoc(unrestricted, allow)

@@ -22,7 +22,10 @@ data class PipelineMetadata(
     val files: List<FileAccessMetadata>,
     val network: AccessLimitMetadata,
     val processes: AccessLimitMetadata,
+    /** Every declared resource name, typed or not. */
     val resources: List<String>,
+    /** The type expected for some of [resources], as the type name written; others need none. */
+    val resourceTypes: Map<String, String> = mapOf(),
 )
 
 /** A class annotated as a pipeline whose declaration could not be read. */

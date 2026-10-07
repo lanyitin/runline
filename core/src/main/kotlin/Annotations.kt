@@ -23,7 +23,18 @@ annotation class PipelineDefinition(
      * classification.
      */
     val resources: Array<String> = [],
+    /**
+     * Shared resources the pipeline uses together with the type it expects each to have (ADR-019).
+     * A name listed here is also a declared resource name; naming a resource in both places is
+     * allowed.
+     */
+    val typedResources: Array<TypedResource> = [],
 )
+
+/** A shared resource name with the type the pipeline expects it to be; see [ResourceTypes]. */
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class TypedResource(val name: String, val type: String)
 
 @Target()
 @Retention(AnnotationRetention.RUNTIME)

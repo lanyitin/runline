@@ -5,6 +5,8 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import javax.sql.DataSource
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore {
   override fun insert(resource: SharedResource): Boolean =
@@ -12,7 +14,8 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
         connection
             .prepareStatement(
                 "INSERT INTO shared_resource (name, capacity, enabled, created_by, created_at, " +
-                    "updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+                    "updated_by, updated_at, type, settings, secret_alias) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?) " +
                     "ON CONFLICT (name) DO NOTHING"
             )
             .use {
@@ -23,6 +26,9 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
               it.setObject(5, resource.createdAt.atOffset(ZoneOffset.UTC))
               it.setString(6, resource.updatedBy)
               it.setObject(7, resource.updatedAt.atOffset(ZoneOffset.UTC))
+              it.setString(8, resource.type.wireName)
+              it.setString(9, Json.encodeToString(JsonObject.serializer(), resource.settings))
+              it.setString(10, resource.secretAlias)
               it.executeUpdate() == 1
             }
       }
@@ -58,8 +64,7 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
             .prepareStatement(
                 "UPDATE shared_resource SET capacity = COALESCE(?, capacity), " +
                     "enabled = COALESCE(?, enabled), updated_by = ?, updated_at = ? " +
-                    "WHERE name = ? RETURNING name, capacity, enabled, created_by, created_at, " +
-                    "updated_by, updated_at"
+                    "WHERE name = ? RETURNING $COLUMNS"
             )
             .use {
               it.setObject(1, capacity)
@@ -69,6 +74,14 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
               it.setString(5, name)
               it.executeQuery().use { rows -> rows.all().singleOrNull() }
             }
+      }
+
+  override fun delete(name: String): Boolean =
+      dataSource.connection.use { connection ->
+        connection.prepareStatement("DELETE FROM shared_resource WHERE name = ?").use {
+          it.setString(1, name)
+          it.executeUpdate() == 1
+        }
       }
 
   private fun ResultSet.all(): List<SharedResource> = buildList {
@@ -82,14 +95,18 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
               createdAt = getObject("created_at", OffsetDateTime::class.java).toInstant(),
               updatedBy = getString("updated_by"),
               updatedAt = getObject("updated_at", OffsetDateTime::class.java).toInstant(),
+              type = checkNotNull(ResourceType.fromWireName(getString("type"))),
+              settings = Json.decodeFromString(JsonObject.serializer(), getString("settings")),
+              secretAlias = getString("secret_alias"),
           )
       )
     }
   }
 
   private companion object {
-    const val SELECT =
-        "SELECT name, capacity, enabled, created_by, created_at, updated_by, updated_at " +
-            "FROM shared_resource"
+    const val COLUMNS =
+        "name, capacity, enabled, created_by, created_at, updated_by, updated_at, type, " +
+            "settings::text AS settings, secret_alias"
+    const val SELECT = "SELECT $COLUMNS FROM shared_resource"
   }
 }

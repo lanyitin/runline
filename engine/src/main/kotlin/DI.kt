@@ -160,8 +160,20 @@ fun Application.configureDependencyInjection() {
       val coordinator = resolve<ResourceCoordinator>()
       ResourceAdmin(resolve<ResourceStore>(), resolve<Clock>(), coordinator::wake)
     }
+    provide<ResourceDeclarationStore> { PostgresResourceDeclarationStore(resolve<DataSource>()) }
     provide<ResourceCatalog> {
-      ResourceCatalog(resolve<ResourceStore>(), resolve<ResourceCoordinator>())
+      ResourceCatalog(
+          resolve<ResourceStore>(),
+          resolve<ResourceCoordinator>(),
+          resolve<ResourceDeclarationStore>(),
+      )
+    }
+    provide<ResourceRemoval> {
+      ResourceRemoval(
+          resolve<ResourceStore>(),
+          resolve<ResourceCoordinator>(),
+          resolve<ResourceDeclarationStore>(),
+      )
     }
     provide<ResourceWarnings> { ResourceWarnings(resolve<ResourceAvailability>()) }
     provide<RunScheduler> {

@@ -47,6 +47,7 @@ class MetadataMatchesCoreTest {
     assertLimit(fromCore.network, fromAnalyzer.network, "network")
     assertLimit(fromCore.processes, fromAnalyzer.processes, "processes")
     assertEquals(fromCore.resources.toList(), fromAnalyzer.resources, "resources")
+    assertEquals(fromCore.resourceTypes, fromAnalyzer.resourceTypes, "resource types")
   }
 
   /** An unrestricted limit has no allow list in core; only a restricted one carries entries. */
@@ -115,6 +116,19 @@ class MetadataMatchesCoreTest {
   @Test
   fun `declared resources`() {
     listOf("resources = {}", "resources = {\"db\"}", "resources = {\"db\", \"queue\", \"mail\"}")
+        .forEach { assertDeclaration(it) }
+  }
+
+  @Test
+  fun `declared resource types, alone, beside names and outside the closed set`() {
+    listOf(
+            "typedResources = {}",
+            "typedResources = { @TypedResource(name = \"f\", type = \"file\") }",
+            "resources = {\"a\", \"f\"}, typedResources = { @TypedResource(name = \"f\", type = ResourceTypes.FILE) }",
+            "typedResources = { @TypedResource(name = \"x\", type = \"not-a-type\"), " +
+                "@TypedResource(name = \"c\", type = ResourceTypes.COUNTER) }",
+            "resources = {\"r\"}, typedResources = { @TypedResource(name = \"r\", type = \"jdbc-pool\") }",
+        )
         .forEach { assertDeclaration(it) }
   }
 

@@ -39,3 +39,17 @@ class StaticInitPipeline : Pipeline {
 
   override fun run(context: PipelineContext) = Unit
 }
+
+@PipelineDefinition(
+    name = "typed",
+    resources = ["lock", "shared-file"],
+    typedResources =
+        [
+            TypedResource("shared-file", ResourceTypes.FILE),
+            TypedResource("llm", ResourceTypes.OPENAI_COMPATIBLE),
+            TypedResource("odd", "not-a-type"),
+        ],
+)
+class TypedResourcesPipeline : Pipeline {
+  override fun run(context: PipelineContext) = Unit
+}

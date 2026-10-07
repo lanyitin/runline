@@ -31,6 +31,30 @@ class PipelineMetadataReadingTest {
   private fun metadataOf(path: Path) = report(path).pipelines.single().metadata
 
   @Test
+  fun `reads the declared resource types without running anything and leaves the verdict alone`() {
+    val path =
+        jar(
+            "demo.Typed" to
+                CompiledJars.pipeline(
+                    "demo.Typed",
+                    limits =
+                        "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+                            "resources = {\"plain\"}, typedResources = { " +
+                            "@TypedResource(name = \"data\", type = ResourceTypes.FILE), " +
+                            "@TypedResource(name = \"odd\", type = \"not-a-type\") }",
+                    members =
+                        "static { if (true) throw new IllegalStateException(\"initialised\"); }",
+                )
+        )
+
+    val pipeline = report(path).pipelines.single()
+
+    assertEquals(listOf("plain", "data", "odd"), pipeline.metadata.resources)
+    assertEquals(mapOf("data" to "file", "odd" to "not-a-type"), pipeline.metadata.resourceTypes)
+    assertEquals(Verdict.SAFE, pipeline.verdict)
+  }
+
+  @Test
   fun `reads parameters, files, limits and resources without running anything`() {
     val path =
         jar(

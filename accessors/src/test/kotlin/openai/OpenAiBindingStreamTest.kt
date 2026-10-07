@@ -274,4 +274,29 @@ class OpenAiBindingStreamTest {
     assertEquals("""{"n":1}""", next(b, opened))
     assertNull(next(b, opened))
   }
+
+  @Test
+  fun `a gap between two events longer than the idle limit is an idle timeout, and the events before it were delivered`() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.event("""{"n":1}""")
+      response.pause(3000)
+      response.event("""{"n":2}""")
+      response.endChunked()
+      true
+    }
+    val b = binding("\"timeouts\":{\"idleMs\":300}")
+    val opened = open(b)
+
+    val first = next(b, opened)
+    val start = System.nanoTime()
+    val e = failure { next(b, opened) }
+    val took = (System.nanoTime() - start) / 1_000_000
+
+    assertEquals("""{"n":1}""", first)
+    assertEquals(ResourceFailure.IDLE_TIMEOUT, e.failure)
+    assertTrue(took in 250..1500, "took $took ms")
+    await("the service to see the connection go") { server.clientsGone == 1 }
+    assertEquals(0, server.inFlight)
+  }
 }

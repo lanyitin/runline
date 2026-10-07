@@ -351,15 +351,19 @@ class OpenAiBinding(
 
     fun read(buffer: ByteArray): Int {
       // Until the first byte of the answer it is the first byte limit that counts, from the
-      // request.
-      val first =
-          if (begun) null
-          else
-              TIMERS.schedule(
-                  { call.stop(ResourceFailure.FIRST_BYTE_TIMEOUT) },
-                  maxOf(call.limits.firstByteMillis - millisSince(sentAt), 0),
-                  TimeUnit.MILLISECONDS,
-              )
+      // request;
+      // after it, the gap between two reads.
+      val timer =
+          TIMERS.schedule(
+              {
+                call.stop(
+                    if (begun) ResourceFailure.IDLE_TIMEOUT else ResourceFailure.FIRST_BYTE_TIMEOUT
+                )
+              },
+              if (begun) call.limits.idleMillis
+              else maxOf(call.limits.firstByteMillis - millisSince(sentAt), 0),
+              TimeUnit.MILLISECONDS,
+          )
       val count =
           try {
             input.read(buffer)
@@ -371,7 +375,7 @@ class OpenAiBinding(
                   classifyIo(e)
                 }
           } finally {
-            first?.cancel(false)
+            timer.cancel(false)
           }
       stopped(call)?.let { throw it }
       if (count > 0) begun = true

@@ -50,6 +50,18 @@ class OpenAiTelemetry(openTelemetry: OpenTelemetry, private val usage: OpenAiUsa
           .setUnit("s")
           .setDescription("From the first byte of an answer to its last")
           .build()
+  private val firstChunk =
+      meter
+          .histogramBuilder("runline.resources.openai.stream.first_chunk.duration")
+          .setUnit("s")
+          .setDescription("From sending a streamed request to the first byte of its answer")
+          .build()
+  private val maxGap =
+      meter
+          .histogramBuilder("runline.resources.openai.stream.max_gap.duration")
+          .setUnit("s")
+          .setDescription("The longest wait for the next event of a stream")
+          .build()
   private val timeouts =
       meter
           .counterBuilder("runline.resources.openai.timeouts")
@@ -81,6 +93,10 @@ class OpenAiTelemetry(openTelemetry: OpenTelemetry, private val usage: OpenAiUsa
       quotaWait.record(outcome.quotaWaitMillis / 1000.0, base)
     }
     outcome.generationMillis?.let { generation.record(it / 1000.0, byEndpoint) }
+    if (outcome.maxChunkGapMillis != null) {
+      outcome.firstByteMillis?.let { firstChunk.record(it / 1000.0, byEndpoint) }
+      maxGap.record(outcome.maxChunkGapMillis!! / 1000.0, byEndpoint)
+    }
     outcome.failure?.let(::timeoutKind)?.let { timeouts.add(1, attributes(resource, KIND to it)) }
     outcome.usage?.prompt?.let { tokens.add(it, attributes(resource, KIND to "prompt")) }
     outcome.usage?.completion?.let { tokens.add(it, attributes(resource, KIND to "completion")) }

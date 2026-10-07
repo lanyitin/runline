@@ -369,4 +369,76 @@ class OpenAiResourceObservabilityTest {
         logs.lines.toString(),
     )
   }
+
+  // ---- streams (WI-47) ----
+
+  /** A pipeline that streams a chat completion, with usage, to its end, and says what it pulled. */
+  private fun streamBody() =
+      """
+      OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+      try (OpenAiStream s = lemon.stream(new OpenAiRequest("chat.completions", "{\"model\":\"$modelMarker\",\"stream_options\":{\"include_usage\":true},\"messages\":[{\"role\":\"user\",\"content\":\"$promptMarker\"}]}"))) {
+        int n = 0;
+        while (s.next() != null) n++;
+        context.getFiles().writeText(FileScope.PIPELINE_SHARED, "events", Integer.toString(n));
+      } catch (ResourceAccessException e) {
+        context.getFiles().writeText(FileScope.PIPELINE_SHARED, "failure", e.getFailure().name());
+      }
+      """
+          .trimIndent()
+
+  @Test
+  fun `a stream is timed by its first event, its longest wait and its generation, and its tokens are counted`() {
+    define()
+    server.chunkDelayMillis = 120
+
+    ran("streamer", streamBody())
+
+    val base = arrayOf("resource" to "lemon", "type" to "openai-compatible")
+    assertEquals(
+        1,
+        histogramCount(
+            "runline.resources.openai.stream.first_chunk.duration",
+            *base,
+            "endpoint" to "chat.completions",
+        ),
+    )
+    assertEquals(
+        1,
+        histogramCount(
+            "runline.resources.openai.stream.max_gap.duration",
+            *base,
+            "endpoint" to "chat.completions",
+        ),
+    )
+    val gap =
+        metric("runline.resources.openai.stream.max_gap.duration")!!
+            .histogramData
+            .points
+            .single()
+            .sum
+    assertTrue(gap in 0.1..1.5, "the longest wait was $gap s")
+    assertEquals(
+        1,
+        histogramCount(
+            "runline.resources.openai.generation.duration",
+            *base,
+            "endpoint" to "chat.completions",
+        ),
+    )
+    assertEquals(
+        1,
+        counter(
+            "runline.resources.openai.requests",
+            *base,
+            "endpoint" to "chat.completions",
+            "outcome" to "ok",
+        ),
+    )
+    assertEquals(3, counter("runline.resources.openai.tokens", *base, "kind" to "prompt"))
+    assertEquals(4, counter("runline.resources.openai.tokens", *base, "kind" to "completion"))
+    assertEquals(
+        0,
+        metric("runline.resources.openai.requests.in_flight")!!.longSumData.points.single().value,
+    )
+  }
 }

@@ -52,27 +52,20 @@ class ResourceTypeApiTest : ResourceApiSupport() {
   }
 
   @Test
-  fun `a type that is not known, or not implemented yet, is refused saying why`() =
-      testApplication {
-        engine()
+  fun `a type that is not known is refused saying why`() = testApplication {
+    engine()
 
-        val unknown = define("a", 1, """"type":"http-endpoint"""")
-        val notYet = listOf("jdbc-pool").map { define("b-$it", 1, """"type":"$it"""") }
+    val unknown = define("a", 1, """"type":"http-endpoint"""")
 
-        assertEquals(HttpStatusCode.UnprocessableEntity, unknown.status)
-        assertEquals("invalid_resource", unknown.json().text("error"))
-        assertEquals("unknown_type", unknown.json().text("problem"))
-        assertTrue(unknown.json().text("message").isNotBlank())
-        notYet.forEach {
-          assertEquals(HttpStatusCode.UnprocessableEntity, it.status)
-          assertEquals("invalid_resource", it.json().text("error"))
-          assertEquals("unsupported_type", it.json().text("problem"))
-        }
-        assertEquals(
-            emptyList(),
-            get("/api/v1/resources", TestTokens.ROOT).json().array("resources"),
-        )
-      }
+    assertEquals(HttpStatusCode.UnprocessableEntity, unknown.status)
+    assertEquals("invalid_resource", unknown.json().text("error"))
+    assertEquals("unknown_type", unknown.json().text("problem"))
+    assertTrue(unknown.json().text("message").isNotBlank())
+    assertEquals(
+        emptyList(),
+        get("/api/v1/resources", TestTokens.ROOT).json().array("resources"),
+    )
+  }
 
   @Test
   fun `a counter given settings or a secret alias is refused`() = testApplication {

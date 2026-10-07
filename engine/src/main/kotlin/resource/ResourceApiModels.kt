@@ -5,6 +5,8 @@ import java.time.Duration
 import java.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** [type] is a counter when left out; [settings] and [secretAlias] belong to the type (ADR-019). */
 @Serializable
@@ -45,12 +47,14 @@ data class CheckDoc(val ok: Boolean, val failure: String? = null, val checkedAt:
 fun CheckResult.toDoc() = CheckDoc(ok, failure?.wire, checkedAt.toString())
 
 /**
- * What a type says about its use now: the requests an `openai-compatible` resource has in flight,
- * or the connections a `jdbc-pool` resource has in use; the member that is not the type's is left
- * out.
+ * What a type says about its use now: `{"inFlightRequests": n}` for an `openai-compatible`
+ * resource, `{"activeConnections": n}` for a `jdbc-pool` one. A member that is not the type's is
+ * not there at all.
  */
-@Serializable
-data class UsageDoc(val inFlightRequests: Int? = null, val activeConnections: Int? = null)
+fun ResourceUsage.toDoc(): JsonObject = buildJsonObject {
+  inFlightRequests?.let { put("inFlightRequests", it) }
+  activeConnections?.let { put("activeConnections", it) }
+}
 
 @Serializable
 data class HolderDoc(
@@ -108,7 +112,7 @@ data class ResourceResponse(
      */
     val concurrencyLimit: Int?,
     /** The use of the entity now, for the types that can say; null for the others. */
-    val usage: UsageDoc?,
+    val usage: JsonObject?,
     /** The last check of the entity; null when never checked or when the settings changed since. */
     val lastCheck: CheckDoc?,
     val createdBy: String,
@@ -171,7 +175,7 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
       secretAlias = resource.secretAlias,
       secretStatus = aliasState.wire,
       concurrencyLimit = concurrencyLimit,
-      usage = usage?.let { UsageDoc(it.inFlightRequests, it.activeConnections) },
+      usage = usage?.toDoc(),
       lastCheck = resource.lastCheck?.toDoc(),
       createdBy = resource.createdBy,
       createdAt = resource.createdAt.toString(),

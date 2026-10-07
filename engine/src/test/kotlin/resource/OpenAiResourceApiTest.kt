@@ -197,13 +197,14 @@ class OpenAiResourceApiTest : ResourceApiSupport() {
   }
 
   @Test
-  fun `a type that is not implemented yet is still refused as unsupported`() = testApplication {
-    engine()
+  fun `a type of the set needs its settings, and every type of the set can be created now`() =
+      testApplication {
+        engine()
 
-    val response = define("pool", 1, """"type":"jdbc-pool"""")
+        val response = define("pool", 1, """"type":"jdbc-pool"""")
 
-    assertEquals("unsupported_type", response.json().text("problem"))
-  }
+        assertEquals("invalid_settings", response.json().text("problem"))
+      }
 
   @Test
   fun `an alias that is not a well formed name is refused and a good one is stored in lower case`() =

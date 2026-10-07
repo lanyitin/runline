@@ -118,7 +118,11 @@ class OpenAiBinding(
       val data =
           try {
             stopped(call)?.let { throw it }
-            events.next()
+            val waitStart = System.nanoTime()
+            events.next().also {
+              val waited = millisSince(waitStart)
+              report.maxChunkGapMillis = maxOf(report.maxChunkGapMillis ?: 0, waited)
+            }
           } catch (e: ResourceOperationFailure) {
             end(e.failure)
             throw e
@@ -127,6 +131,7 @@ class OpenAiBinding(
         end(null)
         return null
       }
+      if (data.contains("\"usage\"")) usageOf(data)?.let { report.usage = it }
       // A service that echoes the key does not give it to the pipeline through a stream either.
       val key = (credential as? OpenAiCredential.Key)?.value
       return if (key != null) data.replace(key, "***") else data
@@ -137,6 +142,9 @@ class OpenAiBinding(
       if (!over.compareAndSet(null, Ending(reason))) return
       runCatching { call.stream?.close() }
       call.release()
+      if (reason == null) {
+        report.firstByteAt?.let { report.generationMillis = millisSince(it) }
+      }
       report.finish(endpoint, reason, null)
     }
   }
@@ -174,6 +182,10 @@ class OpenAiBinding(
     var usage: OpenAiTokenUsage? = null
     var status: Int? = null
 
+    /** For a stream: when its first byte came, and the longest wait for an event so far. */
+    @Volatile var firstByteAt: Long? = null
+    @Volatile var maxChunkGapMillis: Long? = null
+
     /** A stream took the call over, and tells the observer when it ends. */
     @Volatile var handedOver = false
     private val finished = AtomicBoolean()
@@ -190,6 +202,7 @@ class OpenAiBinding(
               firstByteMillis,
               generationMillis,
               usage,
+              maxChunkGapMillis,
           )
       runCatching { observer.finished(resource, endpoint, outcome) }
     }
@@ -353,6 +366,7 @@ class OpenAiBinding(
       private val call: Call,
       private val input: InputStream,
       private val sentAt: Long,
+      private val report: Report,
   ) {
     private var begun = false
 
@@ -385,7 +399,11 @@ class OpenAiBinding(
             timer.cancel(false)
           }
       stopped(call)?.let { throw it }
-      if (count > 0) begun = true
+      if (count > 0 && !begun) {
+        begun = true
+        report.firstByteMillis = millisSince(sentAt)
+        report.firstByteAt = System.nanoTime()
+      }
       return count
     }
   }
@@ -398,7 +416,7 @@ class OpenAiBinding(
       endpoint: String,
       sentAt: Long,
   ): Map<String, Any?> {
-    val wire = Wire(call, response.body(), sentAt)
+    val wire = Wire(call, response.body(), sentAt, report)
     val id = streamIds.incrementAndGet()
     val events = ServerSentEvents(settings.maxResponseBytes.toInt()) { wire.read(it) }
     val headers = answerHeaders(response.headers().map())

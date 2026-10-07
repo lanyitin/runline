@@ -567,4 +567,83 @@ class OpenAiBindingStreamTest {
       elsewhere.close()
     }
   }
+
+  private class Recorder : OpenAiObserver {
+    val started = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val finished = java.util.concurrent.CopyOnWriteArrayList<OpenAiOutcome>()
+
+    override fun started(resource: String, endpoint: String) {
+      started += endpoint
+    }
+
+    override fun finished(resource: String, endpoint: String, outcome: OpenAiOutcome) {
+      finished += outcome
+    }
+  }
+
+  @Test
+  fun `the observer hears of a stream when it opens and, once, when it ends, with the time of the first event, the longest wait and the usage`() {
+    server.chunkDelayMillis = 120
+    val recorder = Recorder()
+    val b = OpenAiBinding("lemon", settingsOf(), observer = recorder).also { bindings += it }
+
+    val opened =
+        b.execute(
+            "openai.stream.open",
+            mapOf(
+                "endpoint" to "chat.completions",
+                "body" to """{"stream_options":{"include_usage":true}}""",
+            ),
+        ) as Map<String, Any?>
+    assertEquals(listOf("chat.completions"), recorder.started)
+    assertEquals(0, recorder.finished.size, "a stream in progress is still in flight")
+    next(b, opened)
+    assertEquals(0, recorder.finished.size)
+    while (next(b, opened) != null) {
+      // to the end
+    }
+    close(b, opened)
+
+    val outcome = recorder.finished.single()
+    assertNull(outcome.failure)
+    assertEquals(200, outcome.status)
+    assertTrue(outcome.firstByteMillis!! >= 0)
+    assertTrue(outcome.maxChunkGapMillis!! in 100..1000, "gap ${outcome.maxChunkGapMillis}")
+    assertTrue(outcome.generationMillis!! >= 400, "generation ${outcome.generationMillis}")
+    assertEquals(7L, outcome.usage?.total)
+    assertEquals(4L, outcome.usage?.completion)
+  }
+
+  @Test
+  fun `a stream that fails is reported once with its category`() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.hang()
+      true
+    }
+    val recorder = Recorder()
+    val b =
+        OpenAiBinding(
+                "lemon",
+                (OpenAiSettings.parse(
+                        Json.parseToJsonElement(
+                                """{"baseUrl":"${server.baseUrl}","timeouts":{"firstByteMs":200}}"""
+                            )
+                            .jsonObject
+                    ) as SettingsResult.Valid)
+                    .settings,
+                observer = recorder,
+            )
+            .also { bindings += it }
+    val opened = open(b)
+
+    failure { next(b, opened) }
+    failure { next(b, opened) }
+    close(b, opened)
+
+    assertEquals(
+        listOf(ResourceFailure.FIRST_BYTE_TIMEOUT),
+        recorder.finished.map { it.failure },
+    )
+  }
 }

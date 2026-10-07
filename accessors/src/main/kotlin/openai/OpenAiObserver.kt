@@ -24,6 +24,8 @@ data class OpenAiOutcome(
     /** From the first byte to the last, when the whole answer came. */
     val generationMillis: Long?,
     val usage: OpenAiTokenUsage?,
+    /** For a stream: the longest time spent waiting for the next event, the first one included. */
+    val maxChunkGapMillis: Long? = null,
 )
 
 /** What the host (the Engine's metrics and traces) learns of the calls on a binding. */

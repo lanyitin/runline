@@ -7,6 +7,8 @@ import java.util.function.Function
 interface Accessors {
   fun file(name: String): FileAccessor
 
+  fun jdbcPool(name: String): JdbcAccessor
+
   fun openAiCompatible(name: String): OpenAiAccessor
 }
 
@@ -28,6 +30,52 @@ interface FileAccessor {
   fun appendText(text: String)
 
   fun appendBytes(bytes: ByteArray)
+}
+
+/**
+ * Controlled access to the database behind a `jdbc-pool` resource. The address, the account and the
+ * driver are the resource's, never the pipeline's; a pipeline gives SQL text and parameters and
+ * gets rows of JDK types back. The SQL text goes to the database as it is: what it may do is what
+ * the resource's database account may do.
+ *
+ * Parameters are `null`, text, booleans, integers, floating point numbers, `BigDecimal` and bytes;
+ * a value of the database that is none of these (a date, a UUID, JSON, ...) comes back as its text.
+ * A text parameter is given to the database untyped, so that it can fill a column of any type it
+ * can be read as. Statements run one at a time; between [begin] and [commit] or [rollback] they all
+ * run in one transaction of the run, and outside one each is its own.
+ */
+interface JdbcAccessor {
+  /** Runs a statement that returns rows. */
+  fun query(sql: String): JdbcRows
+
+  fun query(sql: String, parameters: List<Any?>): JdbcRows
+
+  /** Runs a statement that changes data and returns the number of rows it changed. */
+  fun update(sql: String): Long
+
+  fun update(sql: String, parameters: List<Any?>): Long
+
+  /** Starts the transaction of the run on this resource; fails if one is already open. */
+  fun begin()
+
+  /** Makes the open transaction permanent; fails if none is open. */
+  fun commit()
+
+  /** Undoes the open transaction; fails if none is open. */
+  fun rollback()
+}
+
+/** The rows a query returned: the column names and, per row, a value for each column. */
+class JdbcRows(val columns: List<String>, val rows: List<List<Any?>>) {
+  val size: Int
+    get() = rows.size
+
+  /** Each row as its columns by name; a name that two columns share keeps the later one. */
+  fun maps(): List<Map<String, Any?>> = rows.map { row ->
+    val named = java.util.LinkedHashMap<String, Any?>()
+    columns.forEachIndexed { index, column -> named[column] = row[index] }
+    named
+  }
 }
 
 /**
@@ -331,6 +379,15 @@ enum class ResourceFailure {
 
   /** The call was stopped: the run was cancelled or ended, or the holder was released by force. */
   CANCELLED,
+
+  // The categories of `jdbc-pool` (WI-48). What the database or the driver said is never part of
+  // them; the host's log has it under the errorId.
+
+  /** The database refused the statement; [ResourceAccessException.sqlState] says which way. */
+  SQL_ERROR,
+
+  /** The statement or the transaction does not fit the state of the transaction. */
+  TRANSACTION_STATE,
 }
 
 /** Thrown by an accessor; carries the failure category and never a path or system message. */
@@ -342,6 +399,8 @@ constructor(
     val errorId: String? = null,
     /** The HTTP status the service answered with, for the types that talk HTTP. */
     val status: Int? = null,
+    /** The standard SQLState code of a [ResourceFailure.SQL_ERROR]: five characters, no more. */
+    val sqlState: String? = null,
 ) :
     RuntimeException(
         "Shared resource '$resource': $failure" + (status?.let { " (HTTP $it)" } ?: "")

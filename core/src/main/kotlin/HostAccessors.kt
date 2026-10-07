@@ -16,6 +16,9 @@ internal class HostAccessors(
   override fun file(name: String): FileAccessor =
       HostFile(name, linkFor(name, ResourceTypes.FILE), recorder)
 
+  override fun jdbcPool(name: String): JdbcAccessor =
+      HostJdbc(name, linkFor(name, ResourceTypes.JDBC_POOL), recorder)
+
   override fun openAiCompatible(name: String): OpenAiAccessor =
       HostOpenAi(name, linkFor(name, ResourceTypes.OPENAI_COMPATIBLE), recorder, scopes)
 
@@ -76,6 +79,89 @@ private class HostFile(
 
   private fun call(operation: String, arguments: Map<String, Any?>): Any? =
       callHost(link, name, operation, arguments)
+}
+
+/** One `jdbc-pool` accessor: every statement is a call to the host, whose answer is JDK types. */
+private class HostJdbc(
+    private val name: String,
+    private val link: ResourceLink,
+    private val recorder: IoRecorder?,
+) : JdbcAccessor {
+  override fun query(sql: String): JdbcRows = query(sql, emptyList())
+
+  override fun query(sql: String, parameters: List<Any?>): JdbcRows {
+    val arguments = statement(sql, parameters, IoAccess.READ)
+    val answer = callHost(link, name, "jdbc.query", arguments)
+    return rowsOf(answer) ?: throw ResourceAccessException(name, ResourceFailure.FAILED)
+  }
+
+  override fun update(sql: String): Long = update(sql, emptyList())
+
+  override fun update(sql: String, parameters: List<Any?>): Long {
+    val arguments = statement(sql, parameters, IoAccess.WRITE)
+    return callHost(link, name, "jdbc.update", arguments) as? Long
+        ?: throw ResourceAccessException(name, ResourceFailure.FAILED)
+  }
+
+  override fun begin() = transaction("jdbc.begin")
+
+  override fun commit() = transaction("jdbc.commit")
+
+  override fun rollback() = transaction("jdbc.rollback")
+
+  private fun transaction(operation: String) {
+    record(IoAccess.WRITE)
+    callHost(link, name, operation, emptyMap())
+  }
+
+  /**
+   * The arguments of a statement for the host: its text and its parameters in the few shapes the
+   * host takes. Only the name, the type and the kind of action are recorded: never SQL or a value.
+   */
+  private fun statement(
+      sql: String,
+      parameters: List<Any?>,
+      access: IoAccess,
+  ): java.util.HashMap<String, Any?> {
+    val carried = java.util.ArrayList<Any?>(parameters.size)
+    for (value in parameters) carried += carry(value)
+    record(access)
+    val arguments = java.util.HashMap<String, Any?>()
+    arguments["sql"] = sql
+    arguments["parameters"] = carried
+    return arguments
+  }
+
+  /** A parameter as the host takes it; nothing that is not one of the listed kinds gets there. */
+  private fun carry(value: Any?): Any? =
+      when (value) {
+        null,
+        is String,
+        is Boolean,
+        is java.math.BigDecimal,
+        is ByteArray -> value
+        is Byte,
+        is Short,
+        is Int,
+        is Long -> (value as Number).toLong()
+        is Float,
+        is Double -> (value as Number).toDouble()
+        else -> throw ResourceAccessException(name, ResourceFailure.INVALID_ARGUMENT)
+      }
+
+  private fun rowsOf(answer: Any?): JdbcRows? {
+    val map = answer as? Map<*, *> ?: return null
+    val columns = (map["columns"] as? List<*>)?.map { it as? String ?: return null } ?: return null
+    val rows =
+        (map["rows"] as? List<*>)?.map { row ->
+          (row as? List<*>)?.takeIf { it.size == columns.size } ?: return null
+        } ?: return null
+    return JdbcRows(columns, rows)
+  }
+
+  private fun record(access: IoAccess) {
+    recorder?.record(IoCategory.RESOURCE, name, access, resourceType = ResourceTypes.JDBC_POOL)
+  }
 }
 
 /** One `openai-compatible` accessor: a request becomes one call to the host. */
@@ -293,6 +379,7 @@ private fun callHost(
       failureOf(answer["failure"]),
       answer["errorId"] as String?,
       answer["status"] as Int?,
+      answer["sqlState"] as? String,
   )
 }
 

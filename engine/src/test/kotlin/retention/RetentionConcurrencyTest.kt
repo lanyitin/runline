@@ -173,7 +173,7 @@ class RetentionConcurrencyTest {
 
   private fun rigRuns(hash: String, pipeline: String, count: Int): List<UUID> {
     val rigData = RetentionData(rig.dataSource, clock.instant())
-    val definition = rig.definitions.find(hash, pipeline)!!.id
+    val definition = rig.definitions.find(hash, "alice", pipeline)!!.id
     return List(count) { rigData.run(RunState.SUCCEEDED, ago(40), 2, definition) }
   }
 
@@ -181,7 +181,7 @@ class RetentionConcurrencyTest {
   fun `the clean-up is not held up by an allow list change that holds its lock and a definition`() {
     val hash = rig.uploadNeedingUtil("busy")
     val expired = rigRuns(hash, "busy", 5)
-    val id = rig.definitions.find(hash, "busy")!!.id
+    val id = rig.definitions.find(hash, "alice", "busy")!!.id
     val inside = CountDownLatch(1)
     val finish = CountDownLatch(1)
     val change = pool.submit {

@@ -19,7 +19,7 @@ class AllowListChangeConcurrencyTest {
   @Test
   fun `reading definitions and creating a run go on while a change is rejudging`() {
     val hash = rig.uploadNeedingUtil("busy")
-    val id = rig.definitions.find(hash, "busy")!!.id
+    val id = rig.definitions.find(hash, "alice", "busy")!!.id
     val runs = PostgresRunStore(rig.dataSource)
     val inside = CountDownLatch(1)
     val finish = CountDownLatch(1)
@@ -40,7 +40,7 @@ class AllowListChangeConcurrencyTest {
 
       val others =
           pool.submit<Pair<Verdict, UUID>> {
-            val seen = rig.definitions.find(hash, "busy")!!.verdict
+            val seen = rig.definitions.find(hash, "alice", "busy")!!.verdict
             val run =
                 runs.insert(
                     NewRun(
@@ -59,7 +59,7 @@ class AllowListChangeConcurrencyTest {
       assertEquals(Verdict.UNSAFE, seen, "what was committed is read, not the change in progress")
       finish.countDown()
       change.get(30, TimeUnit.SECONDS)
-      assertEquals(Verdict.SAFE, rig.definitions.find(hash, "busy")!!.verdict)
+      assertEquals(Verdict.SAFE, rig.definitions.find(hash, "alice", "busy")!!.verdict)
     } finally {
       finish.countDown()
       pool.shutdownNow()

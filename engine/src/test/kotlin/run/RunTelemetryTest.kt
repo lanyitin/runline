@@ -36,6 +36,7 @@ class RunTelemetryTest {
       RunRecord(
           id,
           "h".repeat(64),
+          "alice",
           "p.Nightly",
           "nightly",
           RunState.QUEUED,

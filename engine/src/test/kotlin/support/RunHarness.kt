@@ -139,6 +139,7 @@ class RunHarness(
   val service =
       RunService(
           definitions,
+          VersionResolver(artifacts),
           runStore,
           scheduler,
           resourceAvailability,
@@ -257,7 +258,9 @@ class RunHarness(
       parameters: Map<String, String> = emptyMap(),
       source: RunSource = RunSource.Manual("alice"),
       visibility: Visibility = Visibility.All,
-  ): CreateRunResult = service.create(CreateRun(hash, pipeline, parameters, source, visibility))
+      uploader: String? = null,
+  ): CreateRunResult =
+      service.create(CreateRun(hash, uploader, pipeline, parameters, source, visibility))
 
   /** Creates a run that must be accepted and returns its id. */
   fun start(hash: String, pipeline: String, parameters: Map<String, String> = emptyMap()): UUID =

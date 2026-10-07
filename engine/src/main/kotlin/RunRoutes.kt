@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine
 
 import dev.lawlan.runline.engine.artifact.ErrorResponse
 import dev.lawlan.runline.engine.artifact.UnsafeExecutionSettings
+import dev.lawlan.runline.engine.artifact.VersionOutcome
 import dev.lawlan.runline.engine.artifact.visibility
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.auth.authorized
@@ -30,10 +31,12 @@ import kotlinx.serialization.json.Json
  * [UnsafeExecutionSettings]; every rule lives there. A run or pipeline the caller may not see is
  * answered exactly as one that does not exist.
  *
- * - `POST /api/v1/runs` (developer): body `{contentHash, pipeline, parameters}`. 201 with the run
- *   and its `Location`; 404 `definition_not_found`; 422 `invalid_parameters` naming each parameter;
- *   409 `unsafe_not_allowed`; 409 `resources_unavailable` naming each shared resource the pipeline
- *   declares that is not defined (`unknown`) or disabled (`disabled`); 400 `bad_request`.
+ * - `POST /api/v1/runs` (developer): body `{contentHash, uploader?, pipeline, parameters}`. 201
+ *   with the run and its `Location`; 404 `definition_not_found`; 409 `ambiguous_version` (an
+ *   administrator who can see several versions of the content and named none); 422
+ *   `invalid_parameters` naming each parameter; 409 `unsafe_not_allowed`; 409
+ *   `resources_unavailable` naming each shared resource the pipeline declares that is not defined
+ *   (`unknown`) or disabled (`disabled`); 400 `bad_request`.
  * - `GET /api/v1/runs[?pipeline=&limit=]` (developer): own runs, newest first; administrators all.
  * - `GET /api/v1/runs/{runId}` (developer): state, source, parameters, result. 404 when absent.
  * - `POST /api/v1/runs/{runId}/cancel` (developer): 200 when it had not started and ended
@@ -41,8 +44,9 @@ import kotlinx.serialization.json.Json
  * - `GET /api/v1/runs/{runId}/log[?after=&limit=]` (developer): stored log entries.
  * - `GET /api/v1/runs/{runId}/log/stream[?after=]` (developer, WebSocket): entries as JSON text
  *   frames until the run ends, then the socket is closed normally.
- * - `PUT /api/v1/definitions/{contentHash}/{pipeline}/unsafe-execution` (administrator): body
- *   `{allow}`; 200 with the setting, who set it and when; 404.
+ * - `PUT /api/v1/definitions/{contentHash}/{pipeline}/unsafe-execution[?uploader=]`
+ *   (administrator): body `{allow}`; 200 with the setting, who set it and when; 404; 409
+ *   `ambiguous_version` when several uploaders have the version and none is named.
  */
 fun Application.configureRunRoutes() {
   val runs: RunService by dependencies
@@ -74,6 +78,7 @@ fun Application.configureRunRoutes() {
                 runs.create(
                     CreateRun(
                         request.contentHash,
+                        request.uploader,
                         request.pipeline,
                         request.parameters,
                         RunSource.Manual(caller.name),
@@ -86,6 +91,8 @@ fun Application.configureRunRoutes() {
               call.response.header(HttpHeaders.Location, "/api/v1/runs/${result.run.id}")
               call.respond(HttpStatusCode.Created, result.run.toResponse())
             }
+            is CreateRunResult.AmbiguousVersion ->
+                call.respondAmbiguousVersion(VersionOutcome.Ambiguous(result.uploaders))
             CreateRunResult.DefinitionNotFound ->
                 call.respond(
                     HttpStatusCode.NotFound,
@@ -208,17 +215,19 @@ fun Application.configureRunRoutes() {
                     ErrorResponse("bad_request", "請求內容需為 JSON：{\"allow\": true 或 false}。"),
                 )
               }
+          val uploader = call.request.queryParameters["uploader"]
           val updated =
               withContext(Dispatchers.IO) {
-                unsafeSettings.set(contentHash, pipeline, request.allow, call.caller)
+                unsafeSettings.set(contentHash, uploader, pipeline, request.allow, call.caller)
               }
-          if (updated == null) {
-            call.respond(
-                HttpStatusCode.NotFound,
-                ErrorResponse("definition_not_found", "找不到這個 pipeline 定義。"),
-            )
-          } else {
-            call.respond(updated.toUnsafeResponse())
+          when (updated) {
+            is VersionOutcome.Resolved -> call.respond(updated.value.toUnsafeResponse())
+            is VersionOutcome.Ambiguous -> call.respondAmbiguousVersion(updated)
+            VersionOutcome.NotFound ->
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    ErrorResponse("definition_not_found", "找不到這個 pipeline 定義。"),
+                )
           }
         }
       }

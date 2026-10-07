@@ -179,6 +179,7 @@ class PostgresRunStore(private val dataSource: DataSource) : RunStore, RunLogSto
       RunRecord(
           id = getObject("id", UUID::class.java),
           contentHash = getString("content_hash"),
+          uploader = getString("uploaded_by"),
           className = getString("class_name"),
           pipelineName = getString("name"),
           state = RunState.valueOf(getString("state")),
@@ -205,7 +206,7 @@ class PostgresRunStore(private val dataSource: DataSource) : RunStore, RunLogSto
 
   private companion object {
     const val SELECT =
-        "SELECT r.id, a.content_hash, d.class_name, d.name, r.state, r.source_kind, " +
+        "SELECT r.id, a.content_hash, a.uploaded_by, d.class_name, d.name, r.state, r.source_kind, " +
             "r.source_name, r.parameters, r.created_at, r.started_at, r.finished_at, " +
             "r.failure_type, r.failure_message, r.failure_trace, r.unsafe_execution, " +
             "r.unsafe_setting_set_by, r.unsafe_setting_set_at FROM run r " +

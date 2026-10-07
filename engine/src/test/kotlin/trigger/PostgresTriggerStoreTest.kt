@@ -26,7 +26,7 @@ class PostgresTriggerStoreTest {
   private val t0 = Instant.now().truncatedTo(ChronoUnit.MICROS)
 
   private fun definitionId(hash: String, name: String = "nightly") =
-      definitions.find(hash, name)!!.id
+      definitions.find(hash, "alice", name)!!.id
 
   private fun cron(
       name: String = "every-night",

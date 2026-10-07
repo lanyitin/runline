@@ -19,6 +19,8 @@ data class Trigger(
     /** The definition the trigger is bound to, which is one version of a pipeline. */
     val definitionId: Long,
     val contentHash: String,
+    /** Whose version of the content the trigger is bound to (ADR-020). */
+    val uploader: String,
     val pipeline: String,
     /** The fixed parameters of every run it creates, defaults applied. */
     val parameters: Map<String, String>,

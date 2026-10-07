@@ -21,7 +21,11 @@ class TriggerCatalog(
       triggers.find(name)?.let { triggers.firings(it.id, limit) }
 
   private fun viewOf(trigger: Trigger): TriggerView {
-    val declared = definitions.find(trigger.contentHash, trigger.pipeline)?.metadata?.parameters
+    val declared =
+        definitions
+            .find(trigger.contentHash, trigger.uploader, trigger.pipeline)
+            ?.metadata
+            ?.parameters
     val check = declared?.let { validateParameters(it, trigger.parameters) }
     // The binding was checked when it was made, and a version never changes.
     val effective = (check as? ParameterCheck.Valid)?.effective ?: trigger.parameters

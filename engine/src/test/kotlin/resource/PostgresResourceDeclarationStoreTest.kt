@@ -39,7 +39,7 @@ class PostgresResourceDeclarationStoreTest {
         NewTrigger(
             name,
             TriggerKind.CRON,
-            definitions.find(hash, pipeline)!!.id,
+            definitions.find(hash, "alice", pipeline)!!.id,
             mapOf("env" to "prod", "retries" to "3"),
             true,
             "0 2 * * *",

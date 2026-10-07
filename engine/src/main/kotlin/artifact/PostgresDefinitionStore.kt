@@ -14,17 +14,27 @@ import kotlinx.serialization.json.Json
 class PostgresDefinitionStore(private val dataSource: DataSource) : DefinitionStore {
   private val json = Json { ignoreUnknownKeys = true }
 
-  override fun find(contentHash: String, pipelineName: String): StoredDefinition? =
+  override fun find(
+      contentHash: String,
+      uploader: String,
+      pipelineName: String,
+  ): StoredDefinition? =
       dataSource.connection.use { connection ->
-        connection.prepareStatement("$SELECT WHERE a.content_hash = ? AND d.name = ?").use {
-          it.setString(1, contentHash)
-          it.setString(2, pipelineName)
-          it.executeQuery().use { rs -> if (rs.next()) rs.definition() else null }
-        }
+        connection
+            .prepareStatement(
+                "$SELECT WHERE a.content_hash = ? AND a.uploaded_by = ? AND d.name = ?"
+            )
+            .use {
+              it.setString(1, contentHash)
+              it.setString(2, uploader)
+              it.setString(3, pipelineName)
+              it.executeQuery().use { rs -> if (rs.next()) rs.definition() else null }
+            }
       }
 
   override fun setUnsafeExecution(
       contentHash: String,
+      uploader: String,
       pipelineName: String,
       allow: Boolean,
       by: String,
@@ -37,7 +47,8 @@ class PostgresDefinitionStore(private val dataSource: DataSource) : DefinitionSt
                     "UPDATE pipeline_definition SET allow_unsafe_execution = ?, " +
                         "unsafe_setting_set_by = ?, unsafe_setting_set_at = ? " +
                         "WHERE name = ? AND artifact_id = " +
-                        "(SELECT id FROM pipeline_artifact WHERE content_hash = ?)"
+                        "(SELECT id FROM pipeline_artifact WHERE content_hash = ? " +
+                        "AND uploaded_by = ?)"
                 )
                 .use {
                   it.setBoolean(1, allow)
@@ -45,9 +56,10 @@ class PostgresDefinitionStore(private val dataSource: DataSource) : DefinitionSt
                   it.setObject(3, at.atOffset(ZoneOffset.UTC))
                   it.setString(4, pipelineName)
                   it.setString(5, contentHash)
+                  it.setString(6, uploader)
                   it.executeUpdate()
                 }
-        if (changed == 0) null else find(contentHash, pipelineName)
+        if (changed == 0) null else find(contentHash, uploader, pipelineName)
       }
 
   override fun copyContent(contentHash: String, target: Path): Boolean =

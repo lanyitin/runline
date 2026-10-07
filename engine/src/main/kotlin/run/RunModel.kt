@@ -51,6 +51,8 @@ data class NewRun(
 data class RunRecord(
     val id: UUID,
     val contentHash: String,
+    /** Whose version of the content the run is of (ADR-020). */
+    val uploader: String,
     val className: String,
     val pipelineName: String,
     val state: RunState,

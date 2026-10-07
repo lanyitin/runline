@@ -237,6 +237,7 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
                         kind = TriggerKind.valueOf(rows.getString("kind")),
                         definitionId = rows.getLong("definition_id"),
                         contentHash = rows.getString("content_hash"),
+                        uploader = rows.getString("uploaded_by"),
                         pipeline = rows.getString("pipeline"),
                         parameters =
                             Json.decodeFromString(parameters, rows.getString("parameters")),
@@ -267,7 +268,7 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
   private companion object {
     // The binding is shown as the version (artifact content hash) and pipeline name.
     const val SELECT =
-        "SELECT t.id, t.name, t.kind, t.definition_id, a.content_hash, d.name AS pipeline, " +
+        "SELECT t.id, t.name, t.kind, t.definition_id, a.content_hash, a.uploaded_by, d.name AS pipeline, " +
             "t.parameters, t.enabled, t.cron_expression, t.time_zone, t.secret_rotated_at, " +
             "t.created_by, t.created_at, t.updated_by, t.updated_at FROM pipeline_trigger t " +
             "JOIN pipeline_definition d ON d.id = t.definition_id " +

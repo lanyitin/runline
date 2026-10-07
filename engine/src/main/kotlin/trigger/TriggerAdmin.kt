@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
+import dev.lawlan.runline.engine.artifact.ArtifactStore
 import dev.lawlan.runline.engine.artifact.DefinitionStore
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.run.ParameterCheck
@@ -94,18 +95,24 @@ sealed interface RotateSecretResult {
  */
 class TriggerAdmin(
     private val definitions: DefinitionStore,
+    private val artifacts: ArtifactStore,
     private val triggers: TriggerStore,
     private val clock: Clock,
 ) {
   private val log = LoggerFactory.getLogger(TriggerAdmin::class.java)
+
+  private fun soleUploader(contentHash: String) = artifacts.uploadersOf(contentHash).singleOrNull()
 
   fun create(request: CreateTrigger, by: ApiIdentity): CreateTriggerResult {
     if (!NAME.matches(request.name)) return CreateTriggerResult.Invalid(InvalidTrigger.NAME)
     val schedule = scheduleOf(request.kind, request.cronExpression, request.timeZone)
     if (schedule is Schedule.Refused) return CreateTriggerResult.Invalid(schedule.problem)
     val definition =
-        definitions.find(request.contentHash, request.pipeline)
-            ?: return CreateTriggerResult.DefinitionNotFound
+        definitions.find(
+            request.contentHash,
+            soleUploader(request.contentHash) ?: return CreateTriggerResult.DefinitionNotFound,
+            request.pipeline,
+        ) ?: return CreateTriggerResult.DefinitionNotFound
     (validateParameters(definition.metadata.parameters, request.parameters)
             as? ParameterCheck.Invalid)
         ?.let {
@@ -154,6 +161,8 @@ class TriggerAdmin(
     val definition =
         definitions.find(
             request.contentHash ?: current.contentHash,
+            if (request.contentHash == null) current.uploader
+            else soleUploader(request.contentHash) ?: return UpdateTriggerResult.DefinitionNotFound,
             request.pipeline ?: current.pipeline,
         ) ?: return UpdateTriggerResult.DefinitionNotFound
     val parameters = request.parameters ?: current.parameters

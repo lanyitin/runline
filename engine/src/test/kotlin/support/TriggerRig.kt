@@ -84,7 +84,7 @@ class TriggerRig(
           .build()
   val harness = RunHarness(maxConcurrent = maxConcurrent, openTelemetry = otel)
   val store = PostgresTriggerStore(harness.dataSource)
-  val admin = TriggerAdmin(harness.definitions, store, clock)
+  val admin = TriggerAdmin(harness.definitions, harness.artifacts, store, clock)
   val catalog = TriggerCatalog(harness.definitions, store)
   val telemetry = TriggerTelemetry(otel)
   val firer = TriggerFirer(harness.service, store, telemetry)

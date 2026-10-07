@@ -90,7 +90,7 @@ class TriggerFirerTest {
     )
 
     // The administrator allows it; the next firing goes through.
-    h.definitions.setUnsafeExecution(hash, "risky", true, "root", Instant.now())
+    h.definitions.setUnsafeExecution(hash, "alice", "risky", true, "root", Instant.now())
     val (next, nextFiring) = fire(trigger)
     assertEquals(FiringOutcome.RUN_CREATED, next)
     h.await(checkNotNull(nextFiring.runId), RunState.SUCCEEDED)

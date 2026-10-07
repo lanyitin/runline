@@ -4,7 +4,10 @@ import dev.lawlan.runline.analyzer.Verdict
 import java.nio.file.Path
 import java.time.Instant
 
-/** One pipeline definition with what running it needs, found by version and pipeline name. */
+/**
+ * One pipeline definition with what running it needs, found by version (content hash and uploader)
+ * and pipeline name.
+ */
 data class StoredDefinition(
     /** Database identity; what runs refer to. */
     val id: Long,
@@ -22,8 +25,11 @@ data class StoredDefinition(
 
 /** What running a stored pipeline needs from storage, and the administrator's unsafe setting. */
 interface DefinitionStore {
-  /** The definition of pipeline [pipelineName] in the version [contentHash], or null. */
-  fun find(contentHash: String, pipelineName: String): StoredDefinition?
+  /**
+   * The definition of pipeline [pipelineName] in the version [uploader] made of [contentHash], or
+   * null. Whose version it is has been decided by the caller (see [VersionResolver]).
+   */
+  fun find(contentHash: String, uploader: String, pipelineName: String): StoredDefinition?
 
   /**
    * Records whether the definition may run when unsafe, with who decided and when. Returns the
@@ -31,6 +37,7 @@ interface DefinitionStore {
    */
   fun setUnsafeExecution(
       contentHash: String,
+      uploader: String,
       pipelineName: String,
       allow: Boolean,
       by: String,
@@ -38,7 +45,7 @@ interface DefinitionStore {
   ): StoredDefinition?
 
   /**
-   * Writes the jar of the version [contentHash] to [target]; false when there is no such version.
+   * Writes the jar of the content [contentHash] to [target]; false when there is no such content.
    */
   fun copyContent(contentHash: String, target: Path): Boolean
 }

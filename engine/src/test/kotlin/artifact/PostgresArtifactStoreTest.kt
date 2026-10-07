@@ -94,7 +94,7 @@ class PostgresArtifactStoreTest {
     }
 
     val read = store.find(hash, "alice")!!.definitions.single().metadata
-    val forRun = PostgresDefinitionStore(dataSource).find(hash, "one")!!.metadata
+    val forRun = PostgresDefinitionStore(dataSource).find(hash, "alice", "one")!!.metadata
 
     assertEquals(listOf("db-lock"), read.resources)
     assertEquals(emptyMap(), read.resourceTypes)

@@ -648,7 +648,7 @@ class RunApiTest {
   fun `a run left unfinished by a previous process is marked interrupted when the Engine starts`() {
     val dataSource = dataSourceOf(database)
     val hash = StoredPipelines(PostgresArtifactStore(dataSource), dir).save("v1", "orphan")
-    val definition = PostgresDefinitionStore(dataSource).find(hash, "orphan")!!
+    val definition = PostgresDefinitionStore(dataSource).find(hash, "alice", "orphan")!!
     val store = PostgresRunStore(dataSource)
     val id = UUID.randomUUID()
     store.insert(

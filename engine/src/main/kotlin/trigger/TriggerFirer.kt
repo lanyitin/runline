@@ -28,10 +28,12 @@ class TriggerFirer(
   fun fire(trigger: Trigger, firingId: Long): FiringOutcome {
     val result =
         try {
-          // A trigger is the administrator's, so it sees every definition.
+          // A trigger is the administrator's, so it sees every definition; it runs the very version
+          // it is bound to.
           runs.create(
               CreateRun(
                   trigger.contentHash,
+                  trigger.uploader,
                   trigger.pipeline,
                   trigger.parameters,
                   RunSource.Trigger(trigger.name),
@@ -85,6 +87,8 @@ class TriggerFirer(
       when (result) {
         is CreateRunResult.Accepted -> error("an accepted run is not a refusal")
         CreateRunResult.DefinitionNotFound -> Refusal("definition_not_found", "找不到這個 pipeline 定義。")
+        // A trigger runs the version it is bound to, which names its uploader: never ambiguous.
+        is CreateRunResult.AmbiguousVersion -> Refusal("ambiguous_version", "有多位上傳者的版本，無法決定要執行哪一個。")
         is CreateRunResult.InvalidParameters ->
             Refusal(
                 "invalid_parameters",

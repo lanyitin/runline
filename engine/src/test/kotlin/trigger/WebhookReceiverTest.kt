@@ -199,6 +199,7 @@ class WebhookReceiverTest {
     receiver.receive("on-push", secret, "d-1")
     h.definitions.setUnsafeExecution(
         rig.store.find("on-push")!!.contentHash,
+        "alice",
         "risky",
         true,
         "root",

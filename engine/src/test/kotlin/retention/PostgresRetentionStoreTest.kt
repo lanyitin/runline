@@ -396,7 +396,7 @@ class PostgresRetentionStoreTest {
     cleanRuns(runEnded = now)
 
     assertNotNull(artifacts.find(hash, "alice"))
-    assertNotNull(definitions.find(hash, "nightly"))
+    assertNotNull(definitions.find(hash, "alice", "nightly"))
   }
 
   @Test

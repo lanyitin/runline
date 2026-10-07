@@ -41,7 +41,7 @@ class TriggerStartupTest {
             NewTrigger(
                 "on-push",
                 TriggerKind.WEBHOOK,
-                PostgresDefinitionStore(dataSource).find(hash, "nightly")!!.id,
+                PostgresDefinitionStore(dataSource).find(hash, "alice", "nightly")!!.id,
                 mapOf("env" to "prod"),
                 true,
                 null,

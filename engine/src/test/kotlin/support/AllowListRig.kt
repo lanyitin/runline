@@ -77,7 +77,7 @@ class AllowListRig(
       artifacts.find(hash, "alice")!!.definitions.single { it.name == pipeline }
 
   fun allowUnsafe(hash: String, pipeline: String, allow: Boolean) {
-    definitions.setUnsafeExecution(hash, pipeline, allow, "root", clock.instant())
+    definitions.setUnsafeExecution(hash, "alice", pipeline, allow, "root", clock.instant())
   }
 
   fun add(name: String, kind: EntryKind = EntryKind.PACKAGE, exactOnly: Boolean = false) =

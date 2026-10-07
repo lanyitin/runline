@@ -297,7 +297,7 @@ class ResourceAccessorRunTest {
             declaration = usingTyped("log" to "file"),
         )
 
-    assertEquals(Verdict.SAFE, h.definitions.find(hash, "safe-user")!!.verdict)
+    assertEquals(Verdict.SAFE, h.definitions.find(hash, "alice", "safe-user")!!.verdict)
   }
 
   @Test

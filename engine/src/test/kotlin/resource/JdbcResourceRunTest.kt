@@ -104,7 +104,7 @@ class JdbcResourceRunTest {
     val h = harness()
     val hash = h.upload("caller", attempt("answer", "SELECT 1"), declaration = declaration)
 
-    assertEquals(Verdict.SAFE, h.definitions.find(hash, "caller")!!.verdict)
+    assertEquals(Verdict.SAFE, h.definitions.find(hash, "alice", "caller")!!.verdict)
   }
 
   @Test

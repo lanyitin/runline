@@ -24,7 +24,7 @@ class RetentionData(val dataSource: DataSource, val now: Instant) {
 
   /** The content hash of the one pipeline version everything here is bound to. */
   val hash: String = pipelines.save("v1", "nightly")
-  val definitionId: Long = definitions.find(hash, "nightly")!!.id
+  val definitionId: Long = definitions.find(hash, "alice", "nightly")!!.id
 
   /** A run that is in [state]; a run that has ended ended at [endedAt] and wrote [logLines]. */
   fun run(

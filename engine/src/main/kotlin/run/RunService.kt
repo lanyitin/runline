@@ -2,6 +2,8 @@ package dev.lawlan.runline.engine.run
 
 import dev.lawlan.runline.analyzer.Verdict
 import dev.lawlan.runline.engine.artifact.DefinitionStore
+import dev.lawlan.runline.engine.artifact.VersionOutcome
+import dev.lawlan.runline.engine.artifact.VersionResolver
 import dev.lawlan.runline.engine.artifact.Visibility
 import dev.lawlan.runline.engine.resource.ResourceAvailability
 import dev.lawlan.runline.engine.resource.ResourceProblem
@@ -15,6 +17,8 @@ import org.slf4j.LoggerFactory
  */
 data class CreateRun(
     val contentHash: String,
+    /** Whose version of the content, when the requester names one (ADR-020). */
+    val uploader: String?,
     val pipeline: String,
     val parameters: Map<String, String>,
     val source: RunSource,
@@ -25,6 +29,9 @@ sealed interface CreateRunResult {
   data class Accepted(val run: RunRecord) : CreateRunResult
 
   data object DefinitionNotFound : CreateRunResult
+
+  /** The requester can see several versions of the content and did not say whose to run. */
+  data class AmbiguousVersion(val uploaders: List<String>) : CreateRunResult
 
   data class InvalidParameters(val problems: List<ParameterProblem>) : CreateRunResult
 
@@ -55,6 +62,7 @@ sealed interface CancelResult {
  */
 class RunService(
     private val definitions: DefinitionStore,
+    private val resolver: VersionResolver,
     private val runs: RunStore,
     private val scheduler: RunScheduler,
     private val resources: ResourceAvailability,
@@ -65,10 +73,25 @@ class RunService(
   private val log = LoggerFactory.getLogger(RunService::class.java)
 
   fun create(request: CreateRun): CreateRunResult {
+    // Which version is decided against what the requester may see, never by the name alone.
+    val owner =
+        when (
+            val version =
+                resolver.resolve(request.contentHash, request.uploader, request.visibility)
+        ) {
+          is VersionOutcome.Resolved -> version.value
+          is VersionOutcome.Ambiguous ->
+              return refused(
+                  "ambiguous_version",
+                  request,
+                  CreateRunResult.AmbiguousVersion(version.uploaders),
+              )
+          VersionOutcome.NotFound ->
+              return refused("definition_not_found", request, CreateRunResult.DefinitionNotFound)
+        }
     val definition =
-        definitions.find(request.contentHash, request.pipeline)?.takeIf {
-          request.visibility.permitsUploader(it.uploadedBy)
-        } ?: return refused("definition_not_found", request, CreateRunResult.DefinitionNotFound)
+        definitions.find(request.contentHash, owner, request.pipeline)
+            ?: return refused("definition_not_found", request, CreateRunResult.DefinitionNotFound)
 
     val parameters =
         when (val check = validateParameters(definition.metadata.parameters, request.parameters)) {

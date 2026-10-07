@@ -7,6 +7,11 @@ import kotlinx.serialization.Serializable
 data class CreateRunRequest(
     /** The version (content hash) the pipeline is in. */
     val contentHash: String,
+    /**
+     * Whose version of that content, for an administrator who can see several (ADR-020). A
+     * developer's own name is accepted; any other value is answered as a version not found.
+     */
+    val uploader: String? = null,
     /** The pipeline's name within that version. */
     val pipeline: String,
     val parameters: Map<String, String> = emptyMap(),
@@ -24,6 +29,7 @@ data class RunResponse(
     val runId: String,
     val state: String,
     val contentHash: String,
+    val uploader: String,
     val pipeline: String,
     val className: String,
     val source: SourceDoc,
@@ -61,6 +67,7 @@ data class LogEntryDoc(val seq: Long, val at: String, val stream: String, val li
 @Serializable
 data class UnsafeExecutionResponse(
     val contentHash: String,
+    val uploader: String,
     val pipeline: String,
     val allow: Boolean,
     val setBy: String?,
@@ -72,6 +79,7 @@ fun RunRecord.toResponse() =
         runId = id.toString(),
         state = state.name,
         contentHash = contentHash,
+        uploader = uploader,
         pipeline = pipelineName,
         className = className,
         source = SourceDoc(source.kind, source.name),
@@ -89,6 +97,7 @@ fun LogEntry.toDoc() = LogEntryDoc(seq, at.toString(), stream.name, line)
 fun StoredDefinition.toUnsafeResponse() =
     UnsafeExecutionResponse(
         contentHash,
+        uploadedBy,
         name,
         allowUnsafeExecution,
         unsafeSettingSetBy,

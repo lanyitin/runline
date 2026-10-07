@@ -260,6 +260,7 @@ fun Application.configureDependencyInjection() {
     provide<RunService> {
       RunService(
           resolve<DefinitionStore>(),
+          resolve<VersionResolver>(),
           resolve<RunStore>(),
           resolve<RunScheduler>(),
           resolve<ResourceAvailability>(),
@@ -270,13 +271,22 @@ fun Application.configureDependencyInjection() {
     provide<RunCatalog> { RunCatalog(resolve<RunStore>(), resolve<RunLogStore>()) }
     provide<RunLogFollower> { RunLogFollower(resolve<RunCatalog>(), Duration.ofMillis(200)) }
     provide<UnsafeExecutionSettings> {
-      UnsafeExecutionSettings(resolve<DefinitionStore>(), resolve<Clock>())
+      UnsafeExecutionSettings(
+          resolve<DefinitionStore>(),
+          resolve<VersionResolver>(),
+          resolve<Clock>(),
+      )
     }
     // Triggers (WI-07). The cron scheduler is declared after everything it fires through, so it is
     // closed first and no run is created while the run machinery shuts down.
     provide<TriggerStore> { PostgresTriggerStore(resolve<DataSource>()) }
     provide<TriggerAdmin> {
-      TriggerAdmin(resolve<DefinitionStore>(), resolve<TriggerStore>(), resolve<Clock>())
+      TriggerAdmin(
+          resolve<DefinitionStore>(),
+          resolve<ArtifactStore>(),
+          resolve<TriggerStore>(),
+          resolve<Clock>(),
+      )
     }
     provide<TriggerCatalog> { TriggerCatalog(resolve<DefinitionStore>(), resolve<TriggerStore>()) }
     provide<TriggerTelemetry> { TriggerTelemetry(resolve<OpenTelemetry>()) }

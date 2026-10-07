@@ -20,7 +20,7 @@ class PostgresDefinitionStoreTest {
   fun `finds a definition by version and pipeline name with what a run needs`() {
     val hash = pipelines.save("v1", "nightly", uploader = "alice", verdict = Verdict.UNSAFE)
 
-    val found = store.find(hash, "nightly")!!
+    val found = store.find(hash, "alice", "nightly")!!
 
     assertEquals(hash, found.contentHash)
     assertEquals("alice", found.uploadedBy)
@@ -35,7 +35,7 @@ class PostgresDefinitionStoreTest {
   fun `a new definition does not allow unsafe execution and has no setter`() {
     val hash = pipelines.save("v1", "nightly")
 
-    val found = store.find(hash, "nightly")!!
+    val found = store.find(hash, "alice", "nightly")!!
 
     assertFalse(found.allowUnsafeExecution)
     assertNull(found.unsafeSettingSetBy)
@@ -46,8 +46,8 @@ class PostgresDefinitionStoreTest {
   fun `an unknown version or pipeline name finds nothing`() {
     val hash = pipelines.save("v1", "nightly")
 
-    assertNull(store.find(hash, "other"))
-    assertNull(store.find("f".repeat(64), "nightly"))
+    assertNull(store.find(hash, "alice", "other"))
+    assertNull(store.find("f".repeat(64), "alice", "nightly"))
   }
 
   @Test
@@ -55,7 +55,10 @@ class PostgresDefinitionStoreTest {
     val v1 = pipelines.save("v1", "nightly")
     val v2 = pipelines.save("v2", "nightly")
 
-    assertNotEquals(store.find(v1, "nightly")!!.id, store.find(v2, "nightly")!!.id)
+    assertNotEquals(
+        store.find(v1, "alice", "nightly")!!.id,
+        store.find(v2, "alice", "nightly")!!.id,
+    )
   }
 
   @Test
@@ -63,22 +66,22 @@ class PostgresDefinitionStoreTest {
     val hash = pipelines.save("v1", "nightly", verdict = Verdict.UNSAFE)
     val at = Instant.now().truncatedTo(ChronoUnit.MICROS)
 
-    val updated = store.setUnsafeExecution(hash, "nightly", true, "root", at)!!
+    val updated = store.setUnsafeExecution(hash, "alice", "nightly", true, "root", at)!!
 
     assertTrue(updated.allowUnsafeExecution)
     assertEquals("root", updated.unsafeSettingSetBy)
     assertEquals(at, updated.unsafeSettingSetAt)
-    assertEquals(updated, store.find(hash, "nightly"))
+    assertEquals(updated, store.find(hash, "alice", "nightly"))
   }
 
   @Test
   fun `a later change replaces the earlier decision and its author`() {
     val hash = pipelines.save("v1", "nightly", verdict = Verdict.UNSAFE)
     val first = Instant.now().truncatedTo(ChronoUnit.MICROS)
-    store.setUnsafeExecution(hash, "nightly", true, "root", first)
+    store.setUnsafeExecution(hash, "alice", "nightly", true, "root", first)
 
     val later = first.plusSeconds(60)
-    val updated = store.setUnsafeExecution(hash, "nightly", false, "ops", later)!!
+    val updated = store.setUnsafeExecution(hash, "alice", "nightly", false, "ops", later)!!
 
     assertFalse(updated.allowUnsafeExecution)
     assertEquals("ops", updated.unsafeSettingSetBy)
@@ -90,16 +93,18 @@ class PostgresDefinitionStoreTest {
     val v1 = pipelines.save("v1", "nightly", verdict = Verdict.UNSAFE)
     val v2 = pipelines.save("v2", "nightly", verdict = Verdict.UNSAFE)
 
-    store.setUnsafeExecution(v1, "nightly", true, "root", Instant.now())
+    store.setUnsafeExecution(v1, "alice", "nightly", true, "root", Instant.now())
 
-    assertFalse(store.find(v2, "nightly")!!.allowUnsafeExecution)
+    assertFalse(store.find(v2, "alice", "nightly")!!.allowUnsafeExecution)
   }
 
   @Test
   fun `setting an unknown definition changes nothing and says so`() {
     pipelines.save("v1", "nightly")
 
-    assertNull(store.setUnsafeExecution("f".repeat(64), "nightly", true, "root", Instant.now()))
+    assertNull(
+        store.setUnsafeExecution("f".repeat(64), "alice", "nightly", true, "root", Instant.now())
+    )
   }
 
   @Test
@@ -119,5 +124,27 @@ class PostgresDefinitionStoreTest {
 
     assertFalse(store.copyContent("f".repeat(64), target))
     assertFalse(Files.exists(target))
+  }
+
+  @Test
+  fun `the same content of two uploaders has a definition each and the unsafe setting is each one's own`() {
+    val hash = pipelines.save("same", "nightly", uploader = "alice", verdict = Verdict.UNSAFE)
+    assertEquals(
+        hash,
+        pipelines.save("same", "nightly", uploader = "bob", verdict = Verdict.UNSAFE),
+    )
+    val at = Instant.now().truncatedTo(ChronoUnit.MICROS)
+
+    val approved = store.setUnsafeExecution(hash, "alice", "nightly", true, "root", at)!!
+
+    val alice = store.find(hash, "alice", "nightly")!!
+    val bob = store.find(hash, "bob", "nightly")!!
+    assertEquals(approved, alice)
+    assertNotEquals(alice.id, bob.id)
+    assertEquals("bob", bob.uploadedBy)
+    assertFalse(bob.allowUnsafeExecution)
+    assertNull(bob.unsafeSettingSetBy)
+    assertNull(store.find(hash, "carol", "nightly"))
+    assertNull(store.setUnsafeExecution(hash, "carol", "nightly", true, "root", at))
   }
 }

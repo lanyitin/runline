@@ -22,7 +22,7 @@ class PostgresRunStoreTest {
   private val store = PostgresRunStore(dataSource)
   private val t0 = Instant.now().truncatedTo(ChronoUnit.MICROS)
 
-  private fun definitionId(hash: String, name: String) = definitions.find(hash, name)!!.id
+  private fun definitionId(hash: String, name: String) = definitions.find(hash, "alice", name)!!.id
 
   private fun newRun(
       definitionId: Long,

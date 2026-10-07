@@ -161,7 +161,14 @@ class RunServiceTest {
     val h = harness()
     val hash = h.upload("risky", unsafeBody)
     val set =
-        h.definitions.setUnsafeExecution(hash, "risky", true, "root", java.time.Instant.now())!!
+        h.definitions.setUnsafeExecution(
+            hash,
+            "alice",
+            "risky",
+            true,
+            "root",
+            java.time.Instant.now(),
+        )!!
 
     val id = h.start(hash, "risky")
 
@@ -173,11 +180,11 @@ class RunServiceTest {
   fun `withdrawing the permission stops new unsafe runs but not the setting snapshot of old ones`() {
     val h = harness()
     val hash = h.upload("risky", unsafeBody)
-    h.definitions.setUnsafeExecution(hash, "risky", true, "root", java.time.Instant.now())
+    h.definitions.setUnsafeExecution(hash, "alice", "risky", true, "root", java.time.Instant.now())
     val first = h.start(hash, "risky")
     h.await(first, RunState.SUCCEEDED)
 
-    h.definitions.setUnsafeExecution(hash, "risky", false, "ops", java.time.Instant.now())
+    h.definitions.setUnsafeExecution(hash, "alice", "risky", false, "ops", java.time.Instant.now())
 
     assertEquals(CreateRunResult.UnsafeNotAllowed("risky"), h.create(hash, "risky"))
     assertEquals("root", h.record(first).unsafeExecution!!.setBy)
@@ -198,7 +205,7 @@ class RunServiceTest {
     val h = harness()
     val v1 = h.upload("risky", unsafeBody)
     val v2 = h.upload("risky", unsafeBody)
-    h.definitions.setUnsafeExecution(v1, "risky", true, "root", java.time.Instant.now())
+    h.definitions.setUnsafeExecution(v1, "alice", "risky", true, "root", java.time.Instant.now())
 
     assertIs<CreateRunResult.Accepted>(h.create(v1, "risky"))
     assertEquals(CreateRunResult.UnsafeNotAllowed("risky"), h.create(v2, "risky"))

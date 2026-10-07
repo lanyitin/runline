@@ -18,7 +18,7 @@ class TriggerCatalogTest {
   private val definitions = PostgresDefinitionStore(dataSource)
   private val store = PostgresTriggerStore(dataSource)
   private val clock = MutableClock()
-  private val admin = TriggerAdmin(definitions, store, clock)
+  private val admin = TriggerAdmin(definitions, PostgresArtifactStore(dataSource), store, clock)
   private val catalog = TriggerCatalog(definitions, store)
   private val root = ApiIdentity("root", Role.ADMIN)
   private val v1 = pipelines.save("v1", "nightly")

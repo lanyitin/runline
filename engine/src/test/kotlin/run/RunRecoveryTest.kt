@@ -47,7 +47,7 @@ class RunRecoveryTest {
         store.insert(
             NewRun(
                 UUID.randomUUID(),
-                definitions.find(hash, name)!!.id,
+                definitions.find(hash, "alice", name)!!.id,
                 RunSource.Manual("alice"),
                 emptyMap(),
                 clock.instant(),
@@ -67,7 +67,7 @@ class RunRecoveryTest {
             .insert(
                 NewRun(
                     UUID.randomUUID(),
-                    definitions.find(pipelines.save("v2", "other"), "other")!!.id,
+                    definitions.find(pipelines.save("v2", "other"), "alice", "other")!!.id,
                     RunSource.Manual("alice"),
                     emptyMap(),
                     clock.instant(),
@@ -121,7 +121,7 @@ class RunRecoveryTest {
         store.insert(
             NewRun(
                 UUID.randomUUID(),
-                definitions.find(hash, "bad name")!!.id,
+                definitions.find(hash, "alice", "bad name")!!.id,
                 RunSource.Manual("alice"),
                 emptyMap(),
                 clock.instant(),

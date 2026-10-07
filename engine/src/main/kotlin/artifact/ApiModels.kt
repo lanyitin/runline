@@ -20,10 +20,26 @@ data class PipelineResponse(
     val warnings: List<WarningDoc> = emptyList(),
 )
 
-/** The artifact (a version identified by its content hash) with the pipelines found in it. */
+/**
+ * Refusal to pick a version: an administrator can see several versions of the content and did not
+ * name the [uploaders] one (ADR-020). Nothing was changed.
+ */
+@Serializable
+data class AmbiguousVersionResponse(
+    val error: String,
+    val message: String,
+    val uploaders: List<String>,
+)
+
+/**
+ * A version (the content with one uploader's judgement of it) and the pipelines found in it.
+ * [uploader] names the version for the administrator's `uploader` parameter; [uploadedBy] says the
+ * same and stays for existing callers.
+ */
 @Serializable
 data class ArtifactResponse(
     val contentHash: String,
+    val uploader: String,
     val sizeBytes: Long,
     val uploadedBy: String,
     val uploadedAt: String,
@@ -36,6 +52,7 @@ data class ArtifactResponse(
 @Serializable
 data class DefinitionEntry(
     val contentHash: String,
+    val uploader: String,
     val uploadedBy: String,
     val uploadedAt: String,
     val className: String,
@@ -70,6 +87,7 @@ private fun DefinitionRecord.toResponse(warnings: List<WarningDoc>) =
 fun ArtifactRecord.toResponse(warnings: (DefinitionRecord) -> List<WarningDoc>) =
     ArtifactResponse(
         contentHash,
+        uploadedBy,
         sizeBytes,
         uploadedBy,
         uploadedAt.toString(),
@@ -82,6 +100,7 @@ fun List<ArtifactRecord>.toDefinitionList(warnings: (DefinitionRecord) -> List<W
           artifact.definitions.map {
             DefinitionEntry(
                 artifact.contentHash,
+                artifact.uploadedBy,
                 artifact.uploadedBy,
                 artifact.uploadedAt.toString(),
                 it.className,

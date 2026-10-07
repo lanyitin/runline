@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.artifact
 
 import dev.lawlan.runline.analyzer.Verdict
 import dev.lawlan.runline.engine.db.AllowListLock
+import dev.lawlan.runline.engine.db.ArtifactContentLock
 import java.nio.file.Files
 import java.sql.Connection
 import java.sql.ResultSet
@@ -21,17 +22,35 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
       AllowListLock.lockShared(connection)
       if (!isCurrentAllowListVersion(connection, it)) return@transaction SaveResult.AllowListChanged
     }
-    val id = insertArtifact(connection, artifact)
+    ArtifactContentLock.lock(connection, artifact.contentHash)
+    insertContent(connection, artifact)
+    val id = insertVersion(connection, artifact)
     if (id == null) {
-      SaveResult.AlreadyExists(checkNotNull(find(connection, artifact.contentHash)))
+      SaveResult.AlreadyExists(
+          checkNotNull(find(connection, artifact.contentHash, artifact.uploadedBy))
+      )
     } else {
       artifact.definitions.forEach { insertDefinition(connection, id, it) }
-      SaveResult.Created(checkNotNull(find(connection, artifact.contentHash)))
+      SaveResult.Created(checkNotNull(find(connection, artifact.contentHash, artifact.uploadedBy)))
     }
   }
 
-  override fun findByHash(contentHash: String): ArtifactRecord? =
-      dataSource.connection.use { find(it, contentHash) }
+  override fun find(contentHash: String, uploader: String): ArtifactRecord? =
+      dataSource.connection.use { find(it, contentHash, uploader) }
+
+  override fun uploadersOf(contentHash: String): List<String> =
+      dataSource.connection.use { connection ->
+        connection
+            .prepareStatement(
+                "SELECT uploaded_by FROM pipeline_artifact WHERE content_hash = ? ORDER BY id"
+            )
+            .use {
+              it.setString(1, contentHash)
+              it.executeQuery().use { rs ->
+                generateSequence { if (rs.next()) rs.getString(1) else null }.toList()
+              }
+            }
+      }
 
   override fun list(visibility: Visibility): List<ArtifactRecord> =
       dataSource.connection.use { connection ->
@@ -52,16 +71,36 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
             .map { it.toRecord(definitionsOf(connection, it.id)) }
       }
 
-  override fun delete(contentHash: String): DeleteResult = transaction { connection ->
-    try {
-      connection.prepareStatement("DELETE FROM pipeline_artifact WHERE content_hash = ?").use {
-        it.setString(1, contentHash)
-        if (it.executeUpdate() == 0) DeleteResult.NotFound else DeleteResult.Deleted
+  override fun delete(contentHash: String, uploader: String): DeleteResult =
+      transaction { connection ->
+        ArtifactContentLock.lock(connection, contentHash)
+        try {
+          val deleted =
+              connection
+                  .prepareStatement(
+                      "DELETE FROM pipeline_artifact WHERE content_hash = ? AND uploaded_by = ?"
+                  )
+                  .use {
+                    it.setString(1, contentHash)
+                    it.setString(2, uploader)
+                    it.executeUpdate()
+                  }
+          if (deleted == 0) return@transaction DeleteResult.NotFound
+          connection
+              .prepareStatement(
+                  "DELETE FROM artifact_content WHERE content_hash = ? AND NOT EXISTS " +
+                      "(SELECT 1 FROM pipeline_artifact WHERE content_hash = ?)"
+              )
+              .use {
+                it.setString(1, contentHash)
+                it.setString(2, contentHash)
+                it.executeUpdate()
+              }
+          DeleteResult.Deleted
+        } catch (e: SQLException) {
+          if (e.sqlState == FOREIGN_KEY_VIOLATION) DeleteResult.InUse else throw e
+        }
       }
-    } catch (e: SQLException) {
-      if (e.sqlState == FOREIGN_KEY_VIOLATION) DeleteResult.InUse else throw e
-    }
-  }
 
   /** Runs [block] in one transaction; rolls back on any failure. */
   private fun <T> transaction(block: (Connection) -> T): T =
@@ -85,29 +124,7 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
         }
       }
 
-  /**
-   * Stores the content (once per hash) and a version of it for the uploader; returns the version's
-   * id, or null when the content hash already has a version.
-   */
-  private fun insertArtifact(connection: Connection, artifact: NewArtifact): Long? {
-    insertContent(connection, artifact)
-    if (hasVersion(connection, artifact.contentHash)) return null
-    return connection
-        .prepareStatement(
-            "INSERT INTO pipeline_artifact (content_hash, uploaded_by, uploaded_at) " +
-                "VALUES (?, ?, ?) RETURNING id"
-        )
-        .use {
-          it.setString(1, artifact.contentHash)
-          it.setString(2, artifact.uploadedBy)
-          it.setObject(3, artifact.uploadedAt.atOffset(java.time.ZoneOffset.UTC))
-          it.executeQuery().use { rs ->
-            rs.next()
-            rs.getLong(1)
-          }
-        }
-  }
-
+  /** Stores the jar unless its content hash is already stored. */
   private fun insertContent(connection: Connection, artifact: NewArtifact) {
     Files.newInputStream(artifact.content).use { content ->
       connection
@@ -124,11 +141,20 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
     }
   }
 
-  private fun hasVersion(connection: Connection, contentHash: String): Boolean =
-      connection.prepareStatement("SELECT 1 FROM pipeline_artifact WHERE content_hash = ?").use {
-        it.setString(1, contentHash)
-        it.executeQuery().use { rs -> rs.next() }
-      }
+  /** Inserts the uploader's version; returns its id, or null when they already have one. */
+  private fun insertVersion(connection: Connection, artifact: NewArtifact): Long? =
+      connection
+          .prepareStatement(
+              "INSERT INTO pipeline_artifact (content_hash, uploaded_by, uploaded_at) " +
+                  "VALUES (?, ?, ?) ON CONFLICT (content_hash, uploaded_by) DO NOTHING " +
+                  "RETURNING id"
+          )
+          .use {
+            it.setString(1, artifact.contentHash)
+            it.setString(2, artifact.uploadedBy)
+            it.setObject(3, artifact.uploadedAt.atOffset(java.time.ZoneOffset.UTC))
+            it.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else null }
+          }
 
   private fun insertDefinition(connection: Connection, artifactId: Long, d: NewDefinition) {
     connection
@@ -149,15 +175,16 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
         }
   }
 
-  private fun find(connection: Connection, contentHash: String): ArtifactRecord? =
+  private fun find(connection: Connection, contentHash: String, uploader: String): ArtifactRecord? =
       connection
           .prepareStatement(
               "SELECT a.id, a.content_hash, c.size_bytes, a.uploaded_by, a.uploaded_at " +
                   "FROM pipeline_artifact a JOIN artifact_content c USING (content_hash) " +
-                  "WHERE a.content_hash = ? ORDER BY a.id LIMIT 1"
+                  "WHERE a.content_hash = ? AND a.uploaded_by = ?"
           )
           .use {
             it.setString(1, contentHash)
+            it.setString(2, uploader)
             it.executeQuery().use { rs -> if (rs.next()) rs.artifactRow() else null }
           }
           ?.let { it.toRecord(definitionsOf(connection, it.id)) }

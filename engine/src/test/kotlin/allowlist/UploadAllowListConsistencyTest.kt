@@ -69,7 +69,7 @@ class UploadAllowListConsistencyTest {
 
     assertEquals(SaveResult.AllowListChanged, rig.artifacts.saveIfAbsent(artifact))
 
-    assertNull(rig.artifacts.findByHash(artifact.contentHash))
+    assertNull(rig.artifacts.find(artifact.contentHash, "alice"))
   }
 
   @Test

@@ -125,7 +125,10 @@ fun Application.configureDependencyInjection() {
           Clock.systemUTC(),
       )
     }
-    provide<ArtifactCatalog> { ArtifactCatalog(resolve<ArtifactStore>()) }
+    provide<VersionResolver> { VersionResolver(resolve<ArtifactStore>()) }
+    provide<ArtifactCatalog> {
+      ArtifactCatalog(resolve<ArtifactStore>(), resolve<VersionResolver>())
+    }
 
     // Runs (WI-08). Dependencies are closed in reverse declaration order, so the scheduler
     // (declared

@@ -237,9 +237,9 @@ class PostgresRunStoreTest {
     val hash = pipelines.save("v1", "nightly")
     val run = store.insert(newRun(definitionId(hash, "nightly")))
 
-    assertEquals(DeleteResult.InUse, artifacts.delete(hash))
+    assertEquals(DeleteResult.InUse, artifacts.delete(hash, "alice"))
 
-    assertNotNull(artifacts.findByHash(hash))
+    assertNotNull(artifacts.find(hash, "alice"))
     assertNotNull(store.find(run.id, Visibility.All))
   }
 
@@ -269,7 +269,7 @@ class PostgresRunStoreTest {
       }
     }
 
-    assertEquals(DeleteResult.Deleted, artifacts.delete(hash))
+    assertEquals(DeleteResult.Deleted, artifacts.delete(hash, "alice"))
   }
 
   @Test

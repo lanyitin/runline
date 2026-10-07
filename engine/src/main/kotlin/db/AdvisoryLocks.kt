@@ -23,3 +23,20 @@ object AllowListLock {
     }
   }
 }
+
+/**
+ * Serializes the stores and deletions of the versions of one content (WI-54, ADR-020): the jar is
+ * kept once per content hash and removed with its last version, so a deletion that finds no other
+ * version and an upload that is adding one must not run side by side. Transaction-scoped, per hash.
+ */
+object ArtifactContentLock {
+  private const val NAMESPACE = 7_102
+
+  fun lock(connection: Connection, contentHash: String) {
+    connection.prepareStatement("SELECT pg_advisory_xact_lock(?, hashtext(?))").use {
+      it.setInt(1, NAMESPACE)
+      it.setString(2, contentHash)
+      it.execute()
+    }
+  }
+}

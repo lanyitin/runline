@@ -93,7 +93,7 @@ class PostgresArtifactStoreTest {
       }
     }
 
-    val read = store.findByHash(hash)!!.definitions.single().metadata
+    val read = store.find(hash, "alice")!!.definitions.single().metadata
     val forRun = PostgresDefinitionStore(dataSource).find(hash, "one")!!.metadata
 
     assertEquals(listOf("db-lock"), read.resources)
@@ -119,7 +119,7 @@ class PostgresArtifactStoreTest {
     assertEquals(definition("one").reasons, one.reasons)
     assertEquals("config", one.allowListVersion)
     assertEquals("p.one", one.className)
-    assertEquals(created, store.findByHash(new.contentHash))
+    assertEquals(created, store.find(new.contentHash, "alice"))
   }
 
   @Test
@@ -151,14 +151,10 @@ class PostgresArtifactStoreTest {
   }
 
   @Test
-  fun `the same content is stored once and the existing record is returned`() {
-    val first = artifact("dup", uploader = "alice")
-    val created = assertIs<SaveResult.Created>(store.saveIfAbsent(first)).artifact
+  fun `the same uploader storing the same content again gets their version back and nothing is written`() {
+    val created = assertIs<SaveResult.Created>(store.saveIfAbsent(artifact("dup"))).artifact
 
-    val again =
-        store.saveIfAbsent(
-            artifact("dup", uploader = "bob", definitions = arrayOf(definition("other")))
-        )
+    val again = store.saveIfAbsent(artifact("dup", definitions = arrayOf(definition("other"))))
 
     assertEquals(created, assertIs<SaveResult.AlreadyExists>(again).artifact)
     assertEquals(1, scalar("SELECT count(*) FROM pipeline_artifact"))
@@ -166,7 +162,31 @@ class PostgresArtifactStoreTest {
   }
 
   @Test
-  fun `concurrent uploads of the same content create exactly one record`() {
+  fun `another uploader of the same content gets a version of their own and the jar is kept once`() {
+    val alice = assertIs<SaveResult.Created>(store.saveIfAbsent(artifact("dup"))).artifact
+
+    val bob =
+        assertIs<SaveResult.Created>(
+                store.saveIfAbsent(
+                    artifact("dup", uploader = "bob", definitions = arrayOf(definition("other")))
+                )
+            )
+            .artifact
+
+    assertEquals(alice.contentHash, bob.contentHash)
+    assertEquals("bob", bob.uploadedBy)
+    assertEquals(listOf("other"), bob.definitions.map { it.name })
+    assertEquals(
+        listOf("one"),
+        store.find(alice.contentHash, "alice")!!.definitions.map { it.name },
+    )
+    assertEquals(listOf("alice", "bob"), store.uploadersOf(alice.contentHash))
+    assertEquals(2, scalar("SELECT count(*) FROM pipeline_artifact"))
+    assertEquals(1, scalar("SELECT count(*) FROM artifact_content"))
+  }
+
+  @Test
+  fun `concurrent uploads of the same content by different uploaders each create their version`() {
     val threads = 8
     val pool = Executors.newFixedThreadPool(threads)
     val start = CountDownLatch(1)
@@ -179,6 +199,29 @@ class PostgresArtifactStoreTest {
                     uploader = "u$it",
                     definitions = arrayOf(definition("one"), definition("two")),
                 )
+            start.await()
+            store.saveIfAbsent(new)
+          }
+        }
+    start.countDown()
+    val outcomes = results.map { it.getWithin("an upload of the same content") }
+    pool.shutdown()
+
+    assertEquals(threads, outcomes.count { it is SaveResult.Created })
+    assertEquals(threads, scalar("SELECT count(*) FROM pipeline_artifact").toInt())
+    assertEquals(1, scalar("SELECT count(*) FROM artifact_content"))
+    assertEquals(2L * threads, scalar("SELECT count(*) FROM pipeline_definition"))
+  }
+
+  @Test
+  fun `concurrent uploads of the same content by one uploader create exactly one version`() {
+    val threads = 8
+    val pool = Executors.newFixedThreadPool(threads)
+    val start = CountDownLatch(1)
+    val results =
+        (1..threads).map {
+          pool.submit<SaveResult> {
+            val new = artifact("race", definitions = arrayOf(definition("one"), definition("two")))
             start.await()
             store.saveIfAbsent(new)
           }
@@ -205,7 +248,7 @@ class PostgresArtifactStoreTest {
 
     assertEquals(0, scalar("SELECT count(*) FROM pipeline_artifact"))
     assertEquals(0, scalar("SELECT count(*) FROM pipeline_definition"))
-    assertNull(store.findByHash(broken.contentHash))
+    assertNull(store.find(broken.contentHash, "alice"))
   }
 
   @Test
@@ -231,7 +274,8 @@ class PostgresArtifactStoreTest {
 
   @Test
   fun `unknown hash is not found`() {
-    assertNull(store.findByHash("f".repeat(64)))
+    assertNull(store.find("f".repeat(64), "alice"))
+    assertEquals(emptyList(), store.uploadersOf("f".repeat(64)))
   }
 
   @Test
@@ -239,11 +283,11 @@ class PostgresArtifactStoreTest {
     val new = artifact("del")
     store.saveIfAbsent(new)
 
-    assertEquals(DeleteResult.Deleted, store.delete(new.contentHash))
+    assertEquals(DeleteResult.Deleted, store.delete(new.contentHash, "alice"))
 
-    assertNull(store.findByHash(new.contentHash))
+    assertNull(store.find(new.contentHash, "alice"))
     assertEquals(0, scalar("SELECT count(*) FROM pipeline_definition"))
-    assertEquals(DeleteResult.NotFound, store.delete(new.contentHash))
+    assertEquals(DeleteResult.NotFound, store.delete(new.contentHash, "alice"))
   }
 
   @Test
@@ -261,9 +305,97 @@ class PostgresArtifactStoreTest {
       }
     }
 
-    assertEquals(DeleteResult.InUse, store.delete(new.contentHash))
+    assertEquals(DeleteResult.InUse, store.delete(new.contentHash, "alice"))
 
-    assertNotNull(store.findByHash(new.contentHash))
+    assertNotNull(store.find(new.contentHash, "alice"))
     assertEquals(1, scalar("SELECT count(*) FROM pipeline_definition"))
+  }
+
+  @Test
+  fun `deleting one uploader's version keeps the jar and the other version, and the last takes the jar`() {
+    val alice = artifact("shared", uploader = "alice")
+    store.saveIfAbsent(alice)
+    store.saveIfAbsent(artifact("shared", uploader = "bob"))
+
+    assertEquals(DeleteResult.Deleted, store.delete(alice.contentHash, "alice"))
+
+    assertNull(store.find(alice.contentHash, "alice"))
+    assertNotNull(store.find(alice.contentHash, "bob"))
+    assertEquals(1, scalar("SELECT count(*) FROM artifact_content"))
+    assertEquals(1, scalar("SELECT count(*) FROM pipeline_definition"))
+    val bytes =
+        dataSource.connection.use { c ->
+          c.createStatement().use { s ->
+            s.executeQuery("SELECT content FROM artifact_content").use {
+              it.next()
+              it.getBytes(1)
+            }
+          }
+        }
+    assertContentEquals("jar-shared".toByteArray(), bytes)
+
+    assertEquals(DeleteResult.Deleted, store.delete(alice.contentHash, "bob"))
+    assertEquals(0, scalar("SELECT count(*) FROM artifact_content"))
+  }
+
+  @Test
+  fun `a version in use does not stop another uploader's version from being deleted`() {
+    val alice = artifact("shared", uploader = "alice")
+    store.saveIfAbsent(alice)
+    store.saveIfAbsent(artifact("shared", uploader = "bob"))
+    dataSource.connection.use { c ->
+      c.createStatement().use {
+        it.execute(
+            "CREATE TABLE test_reference (definition_id BIGINT NOT NULL " +
+                "REFERENCES pipeline_definition (id) ON DELETE RESTRICT)"
+        )
+        it.execute(
+            "INSERT INTO test_reference SELECT d.id FROM pipeline_definition d " +
+                "JOIN pipeline_artifact a ON a.id = d.artifact_id WHERE a.uploaded_by = 'alice'"
+        )
+      }
+    }
+
+    assertEquals(DeleteResult.InUse, store.delete(alice.contentHash, "alice"))
+    assertEquals(DeleteResult.Deleted, store.delete(alice.contentHash, "bob"))
+
+    assertNotNull(store.find(alice.contentHash, "alice"))
+    assertNull(store.find(alice.contentHash, "bob"))
+    assertEquals(1, scalar("SELECT count(*) FROM artifact_content"))
+  }
+
+  @Test
+  fun `uploads racing with the deletion of the last other version never leave a version without its jar`() {
+    repeat(25) { round ->
+      val label = "round-$round"
+      val alice = artifact(label, uploader = "alice")
+      store.saveIfAbsent(alice)
+      val pool = Executors.newFixedThreadPool(2)
+      val start = CountDownLatch(1)
+      val delete =
+          pool.submit<DeleteResult> {
+            start.await()
+            store.delete(alice.contentHash, "alice")
+          }
+      val upload =
+          pool.submit<SaveResult> {
+            val bob = artifact(label, uploader = "bob")
+            start.await()
+            store.saveIfAbsent(bob)
+          }
+      start.countDown()
+      delete.getWithin("the deletion")
+      upload.getWithin("the upload")
+      pool.shutdown()
+
+      assertNotNull(store.find(alice.contentHash, "bob"), label)
+      assertEquals(
+          1,
+          scalar(
+              "SELECT count(*) FROM artifact_content WHERE content_hash = '${alice.contentHash}'"
+          ),
+          label,
+      )
+    }
   }
 }

@@ -107,7 +107,7 @@ class UploadServiceTest {
     assertEquals("config", d.allowListVersion)
     assertEquals(listOf("a.com"), d.metadata.network.allow)
     assertFalse(d.allowUnsafeExecution)
-    assertEquals(artifact, store.findByHash(artifact.contentHash))
+    assertEquals(artifact, store.find(artifact.contentHash, "alice"))
   }
 
   @Test
@@ -183,7 +183,7 @@ class UploadServiceTest {
     assertEquals(mapOf("data" to "file", "odd" to "not-a-type"), typed.metadata.resourceTypes)
     assertEquals(Verdict.SAFE, typed.verdict)
     assertEquals(emptyMap(), plain.metadata.resourceTypes)
-    assertEquals(created, store.findByHash(created.contentHash))
+    assertEquals(created, store.find(created.contentHash, "alice"))
   }
 
   @Test
@@ -275,7 +275,7 @@ class UploadServiceTest {
     assertEquals(ReasonKind.IO_SENSITIVE_MEMBER, reason.kind)
     assertEquals("java.lang.ProcessBuilder.start()Ljava/lang/Process;", reason.member)
     assertEquals(listOf("demo.P"), reason.path)
-    assertEquals(artifact, store.findByHash(artifact.contentHash))
+    assertEquals(artifact, store.find(artifact.contentHash, "alice"))
   }
 
   @Test
@@ -346,15 +346,29 @@ class UploadServiceTest {
   }
 
   @Test
-  fun `the same content uploaded again is the same version and nothing new is written`() {
+  fun `the same content uploaded again by the same uploader is their version and nothing new is written`() {
     val path = jar("demo.P" to PipelineJars.pipeline("demo.P", "p"))
     val first = assertIs<UploadResult.Created>(upload(path, "alice")).artifact
 
-    val second = assertIs<UploadResult.Existing>(upload(path, "bob")).artifact
+    val second = assertIs<UploadResult.Existing>(upload(path, "alice")).artifact
 
     assertEquals(first, second)
     assertEquals(1, count("pipeline_artifact"))
     assertEquals(1, count("pipeline_definition"))
+  }
+
+  @Test
+  fun `the same content uploaded by another uploader is a new version of their own`() {
+    val path = jar("demo.P" to PipelineJars.pipeline("demo.P", "p"))
+    val first = assertIs<UploadResult.Created>(upload(path, "alice")).artifact
+
+    val second = assertIs<UploadResult.Created>(upload(path, "bob")).artifact
+
+    assertEquals(first.contentHash, second.contentHash)
+    assertEquals("bob", second.uploadedBy)
+    assertEquals(2, count("pipeline_artifact"))
+    assertEquals(2, count("pipeline_definition"))
+    assertEquals(1, count("artifact_content"))
   }
 
   @Test

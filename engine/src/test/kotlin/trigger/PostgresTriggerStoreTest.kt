@@ -205,13 +205,13 @@ class PostgresTriggerStoreTest {
     val (hash, id) = bound()
     store.insert(cron(definitionId = id))
 
-    assertEquals(DeleteResult.InUse, artifacts.delete(hash))
-    assertNotNull(artifacts.findByHash(hash))
+    assertEquals(DeleteResult.InUse, artifacts.delete(hash, "alice"))
+    assertNotNull(artifacts.find(hash, "alice"))
 
     store.delete("every-night")
 
-    assertEquals(DeleteResult.Deleted, artifacts.delete(hash))
-    assertNull(artifacts.findByHash(hash))
+    assertEquals(DeleteResult.Deleted, artifacts.delete(hash, "alice"))
+    assertNull(artifacts.find(hash, "alice"))
   }
 
   @Test
@@ -220,7 +220,7 @@ class PostgresTriggerStoreTest {
     val v2 = pipelines.save("v2", "nightly")
     store.insert(cron(definitionId = id))
 
-    assertEquals(DeleteResult.Deleted, artifacts.delete(v2))
+    assertEquals(DeleteResult.Deleted, artifacts.delete(v2, "alice"))
   }
 
   @Test

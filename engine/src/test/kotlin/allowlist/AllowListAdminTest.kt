@@ -462,7 +462,7 @@ class AllowListAdminTest {
     val result = applied(rig.add("java.util"))
 
     assertEquals(1, result.impact.unreadable)
-    val record = rig.artifacts.findByHash(hash)!!.definitions.single()
+    val record = rig.artifacts.find(hash, "alice")!!.definitions.single()
     assertEquals(Verdict.UNSAFE, record.verdict)
     assertEquals(ReasonKind.UNREADABLE_CLASS, record.reasons.single().kind)
     assertEquals("2", record.allowListVersion)

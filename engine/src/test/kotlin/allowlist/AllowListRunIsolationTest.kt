@@ -50,7 +50,10 @@ class AllowListRunIsolationTest {
 
     val flipped = assertIs<ChangeResult.Applied>(result).impact.changes.single()
     assertEquals(Verdict.UNSAFE, flipped.to)
-    assertEquals(Verdict.UNSAFE, harness.artifacts.findByHash(hash)!!.definitions.single().verdict)
+    assertEquals(
+        Verdict.UNSAFE,
+        harness.artifacts.find(hash, "alice")!!.definitions.single().verdict,
+    )
     assertEquals(RunState.RUNNING, harness.state(runId), "the run is not touched")
     assertIs<CreateRunResult.UnsafeNotAllowed>(harness.create(hash, "held"))
 

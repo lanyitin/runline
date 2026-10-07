@@ -23,7 +23,7 @@ sealed interface UploadResult {
   /** Stored as a new version. */
   data class Created(val artifact: ArtifactRecord) : UploadResult
 
-  /** The same content was uploaded before; the stored version is returned and nothing changed. */
+  /** The uploader uploaded the same content before; their version is returned, nothing changed. */
   data class Existing(val artifact: ArtifactRecord) : UploadResult
 
   /** Refused. [message] explains why and what the author can do; nothing was stored. */
@@ -48,7 +48,8 @@ class UploadService(
       telemetry.observe(uploader) { process(staged, uploader) }
 
   private fun process(staged: StagedJar, uploader: String): UploadResult {
-    store.findByHash(staged.contentHash)?.let {
+    // Only the uploader's own version is looked for: what others uploaded must not show here.
+    store.find(staged.contentHash, uploader)?.let {
       return UploadResult.Existing(it)
     }
     // Nothing reads the jar's contents before the guard has seen that they stay within bounds.

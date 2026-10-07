@@ -74,7 +74,7 @@ class AllowListRig(
   fun uploadNeedingUtil(name: String) = upload(name, "new java.util.ArrayList<String>();")
 
   fun record(hash: String, pipeline: String): DefinitionRecord =
-      artifacts.findByHash(hash)!!.definitions.single { it.name == pipeline }
+      artifacts.find(hash, "alice")!!.definitions.single { it.name == pipeline }
 
   fun allowUnsafe(hash: String, pipeline: String, allow: Boolean) {
     definitions.setUnsafeExecution(hash, pipeline, allow, "root", clock.instant())

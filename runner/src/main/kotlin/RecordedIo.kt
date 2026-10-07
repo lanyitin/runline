@@ -20,6 +20,8 @@ data class RecordedEvent(
     val access: IoAccess,
     /** Refused by a boundary that recording does not relax. */
     val rejected: Boolean,
+    /** For resources only: the type of the resource used. */
+    val resourceType: String? = null,
 )
 
 /** Every event of one kind folded together, whether or not it was kept as an event. */
@@ -33,6 +35,8 @@ data class RecordedSummary(
     val count: Long,
     val firstSequence: Long,
     val lastSequence: Long,
+    /** For resources only: the type of the resource used. */
+    val resourceType: String? = null,
 )
 
 /** What a recording run did, as the host sees it: built from JDK types only. */
@@ -60,6 +64,7 @@ data class RecordedIo(
                       it["port"] as Int?,
                       IoAccess.valueOf(it["access"] as String),
                       it["rejected"] as Boolean,
+                      it["resourceType"] as String?,
                   )
                 },
             summary =
@@ -73,6 +78,7 @@ data class RecordedIo(
                       it["count"] as Long,
                       it["firstSequence"] as Long,
                       it["lastSequence"] as Long,
+                      it["resourceType"] as String?,
                   )
                 },
         )

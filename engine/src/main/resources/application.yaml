@@ -120,3 +120,10 @@ retention:
   cronFiringSeconds: "$RUNLINE_CRON_FIRING_RETENTION_SECONDS:"
   intervalSeconds: "$RUNLINE_RETENTION_INTERVAL_SECONDS:"
   batchSize: "$RUNLINE_RETENTION_BATCH_SIZE:"
+
+# Files of `file` shared resources (WI-43, ADR-019). RUNLINE_RESOURCE_ROOT is the directory every such
+# file lives under; it must be persistent storage and must not be, contain or lie inside the shared
+# or the run directory. Backup and capacity of it are the deployment's. A root that is missing or
+# not usable does not stop the Engine; the checks and the runs of the resources that need it fail.
+resources:
+  root: "$RUNLINE_RESOURCE_ROOT:"

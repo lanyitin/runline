@@ -4,6 +4,9 @@ enum class IoCategory {
   FILE,
   NETWORK,
   PROCESS,
+
+  /** A typed shared resource, used through its accessor (ADR-019). */
+  RESOURCE,
 }
 
 /** Thrown when a pipeline attempts IO outside what its metadata declares. */

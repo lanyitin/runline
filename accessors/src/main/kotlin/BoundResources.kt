@@ -1,0 +1,109 @@
+package dev.lawlan.runline.accessors
+
+import dev.lawlan.runline.core.ResourceFailure
+import dev.lawlan.runline.runner.ResourceHost
+import java.util.UUID
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
+
+/**
+ * The accessors of one run, by resource name. Fail closed: once [invalidate] (or [invalidateAll])
+ * has returned, every later call on that resource fails with the reason before the entity is
+ * touched, and no operation that was already running can still complete. Operations on a resource
+ * run under its read lock and an invalidation takes the write lock (after asking the binding to
+ * [ResourceBinding.abort] what it is doing, so a long operation cannot hold the invalidation up),
+ * so the two never overlap. The reason is kept per resource and per run, not per call.
+ */
+class BoundResources(
+    private val bindings: Map<String, ResourceBinding>,
+    private val observer: ResourceObserver = ResourceObserver.NONE,
+) : ResourceHost {
+  override val provided: Map<String, String> = bindings.mapValues { it.value.type }
+
+  private class State {
+    val lock = ReentrantReadWriteLock()
+
+    @Volatile var invalidation: Invalidation? = null
+  }
+
+  private val states = bindings.keys.associateWith { State() }
+
+  @Volatile private var runInvalidation: Invalidation? = null
+
+  override fun call(request: Map<String, Any?>): Map<String, Any?> {
+    val name = request["resource"]
+    val binding = bindings[name] ?: return failure(ResourceFailure.NOT_PROVIDED)
+    val state = states.getValue(name as String)
+    @Suppress("UNCHECKED_CAST") val arguments = request["arguments"] as Map<String, Any?>
+    return state.lock.read {
+      val revoked = state.invalidation ?: runInvalidation
+      if (revoked != null) return@read failure(revoked.failure)
+      execute(name, binding, request["operation"] as String, arguments)
+    }
+  }
+
+  private fun execute(
+      resource: String,
+      binding: ResourceBinding,
+      operation: String,
+      arguments: Map<String, Any?>,
+  ): Map<String, Any?> {
+    return try {
+      success(
+          observer.operation(resource, binding.type, operation) {
+            binding.execute(operation, arguments)
+          }
+      )
+    } catch (e: ResourceOperationFailure) {
+      failed(resource, binding, operation, e.failure, e.cause)
+    } catch (e: Exception) {
+      failed(resource, binding, operation, ResourceFailure.FAILED, e)
+    }
+  }
+
+  /** An unforeseen failure gets an errorId, which is how the log's original is found. */
+  private fun failed(
+      resource: String,
+      binding: ResourceBinding,
+      operation: String,
+      failure: ResourceFailure,
+      cause: Throwable?,
+  ): Map<String, Any?> {
+    val errorId = if (failure == ResourceFailure.FAILED) UUID.randomUUID().toString() else null
+    observer.failed(resource, binding.type, operation, failure, errorId, cause)
+    return failure(failure).also { answer -> errorId?.let { answer["errorId"] = it } }
+  }
+
+  /**
+   * From now on every operation on [resource] fails with the reason; nothing reaches the entity.
+   */
+  fun invalidate(resource: String, reason: Invalidation) {
+    val binding = bindings[resource] ?: return
+    val state = states.getValue(resource)
+    binding.abort()
+    val first =
+        state.lock.write {
+          (state.invalidation == null).also { if (it) state.invalidation = reason }
+        }
+    if (first) observer.invalidated(resource, binding.type, reason)
+  }
+
+  /** [invalidate] for every resource of the run, and for any that is looked at later. */
+  fun invalidateAll(reason: Invalidation) {
+    if (runInvalidation == null) runInvalidation = reason
+    bindings.keys.forEach { invalidate(it, reason) }
+  }
+
+  private fun success(value: Any?) =
+      java.util.HashMap<String, Any?>().apply {
+        put("ok", true)
+        put("value", value)
+      }
+
+  private fun failure(failure: ResourceFailure): java.util.HashMap<String, Any?> =
+      java.util.HashMap<String, Any?>().apply {
+        put("ok", false)
+        put("failure", failure.name)
+      }
+}

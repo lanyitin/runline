@@ -29,6 +29,10 @@ internal class RunRecorder(
     }
   }
 
+  /** A line the Engine adds to the run's log on its own account (a resource, not the pipeline). */
+  fun note(line: String) =
+      append(RunEvent.LogLine(runId.toString(), dev.lawlan.runline.runner.LogStream.STDOUT, line))
+
   @Synchronized
   private fun append(event: RunEvent.LogLine) {
     try {

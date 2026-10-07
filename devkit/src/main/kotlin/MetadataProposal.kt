@@ -16,6 +16,8 @@ data class MetadataProposal(
     /** Lower case host names, without ports. */
     val hosts: SortedSet<String>,
     val commands: SortedSet<String>,
+    /** Resources used, by name, with their type; proposed as typed declarations. */
+    val resources: java.util.SortedMap<String, String> = java.util.TreeMap(),
 ) {
   companion object {
     /** Derived from the summary, which is complete whatever the event limit was. */
@@ -35,6 +37,10 @@ data class MetadataProposal(
           files,
           targets(IoCategory.NETWORK).map { it.lowercase() }.toSortedSet(),
           targets(IoCategory.PROCESS).toSortedSet(),
+          accepted
+              .filter { it.category == IoCategory.RESOURCE }
+              .associate { it.target to checkNotNull(it.resourceType) }
+              .toSortedMap(),
       )
     }
   }

@@ -58,7 +58,7 @@ class ProposalTextTest {
 
     assertTrue("只涵蓋" in text && "走過的路徑" in text, text)
     assertTrue("直接使用 JDK 的 IO 類別不被錄製" in text, text)
-    assertTrue("不含共享資源" in text && "參數" in text && "trigger" in text, text)
+    assertTrue("共享資源只含用過的型別化資源" in text && "參數" in text && "trigger" in text, text)
     assertTrue("不會自動套用" in text, text)
   }
 
@@ -151,5 +151,25 @@ class ProposalTextTest {
 
     assertTrue("""processes = AccessLimit(allow = ["a\"b\\c\${'$'}d"]),""" in text, text)
     assertTrue("""processes = @AccessLimit(allow = {"a\"b\\c${'$'}d"})""" in text, text)
+  }
+
+  private val withResource =
+      arrayOf(
+          *busy,
+          RecordedSummary(IoCategory.RESOURCE, null, "log", IoAccess.WRITE, false, 2, 1, 2, "file"),
+      )
+
+  @Test
+  fun `a resource that was used is proposed as a typed declaration in both forms`() {
+    val text = text(*withResource)
+
+    assertTrue("""typedResources = [TypedResource(name = "log", type = "file")],""" in text, text)
+    assertTrue("""typedResources = {@TypedResource(name = "log", type = "file")}""" in text, text)
+    assertTrue("| 資源 | log: file | 2 次 |" in text, text)
+  }
+
+  @Test
+  fun `without resources the members are the three there always were`() {
+    assertFalse("typedResources =" in text(*busy), text(*busy))
   }
 }

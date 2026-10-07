@@ -78,6 +78,9 @@ data class RunSettings(
     val resourceWaitTimeout: Duration,
 )
 
+/** Where the files of `file` shared resources live (ADR-019); every such path is inside it. */
+data class ResourceSettings(val root: Path)
+
 /** How long run, log and trigger records are kept, and how the clean-up runs (WI-20). */
 data class RetentionSettings(
     /** A run that has ended is removed, with its log, this long after it ended. */
@@ -134,6 +137,7 @@ data class EngineConfig(
     val runs: RunSettings,
     val retention: RetentionSettings,
     val telemetry: TelemetryConfig,
+    val resources: ResourceSettings,
 ) {
   companion object {
     private const val DEFAULT_MAX_UPLOAD_BYTES = 50L * 1024 * 1024
@@ -255,6 +259,7 @@ data class EngineConfig(
                   .coerceAtMost(Int.MAX_VALUE.toLong())
                   .toInt(),
           )
+      val resourceRoot = required("resources.root")
       val runtimeDir = required("runs.runtimeDir")
       val runs =
           RunSettings(
@@ -285,6 +290,7 @@ data class EngineConfig(
           runs,
           retention,
           TelemetryConfig(text("telemetry.serviceName") ?: DEFAULT_SERVICE_NAME),
+          ResourceSettings(Path.of(resourceRoot)),
       )
     }
 

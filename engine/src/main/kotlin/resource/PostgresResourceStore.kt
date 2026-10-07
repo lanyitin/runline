@@ -58,20 +58,26 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
       enabled: Boolean?,
       by: String,
       at: Instant,
+      settings: JsonObject?,
   ): SharedResource? =
       dataSource.connection.use { connection ->
         connection
             .prepareStatement(
                 "UPDATE shared_resource SET capacity = COALESCE(?, capacity), " +
-                    "enabled = COALESCE(?, enabled), updated_by = ?, updated_at = ? " +
+                    "enabled = COALESCE(?, enabled), settings = COALESCE(?::jsonb, settings), " +
+                    "updated_by = ?, updated_at = ? " +
                     "WHERE name = ? RETURNING $COLUMNS"
             )
             .use {
               it.setObject(1, capacity)
               it.setObject(2, enabled)
-              it.setString(3, by)
-              it.setObject(4, at.atOffset(ZoneOffset.UTC))
-              it.setString(5, name)
+              it.setString(
+                  3,
+                  settings?.let { s -> Json.encodeToString(JsonObject.serializer(), s) },
+              )
+              it.setString(4, by)
+              it.setObject(5, at.atOffset(ZoneOffset.UTC))
+              it.setString(6, name)
               it.executeQuery().use { rows -> rows.all().singleOrNull() }
             }
       }

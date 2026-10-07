@@ -72,6 +72,8 @@ class ResourceCoordinator(
       val since: Instant,
       /** The type each held resource had when it was acquired. */
       val types: Map<String, String>,
+      /** The definitions as they were when the run was granted them. */
+      val definitions: Map<String, SharedResource>,
   ) {
     val resources = LinkedHashSet<String>()
   }
@@ -150,7 +152,22 @@ class ResourceCoordinator(
     if (changed) wake()
   }
 
+  /**
+   * Asks [listener] to be told, before a holder is taken off a resource by force, which run and
+   * which resource. It runs without the lock held and the release waits for it, so whatever it does
+   * (stop accessors from working) is done before anyone else can be granted the resource.
+   */
+  fun beforeForcedRelease(listener: (runId: UUID, resource: String) -> Unit) {
+    forcedReleaseListener = listener
+  }
+
+  @Volatile private var forcedReleaseListener: (UUID, String) -> Unit = { _, _ -> }
+
   fun forceRelease(resource: String, runId: UUID, by: ApiIdentity): ForceReleaseResult {
+    synchronized(lock) {
+      if (holds[runId]?.resources?.contains(resource) != true) return ForceReleaseResult.NotHeld
+    }
+    forcedReleaseListener(runId, resource)
     val holder =
         synchronized(lock) {
           val hold = holds[runId]
@@ -192,6 +209,10 @@ class ResourceCoordinator(
         }
       }
 
+  /** The definitions [runId] was granted what it holds under, as they were then; empty if none. */
+  fun granted(runId: UUID): Map<String, SharedResource> =
+      synchronized(lock) { holds[runId]?.definitions.orEmpty() }
+
   fun activity(resource: String): ResourceActivity =
       synchronized(lock) {
         ResourceActivity(
@@ -231,7 +252,9 @@ class ResourceCoordinator(
     val waited = removeWaiting(run.id)
     val now = clock.instant()
     val types = typesOf(names, defined)
-    val hold = Hold(run.id, run.pipelineName, now, types).also { it.resources += names }
+    val hold =
+        Hold(run.id, run.pipelineName, now, types, names.associateWith { defined.getValue(it) })
+            .also { it.resources += names }
     holds[run.id] = hold
     known += types
     val seconds = waited?.let { secondsSince(it.since) } ?: 0.0

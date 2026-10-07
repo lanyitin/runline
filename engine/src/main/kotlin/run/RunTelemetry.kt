@@ -80,6 +80,22 @@ class RunTelemetry(openTelemetry: OpenTelemetry) {
     if (residualThreads.isNotEmpty()) residual.add(residualThreads.size.toLong())
   }
 
+  /**
+   * One operation on a typed resource, as a span under the run's own: only the resource's name and
+   * type and the category of the operation, never a path or content. The caller ends it. Null when
+   * the run has no trace (it has ended).
+   */
+  fun resourceOperation(runId: UUID, resource: String, type: String, operation: String): Span? {
+    val trace = traces[runId] ?: return null
+    return tracer
+        .spanBuilder("runline.resource.$operation")
+        .setParent(Context.current().with(trace.root))
+        .setAttribute(RESOURCE_NAME, resource)
+        .setAttribute(RESOURCE_TYPE, type)
+        .setAttribute(RESOURCE_OPERATION, operation)
+        .startSpan()
+  }
+
   fun observeScheduler(stats: () -> SchedulerStats) {
     meter.gaugeBuilder("runline.runs.queued").ofLongs().buildWithCallback {
       it.record(stats().queued.toLong())
@@ -114,6 +130,9 @@ class RunTelemetry(openTelemetry: OpenTelemetry) {
     val SOURCE_NAME = AttributeKey.stringKey("runline.run.source.name")
     val VERDICT = AttributeKey.stringKey("runline.run.verdict")
     val STATE = AttributeKey.stringKey("runline.run.state")
+    val RESOURCE_NAME = AttributeKey.stringKey("runline.resource.name")
+    val RESOURCE_TYPE = AttributeKey.stringKey("runline.resource.type")
+    val RESOURCE_OPERATION = AttributeKey.stringKey("runline.resource.operation")
     val SOURCE = AttributeKey.stringKey("source")
     val VERDICT_LABEL = AttributeKey.stringKey("verdict")
     val STATE_LABEL = AttributeKey.stringKey("state")

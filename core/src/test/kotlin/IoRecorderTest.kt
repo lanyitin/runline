@@ -174,4 +174,28 @@ class IoRecorderTest {
   fun `a negative limit is refused`() {
     assertFailsWith<IllegalArgumentException> { IoRecorder(maxEvents = -1) }
   }
+
+  @Test
+  fun `a resource is recorded by name, type and the kind of action, and folded by name and type`() {
+    val recorder = IoRecorder(maxEvents = 100)
+
+    recorder.record(IoCategory.RESOURCE, "log", IoAccess.WRITE, resourceType = "file")
+    recorder.record(IoCategory.RESOURCE, "log", IoAccess.WRITE, resourceType = "file")
+    recorder.record(IoCategory.RESOURCE, "log", IoAccess.READ, resourceType = "file")
+    recorder.record(IoCategory.RESOURCE, "other", IoAccess.READ, resourceType = "file")
+
+    val first = recorder.events().first()
+    assertEquals("RESOURCE", first["category"])
+    assertEquals("log", first["target"])
+    assertEquals("file", first["resourceType"])
+    assertEquals(
+        listOf(
+            Triple("log", "WRITE", 2L),
+            Triple("log", "READ", 1L),
+            Triple("other", "READ", 1L),
+        ),
+        recorder.summary().map { Triple(it["target"], it["access"], it["count"]) },
+    )
+    assertEquals(listOf("file", "file", "file"), recorder.summary().map { it["resourceType"] })
+  }
 }

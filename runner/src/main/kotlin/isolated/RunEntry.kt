@@ -5,6 +5,7 @@ import dev.lawlan.runline.core.Pipeline
 import dev.lawlan.runline.core.PipelineMetadata
 import dev.lawlan.runline.core.PipelineMetadataReader
 import dev.lawlan.runline.core.RecordingContext
+import dev.lawlan.runline.core.ResourceLink
 import dev.lawlan.runline.core.RestrictedContext
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -38,9 +39,19 @@ class RunEntry(private val request: Map<String, Any?>) :
       val sharedDir = Path.of(input["sharedDir"] as String)
       val runDir = Path.of(input["runDir"] as String)
       val maxBytes = input["maxBytesPerScope"] as Long
+      val resources =
+          (input["resourceTypes"] as Map<String, String>?)?.let {
+            ResourceLink(
+                it,
+                input["resourceCalls"] as Function<Map<String, Any?>, Map<String, Any?>>,
+            )
+          }
       val context =
-          if (recorder == null) RestrictedContext(metadata, parameters, sharedDir, runDir, maxBytes)
-          else RecordingContext(metadata, parameters, sharedDir, runDir, maxBytes, recorder)
+          if (recorder == null) {
+            RestrictedContext(metadata, parameters, sharedDir, runDir, maxBytes, resources)
+          } else {
+            RecordingContext(metadata, parameters, sharedDir, runDir, maxBytes, recorder, resources)
+          }
       (pipelineClass.getDeclaredConstructor().newInstance() as Pipeline).run(context)
       result["outcome"] = "SUCCEEDED"
     } catch (t: Throwable) {

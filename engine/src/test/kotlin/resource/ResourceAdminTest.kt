@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
+import dev.lawlan.runline.engine.config.ResourceSettings
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.migratedDatabase
 import java.time.Clock
@@ -17,7 +18,9 @@ class ResourceAdminTest {
   private val changes = AtomicInteger()
   private val now = Instant.parse("2026-10-04T10:00:00Z")
   private val admin =
-      ResourceAdmin(store, Clock.fixed(now, ZoneOffset.UTC)) { changes.incrementAndGet() }
+      ResourceAdmin(store, Clock.fixed(now, ZoneOffset.UTC), ResourceBehaviors.countersOnly()) {
+        changes.incrementAndGet()
+      }
   private val root = ApiIdentity("root", Role.ADMIN)
   private val ops = ApiIdentity("ops", Role.ADMIN)
 
@@ -159,7 +162,7 @@ class ResourceAdminTest {
 
   @Test
   fun `the types that are in the set but not yet implemented are refused and nothing is stored`() {
-    listOf("file", "jdbc-pool", "openai-compatible").forEach {
+    listOf("jdbc-pool", "openai-compatible").forEach {
       assertEquals(
           CreateResourceResult.Invalid(InvalidResource.UNSUPPORTED_TYPE),
           admin.create("r-$it", 1, root, type = it),
@@ -247,5 +250,85 @@ class ResourceAdminTest {
         UpdateResourceResult.NotFound,
         admin.update("nothing", 2, null, root, settings = someSettings),
     )
+  }
+
+  // ---- the file type (WI-43) ----
+
+  private val resourceRoot = java.nio.file.Files.createTempDirectory("resource-root")
+  private val fileAdmin =
+      ResourceAdmin(
+          store,
+          Clock.fixed(now, ZoneOffset.UTC),
+          ResourceBehaviors.forEngine(ResourceSettings(resourceRoot)),
+      ) {
+        changes.incrementAndGet()
+      }
+
+  private fun path(value: String) = JsonObject(mapOf("path" to JsonPrimitive(value)))
+
+  @Test
+  fun `a file resource is defined by a path relative to the resource root`() {
+    val result = fileAdmin.create("log", 1, root, "file", path("logs/out.txt"))
+
+    val created = assertIs<CreateResourceResult.Created>(result).resource
+    assertEquals(ResourceType.FILE, created.type)
+    assertEquals(path("logs/out.txt"), created.settings)
+  }
+
+  @Test
+  fun `a file resource without a path, with other settings or with a secret alias is refused`() {
+    listOf(
+            null,
+            JsonObject(emptyMap()),
+            path(""),
+            path(" "),
+            JsonObject(mapOf("path" to JsonPrimitive(1))),
+        )
+        .forEach {
+          assertEquals(
+              CreateResourceResult.Invalid(InvalidResource.INVALID_SETTINGS),
+              fileAdmin.create("log", 1, root, "file", it),
+              "$it",
+          )
+        }
+    val extra = JsonObject(mapOf("path" to JsonPrimitive("a"), "mode" to JsonPrimitive("rw")))
+    assertEquals(
+        CreateResourceResult.Invalid(InvalidResource.INVALID_SETTINGS),
+        fileAdmin.create("log", 1, root, "file", extra),
+    )
+    assertEquals(
+        CreateResourceResult.Invalid(InvalidResource.INVALID_SECRET_ALIAS),
+        fileAdmin.create("log", 1, root, "file", path("a"), "key"),
+    )
+    assertNull(fileAdmin.find("log"))
+  }
+
+  @Test
+  fun `a path outside the resource root is refused as such`() {
+    listOf("/etc/passwd", "../x", "a/../../x", "a/../..", "")
+        .filter { it.isNotEmpty() }
+        .forEach {
+          assertEquals(
+              CreateResourceResult.Invalid(InvalidResource.PATH_OUTSIDE_ROOT),
+              fileAdmin.create("log", 1, root, "file", path(it)),
+              it,
+          )
+        }
+    assertNull(fileAdmin.find("log"))
+  }
+
+  @Test
+  fun `the path of a file resource can be changed, and a bad new one is refused`() {
+    fileAdmin.create("log", 1, root, "file", path("a.txt"))
+
+    val changed = fileAdmin.update("log", null, null, root, settings = path("b.txt"))
+
+    assertEquals(path("b.txt"), assertIs<UpdateResourceResult.Updated>(changed).resource.settings)
+    assertEquals(
+        UpdateResourceResult.Invalid(InvalidResource.PATH_OUTSIDE_ROOT),
+        fileAdmin.update("log", null, null, root, settings = path("../b.txt")),
+    )
+    assertEquals(path("b.txt"), fileAdmin.find("log")!!.settings)
+    assertEquals(1, changes.get(), "only the change that happened is announced")
   }
 }

@@ -39,8 +39,9 @@ interface ResourceStore {
   fun list(): List<SharedResource>
 
   /**
-   * Changes the capacity and/or the enabled flag (null leaves it as is) and records who and when.
-   * Returns the definition as updated, or null when there is no such resource.
+   * Changes the capacity, the enabled flag and/or the settings (null leaves each as it is) and
+   * records who and when. Returns the definition as updated, or null when there is no such
+   * resource.
    */
   fun update(
       name: String,
@@ -48,6 +49,7 @@ interface ResourceStore {
       enabled: Boolean?,
       by: String,
       at: Instant,
+      settings: JsonObject? = null,
   ): SharedResource?
 
   /** Removes the definition; false when there is no resource of that name. */

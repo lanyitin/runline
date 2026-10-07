@@ -47,6 +47,7 @@ fun ApplicationTestBuilder.configureEngine(
     put("workspace.runRoot", work.resolve("runs").toString())
     put("workspace.maxBytes", "1000000")
     put("workspace.failedRunRetentionSeconds", "3600")
+    put("resources.root", work.resolve("resources").toString())
     put("runs.maxConcurrent", "2")
     put("runs.runtimeDir", TestRuntimeDir.path.toString())
     put("runs.shutdownGraceSeconds", "5")

@@ -155,10 +155,23 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceTelemetry>(),
       )
     }
-    provide<ResourceGate> { resolve<ResourceCoordinator>() }
+    provide<ResourceGate> {
+      AccessorGate(
+          resolve<ResourceCoordinator>(),
+          resolve<ResourceBehaviors>(),
+          resolve<RunTelemetry>(),
+          resolve<ResourceTelemetry>(),
+      )
+    }
+    provide<ResourceBehaviors> { ResourceBehaviors.forEngine(resolve<EngineConfig>().resources) }
     provide<ResourceAdmin> {
       val coordinator = resolve<ResourceCoordinator>()
-      ResourceAdmin(resolve<ResourceStore>(), resolve<Clock>(), coordinator::wake)
+      ResourceAdmin(
+          resolve<ResourceStore>(),
+          resolve<Clock>(),
+          resolve<ResourceBehaviors>(),
+          coordinator::wake,
+      )
     }
     provide<ResourceDeclarationStore> { PostgresResourceDeclarationStore(resolve<DataSource>()) }
     provide<ResourceCatalog> {

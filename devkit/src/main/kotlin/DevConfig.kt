@@ -16,6 +16,15 @@ data class RecordingConfig(
     val shownAs: String,
 )
 
+/** A shared resource as the development project defines it locally (no Engine to ask). */
+data class LocalResource(val type: String, val path: String?)
+
+/**
+ * The typed shared resources of a development run (ADR-019): where the files of `file` resources
+ * live and what the local resources are.
+ */
+data class LocalResourceSettings(val root: Path, val definitions: Map<String, LocalResource>)
+
 /** Where the allow list used for a verdict came from. */
 enum class AllowListSource {
   DEFAULT,
@@ -39,6 +48,7 @@ data class DevConfig(
     val waitLimit: Duration,
     /** Present when the development entry records the run's IO; null (default) is a normal run. */
     val recording: RecordingConfig? = null,
+    val resources: LocalResourceSettings = LocalResourceSettings(Path.of(""), emptyMap()),
 ) {
   val allowListDisplay: AllowListDisplay
     get() = AllowListDisplay(allowListSource, allowList, showAllowListEntries)
@@ -50,6 +60,8 @@ data class DevConfig(
     private const val ALLOW_LIST_VERSION = "RUNLINE_ALLOW_LIST_VERSION"
     private const val SHOW_ALLOW_LIST = "RUNLINE_SHOW_ALLOW_LIST"
     private const val WAIT_SECONDS = "RUNLINE_DEV_WAIT_SECONDS"
+    private const val RESOURCE_ROOT = "RUNLINE_RESOURCE_ROOT"
+    private const val RESOURCES = "RUNLINE_RESOURCES"
     private const val RECORD = "RUNLINE_RECORD"
     private const val RECORD_MAX_EVENTS = "RUNLINE_RECORD_MAX_EVENTS"
     private const val RECORD_DIR = "RUNLINE_RECORD_DIR"
@@ -75,7 +87,39 @@ data class DevConfig(
             showAllowListEntries = showAllowList(env),
             waitLimit = Duration.ofSeconds(waitSeconds(env)),
             recording = recording(env, projectDir),
+            resources = resources(env, projectDir),
         )
+
+    /**
+     * `RUNLINE_RESOURCE_ROOT` (default `.runline/resources`) and `RUNLINE_RESOURCES`, a comma
+     * separated list of `name=type[:path]`: a `file` has its path below the root, a `counter` has
+     * nothing more.
+     */
+    private fun resources(env: Map<String, String>, projectDir: Path): LocalResourceSettings {
+      val root = projectDir.resolve(optional(env, RESOURCE_ROOT) ?: ".runline/resources")
+      val definitions = LinkedHashMap<String, LocalResource>()
+      optional(env, RESOURCES)?.split(',')?.forEach { entry ->
+        val text = entry.trim()
+        val name = text.substringBefore('=', "").trim()
+        val definition = text.substringAfter('=', "").trim()
+        val type = definition.substringBefore(':').trim()
+        val path = if (':' in definition) definition.substringAfter(':').trim() else null
+        val valid =
+            name.isNotEmpty() &&
+                name !in definitions &&
+                when (type) {
+                  "file" -> !path.isNullOrEmpty()
+                  "counter" -> path == null
+                  else -> false
+                }
+        check(valid) {
+          "Environment variable $RESOURCES entry '$text' must be name=file:<path> or name=counter, " +
+              "with each name once"
+        }
+        definitions[name] = LocalResource(type, path)
+      }
+      return LocalResourceSettings(root, definitions)
+    }
 
     /** Recording is off unless `RUNLINE_RECORD` is `true`; the other two variables then tune it. */
     private fun recording(env: Map<String, String>, projectDir: Path): RecordingConfig? {

@@ -21,6 +21,7 @@ class EngineConfigTest {
           "workspace.failedRunRetentionSeconds" to "3600",
           "runs.maxConcurrent" to "4",
           "runs.runtimeDir" to "/opt/runline/run-runtime",
+          "resources.root" to "/var/lib/runline-resources",
       )
 
   private fun parse(vararg overrides: Pair<String, String>) =
@@ -262,6 +263,7 @@ class EngineConfigTest {
             "workspace.failedRunRetentionSeconds",
             "runs.maxConcurrent",
             "runs.runtimeDir",
+            "resources.root",
         )) {
       val e = assertFailsWith<ConfigurationException>(key) { parse(key to " ") }
       assertTrue(e.message!!.contains(key), "$key missing from: ${e.message}")
@@ -284,6 +286,14 @@ class EngineConfigTest {
       val e = assertFailsWith<ConfigurationException>("$key=$value") { parse(key to value) }
       assertTrue(e.message!!.contains(key), "$key missing from: ${e.message}")
     }
+  }
+
+  @Test
+  fun `the root of the files of file resources is configured`() {
+    assertEquals(
+        java.nio.file.Path.of("/var/lib/runline-resources"),
+        parse().resources.root,
+    )
   }
 
   @Test

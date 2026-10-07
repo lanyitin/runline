@@ -117,4 +117,14 @@ class EventLogTextTest {
 
     assertTrue("FILE RUN_PRIVATE READ 50 次（#1 至 #50）" in text, text)
   }
+
+  @Test
+  fun `a resource event shows its type, the kind of action and its name`() {
+    val event =
+        RecordedEvent(5, IoCategory.RESOURCE, null, "log", null, IoAccess.WRITE, false, "file")
+
+    val text = EventLogText.render(RecordedIo(100, 1, listOf(event), listOf(summaryOf(event))))
+
+    assertTrue("#5 RESOURCE file WRITE log" in text.lines(), text)
+  }
 }

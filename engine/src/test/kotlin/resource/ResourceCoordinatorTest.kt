@@ -17,7 +17,7 @@ import kotlin.test.*
 
 class ResourceCoordinatorTest {
   private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
-  private val admin = ResourceAdmin(store, MutableClock()) {}
+  private val admin = ResourceAdmin(store, MutableClock(), ResourceBehaviors.countersOnly()) {}
   private val root = ApiIdentity("root", Role.ADMIN)
   private val clock = MutableClock()
   private val wakes = AtomicInteger()

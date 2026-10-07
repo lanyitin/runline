@@ -27,6 +27,9 @@ enum class InvalidResource(val problem: String) {
   /** A secret alias on a type that has no secret, or one that is not well formed. */
   INVALID_SECRET_ALIAS("invalid_secret_alias"),
 
+  /** The path of a `file` resource is not inside the resource root (ADR-019). */
+  PATH_OUTSIDE_ROOT("path_outside_root"),
+
   /** A change of name: a resource is identified by its name for good. */
   IMMUTABLE_NAME("immutable_name"),
 
@@ -59,6 +62,7 @@ sealed interface UpdateResourceResult {
 class ResourceAdmin(
     private val store: ResourceStore,
     private val clock: java.time.Clock,
+    private val behaviors: ResourceBehaviors,
     private val onChange: () -> Unit,
 ) {
   private val log = LoggerFactory.getLogger(ResourceAdmin::class.java)
@@ -78,10 +82,10 @@ class ResourceAdmin(
         else
             ResourceType.fromWireName(type)
                 ?: return CreateResourceResult.Invalid(InvalidResource.UNKNOWN_TYPE)
-    if (!resourceType.supported) {
-      return CreateResourceResult.Invalid(InvalidResource.UNSUPPORTED_TYPE)
-    }
-    resourceType.problemWith(settings, secretAlias)?.let {
+    val behavior =
+        behaviors.of(resourceType)
+            ?: return CreateResourceResult.Invalid(InvalidResource.UNSUPPORTED_TYPE)
+    behavior.problemWith(settings, secretAlias)?.let {
       return CreateResourceResult.Invalid(it)
     }
     val now = clock.instant()
@@ -121,18 +125,18 @@ class ResourceAdmin(
   ): UpdateResourceResult {
     if (newName != null) return UpdateResourceResult.Invalid(InvalidResource.IMMUTABLE_NAME)
     if (type != null) return UpdateResourceResult.Invalid(InvalidResource.IMMUTABLE_TYPE)
-    if (capacity == null && enabled == null) {
+    if (capacity == null && enabled == null && settings == null && secretAlias == null) {
       return UpdateResourceResult.Invalid(InvalidResource.NOTHING_TO_CHANGE)
     }
     if (capacity != null && capacity < 1) {
       return UpdateResourceResult.Invalid(InvalidResource.CAPACITY)
     }
     val existing = store.find(name) ?: return UpdateResourceResult.NotFound
-    existing.type.problemWith(settings, secretAlias)?.let {
+    behaviors.of(existing.type)?.problemWith(settings, secretAlias)?.let {
       return UpdateResourceResult.Invalid(it)
     }
     val updated =
-        store.update(name, capacity, enabled, by.name, clock.instant())
+        store.update(name, capacity, enabled, by.name, clock.instant(), settings)
             ?: return UpdateResourceResult.NotFound
     log.info(
         "Shared resource {} changed by {}: capacity {}, enabled {}",

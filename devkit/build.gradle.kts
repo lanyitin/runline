@@ -4,11 +4,13 @@ kotlin { jvmToolchain(25) }
 
 // 開發入口：只依賴 core、runner、analyzer。不得依賴 Engine、Ktor、OpenTelemetry 或資料庫。
 dependencies {
+  implementation(project(":accessors"))
   implementation(project(":analyzer"))
   implementation(project(":core"))
   implementation(project(":runner"))
 
   testImplementation(kotlin("test"))
+  testImplementation(testFixtures(project(":accessors")))
 }
 
 tasks.test { useJUnitPlatform() }

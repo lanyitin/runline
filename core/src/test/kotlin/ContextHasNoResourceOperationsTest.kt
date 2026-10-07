@@ -14,6 +14,9 @@ class ContextHasNoResourceOperationsTest {
           FileOperations::class.java,
           NetworkAccess::class.java,
           ProcessRunner::class.java,
+          // Accessors (ADR-019) only hand out what the Engine already acquired for the run.
+          Accessors::class.java,
+          FileAccessor::class.java,
       )
 
   @Test

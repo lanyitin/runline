@@ -12,6 +12,7 @@ class RestrictedContext(
     sharedDir: Path,
     runDir: Path,
     maxBytesPerScope: Long? = null,
+    resources: ResourceLink? = null,
 ) : PipelineContext {
   override val pipelineName: String
     get() = metadata.name
@@ -26,4 +27,5 @@ class RestrictedContext(
       )
   override val network: NetworkAccess = CheckedNetwork(metadata.name, metadata.network)
   override val processes: ProcessRunner = CheckedProcesses(metadata.name, metadata.processes)
+  override val accessors: Accessors = HostAccessors(metadata, resources)
 }

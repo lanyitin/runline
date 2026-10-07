@@ -2,6 +2,7 @@ package dev.lawlan.runline.devkit
 
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.runner.LogStream
+import dev.lawlan.runline.runner.ResourceHost
 import dev.lawlan.runline.runner.RunEvent
 import dev.lawlan.runline.runner.RunListener
 import dev.lawlan.runline.runner.RunRequest
@@ -42,8 +43,13 @@ class DevSession(private val config: DevConfig, private val out: PrintStream) {
     }
     out.print(VerdictText.render(report, pipeline, config.allowListDisplay))
     val workspaces = Workspaces(config.workspace, Clock.systemUTC()) {}.also { it.sweep() }
-    return LocalResources(out).holding(pipeline.metadata.resources) {
-      runPipeline(arguments, runId, workspaces, pipeline.pipelineName)
+    return try {
+      LocalResources(out, config.resources).holding(pipeline.metadata) { resources ->
+        runPipeline(arguments, runId, workspaces, pipeline.pipelineName, resources)
+      }
+    } catch (e: LocalResourceProblem) {
+      out.println(e.message)
+      EXIT_NOT_STARTED
     }
   }
 
@@ -52,6 +58,7 @@ class DevSession(private val config: DevConfig, private val out: PrintStream) {
       runId: String,
       workspaces: Workspaces,
       pipelineName: String,
+      resources: ResourceHost?,
   ): Int {
     val report = config.recording?.let { RecordingReport(it, out) }
     report?.announce()
@@ -64,6 +71,7 @@ class DevSession(private val config: DevConfig, private val out: PrintStream) {
                   arguments.pipelineClass,
                   arguments.parameters,
                   recording = config.recording?.options,
+                  resources = resources,
               ),
               RunListener(::print),
           )

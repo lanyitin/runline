@@ -9,6 +9,7 @@ interface PipelineContext {
   val files: FileOperations
   val network: NetworkAccess
   val processes: ProcessRunner
+  val accessors: Accessors
 }
 
 /** File operations. Paths are relative to the root of the given [FileScope]. */

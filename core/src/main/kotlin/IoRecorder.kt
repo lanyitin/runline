@@ -34,6 +34,7 @@ class IoRecorder(private val maxEvents: Int) {
       val port: Int?,
       val access: IoAccess,
       val rejected: Boolean,
+      val resourceType: String?,
   )
 
   private data class SummaryKey(
@@ -42,6 +43,7 @@ class IoRecorder(private val maxEvents: Int) {
       val target: String,
       val access: IoAccess,
       val rejected: Boolean,
+      val resourceType: String?,
   )
 
   private class Tally(val firstSequence: Long) {
@@ -56,7 +58,8 @@ class IoRecorder(private val maxEvents: Int) {
 
   /**
    * Records one action. [target] is the relative path (files), the host (network) or the command
-   * (processes); [scope] is for files, [port] for the network.
+   * (processes) or the name (resources); [scope] is for files, [port] for the network and
+   * [resourceType] for resources.
    */
   fun record(
       category: IoCategory,
@@ -65,13 +68,22 @@ class IoRecorder(private val maxEvents: Int) {
       scope: FileScope? = null,
       port: Int? = null,
       rejected: Boolean = false,
+      resourceType: String? = null,
   ) {
     synchronized(lock) {
       val sequence = ++total
       if (events.size < maxEvents) {
-        events.add(Event(sequence, category, scope, target, port, access, rejected))
+        events.add(Event(sequence, category, scope, target, port, access, rejected, resourceType))
       }
-      val key = SummaryKey(category, scope, summaryTarget(category, target), access, rejected)
+      val key =
+          SummaryKey(
+              category,
+              scope,
+              summaryTarget(category, target),
+              access,
+              rejected,
+              resourceType,
+          )
       val tally = summary.getOrPut(key) { Tally(sequence) }
       tally.count++
       tally.lastSequence = sequence
@@ -83,6 +95,7 @@ class IoRecorder(private val maxEvents: Int) {
         IoCategory.FILE -> ""
         IoCategory.NETWORK -> target.lowercase()
         IoCategory.PROCESS -> target
+        IoCategory.RESOURCE -> target
       }
 
   /**
@@ -100,6 +113,7 @@ class IoRecorder(private val maxEvents: Int) {
               "port" to it.port,
               "access" to it.access.name,
               "rejected" to it.rejected,
+              "resourceType" to it.resourceType,
           )
         }
         val folded = summary.map { (key, tally) ->
@@ -109,6 +123,7 @@ class IoRecorder(private val maxEvents: Int) {
               "target" to key.target,
               "access" to key.access.name,
               "rejected" to key.rejected,
+              "resourceType" to key.resourceType,
               "count" to tally.count,
               "firstSequence" to tally.firstSequence,
               "lastSequence" to tally.lastSequence,

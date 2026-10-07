@@ -17,6 +17,7 @@ class RecordingContext(
     runDir: Path,
     maxBytesPerScope: Long?,
     val recorder: IoRecorder,
+    resources: ResourceLink? = null,
 ) : PipelineContext {
   override val pipelineName: String
     get() = metadata.name
@@ -34,4 +35,5 @@ class RecordingContext(
       CheckedNetwork(metadata.name, AccessPolicy.Unrestricted, recorder)
   override val processes: ProcessRunner =
       CheckedProcesses(metadata.name, AccessPolicy.Unrestricted, recorder)
+  override val accessors: Accessors = HostAccessors(metadata, resources, recorder)
 }

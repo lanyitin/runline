@@ -27,7 +27,7 @@ class ResourceTelemetryTest {
           .build()
   private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
   private val clock = MutableClock()
-  private val admin = ResourceAdmin(store, clock) {}
+  private val admin = ResourceAdmin(store, clock, ResourceBehaviors.countersOnly()) {}
   private val root = ApiIdentity("root", Role.ADMIN)
   private val coordinator =
       ResourceCoordinator(

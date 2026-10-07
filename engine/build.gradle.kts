@@ -30,11 +30,13 @@ dependencies {
   implementation(libs.opentelemetry.sdkAutoconfigure)
   implementation(libs.opentelemetry.semconv)
   implementation(libs.postgresql)
+  implementation(project(":accessors"))
   implementation(project(":analyzer"))
   implementation(project(":core"))
   implementation(project(":runner"))
 
   testImplementation(kotlin("test"))
+  testImplementation(testFixtures(project(":accessors")))
   testImplementation(ktorLibs.server.testHost)
   testImplementation(ktorLibs.client.websockets)
   testImplementation(libs.opentelemetry.sdkTesting)

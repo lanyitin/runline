@@ -33,7 +33,7 @@ internal object ProposalText {
     appendLine()
     appendLine("- 只涵蓋這次執行走過的路徑；沒走到的分支用到的 IO 不在其中，提案可能過窄。")
     appendLine("- 只涵蓋經由 context 的 IO；直接使用 JDK 的 IO 類別不被錄製，這類 IO 只會出現在靜態分析的 unsafe 判定。")
-    appendLine("- 不含共享資源（resources）、參數（parameters）與 trigger；請保留你原有的宣告。")
+    appendLine("- 共享資源只含用過的型別化資源（名稱與型別）；容量與只宣告名稱的資源、參數（parameters）與 trigger 不在其中，請保留你原有的宣告。")
     appendLine("- 提案不會自動套用，請自行檢視後採用。")
     appendRejected(recording)
     appendLine()
@@ -45,7 +45,9 @@ internal object ProposalText {
     appendLine()
     appendLine("## 採用")
     appendLine()
-    appendLine("把下列三個成員放進 pipeline 的 `@PipelineDefinition`，取代原有的同名成員（沒有則新增），")
+    appendLine(
+        "把下列成員（用過型別化資源時多一個 typedResources）放進 pipeline 的 `@PipelineDefinition`，取代原有的同名成員（沒有則新增），"
+    )
     appendLine("其他成員（name、parameters、resources）保持原樣。沒有使用過的類別是「不允許」（空的範圍），不是「不限制」。")
     appendLine()
     appendLine("Kotlin：")
@@ -79,6 +81,11 @@ internal object ProposalText {
     }
     appendTargets("網路", proposal.hosts, used, IoCategory.NETWORK, lowercase = true)
     appendTargets("外部行程", proposal.commands, used, IoCategory.PROCESS, lowercase = false)
+    proposal.resources.forEach { (name, type) ->
+      val count =
+          used.filter { it.category == IoCategory.RESOURCE && it.target == name }.sumOf { it.count }
+      appendLine("| 資源 | $name: $type | $count 次 |")
+    }
   }
 
   private fun StringBuilder.appendTargets(
@@ -117,6 +124,15 @@ internal object ProposalText {
     }
     appendLine("network = AccessLimit(allow = ${kotlinList(proposal.hosts)}),")
     appendLine("processes = AccessLimit(allow = ${kotlinList(proposal.commands)}),")
+    if (proposal.resources.isNotEmpty()) {
+      appendLine(
+          "typedResources = [" +
+              proposal.resources.entries.joinToString(", ") {
+                "TypedResource(name = ${quoted(it.key)}, type = ${quoted(it.value)})"
+              } +
+              "],"
+      )
+    }
   }
 
   private fun javaMembers(proposal: MetadataProposal): String = buildString {
@@ -133,8 +149,26 @@ internal object ProposalText {
       appendLine("},")
     }
     appendLine("network = @AccessLimit(allow = ${javaList(proposal.hosts)}),")
-    appendLine("processes = @AccessLimit(allow = ${javaList(proposal.commands)})")
+    if (proposal.resources.isEmpty()) {
+      appendLine("processes = @AccessLimit(allow = ${javaList(proposal.commands)})")
+    } else {
+      appendLine("processes = @AccessLimit(allow = ${javaList(proposal.commands)}),")
+      appendLine(
+          "typedResources = {" +
+              proposal.resources.entries.joinToString(", ") {
+                "@TypedResource(name = ${quoted(it.key, kotlin = false)}, type = ${quoted(it.value, kotlin = false)})"
+              } +
+              "}"
+      )
+    }
   }
+
+  private fun quoted(value: String, kotlin: Boolean = true): String =
+      "\"" +
+          value.replace("\\", "\\\\").replace("\"", "\\\"").let {
+            if (kotlin) it.replace("$", "\\$") else it
+          } +
+          "\""
 
   private fun kotlinList(values: Collection<String>) =
       values.joinToString(", ", "[", "]") {

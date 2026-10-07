@@ -21,6 +21,7 @@ rootProject.name = "runline"
 
 include(":core")
 include(":runner")
+include(":accessors")
 include(":analyzer")
 include(":devkit")
 include(":engine")

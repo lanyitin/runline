@@ -18,6 +18,8 @@ data class RunRequest(
      * entry only. Null, the default, is a normal run.
      */
     val recording: RecordingOptions? = null,
+    /** The accessors the host lends for the typed resources the run holds; null for none. */
+    val resources: ResourceHost? = null,
 )
 
 /** How a recording run keeps what it records; see [dev.lawlan.runline.core.IoRecorder]. */

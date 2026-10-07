@@ -100,4 +100,27 @@ class MetadataProposalTest {
 
     assertEquals(listOf("example.com"), proposal.hosts.toList())
   }
+
+  private fun resource(name: String, type: String, access: IoAccess, rejected: Boolean = false) =
+      RecordedSummary(IoCategory.RESOURCE, null, name, access, rejected, 1, 1, 1, type)
+
+  @Test
+  fun `a resource that was used is proposed by name with its type, however often and however`() {
+    val proposal =
+        MetadataProposal.from(
+            recording(
+                resource("log", "file", IoAccess.WRITE),
+                resource("log", "file", IoAccess.READ),
+                resource("audit", "file", IoAccess.READ),
+            )
+        )
+
+    assertEquals(mapOf("audit" to "file", "log" to "file"), proposal.resources)
+    assertEquals(listOf("audit", "log"), proposal.resources.keys.toList())
+  }
+
+  @Test
+  fun `no resource used proposes no resource declaration`() {
+    assertTrue(MetadataProposal.from(recording(net("a.example"))).resources.isEmpty())
+  }
 }

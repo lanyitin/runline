@@ -51,6 +51,7 @@ class PackagedConsoleTest {
           "API_TOKENS" to "alice:developer:tok-alice-0123456789",
           "RUNLINE_SHARED_ROOT" to work.resolve("shared").toString(),
           "RUNLINE_RUN_ROOT" to work.resolve("runs").toString(),
+          "RUNLINE_RESOURCE_ROOT" to work.resolve("resources").toString(),
           "RUNLINE_WORKSPACE_MAX_BYTES" to "1000000",
           "RUNLINE_FAILED_RUN_RETENTION_SECONDS" to "3600",
           "RUNLINE_MAX_CONCURRENT_RUNS" to "2",

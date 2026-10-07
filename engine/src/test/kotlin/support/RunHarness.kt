@@ -6,6 +6,7 @@ import dev.lawlan.runline.core.Pipeline
 import dev.lawlan.runline.engine.artifact.*
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
+import dev.lawlan.runline.engine.config.ResourceSettings
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.resource.*
 import dev.lawlan.runline.engine.run.*
@@ -63,7 +64,11 @@ class RunHarness(
   val runStore = PostgresRunStore(dataSource)
   val resourceStore = PostgresResourceStore(dataSource)
   val resourceAvailability = ResourceAvailability(resourceStore)
-  val resourceAdmin = ResourceAdmin(resourceStore, Clock.systemUTC()) { scheduler.wake() }
+  /** Where the files of `file` resources live; a directory of its own, apart from the others. */
+  val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
+  val behaviors = ResourceBehaviors.forEngine(ResourceSettings(resourceRoot))
+  val resourceAdmin =
+      ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }
   val workspaceEvents = CopyOnWriteArrayList<WorkspaceEvent>()
   val sharedRoot: Path = dir.resolve("shared")
   val runRoot: Path = dir.resolve("runs")
@@ -85,6 +90,9 @@ class RunHarness(
         ResourceTelemetry(OpenTelemetry.noop()),
     )
   }
+  val accessorGate: AccessorGate? = coordinator?.let {
+    AccessorGate(it, behaviors, telemetry, ResourceTelemetry(openTelemetry))
+  }
   val jars: Path = jarDirectory ?: Files.createDirectories(dir.resolve("run-jars"))
   val scheduler =
       RunScheduler(
@@ -92,7 +100,7 @@ class RunHarness(
           definitions,
           progress,
           runStore,
-          gate ?: coordinator ?: NoResources,
+          gate ?: accessorGate ?: NoResources,
           telemetry,
           Clock.systemUTC(),
           SchedulerConfig(maxConcurrent, runTimeout, shutdownGrace, jars),
@@ -154,6 +162,18 @@ class RunHarness(
     val root = ApiIdentity("root", Role.ADMIN)
     assertIs<CreateResourceResult.Created>(resourceAdmin.create(name, capacity, root))
     if (!enabled) resourceAdmin.update(name, null, false, root)
+  }
+
+  /** Defines a `file` resource whose file is [path] below [resourceRoot]. */
+  fun defineFile(name: String, path: String, capacity: Int = 1) {
+    val root = ApiIdentity("root", Role.ADMIN)
+    val settings =
+        kotlinx.serialization.json.JsonObject(
+            mapOf("path" to kotlinx.serialization.json.JsonPrimitive(path))
+        )
+    assertIs<CreateResourceResult.Created>(
+        resourceAdmin.create(name, capacity, root, "file", settings)
+    )
   }
 
   /**
@@ -235,6 +255,17 @@ class RunHarness(
         "files = {@FileAccess(scope = FileScope.PIPELINE_SHARED, mode = FileMode.READ_WRITE)," +
             " @FileAccess(scope = FileScope.RUN_PRIVATE, mode = FileMode.READ_WRITE)}, " +
             "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {})"
+
+    /** A declaration of the resources [names] by name only. */
+    fun using(vararg names: String) =
+        DEFAULT_DECLARATION + ", resources = {" + names.joinToString { "\"$it\"" } + "}"
+
+    /** A declaration of resources with the type the pipeline expects of each (name to type). */
+    fun usingTyped(vararg types: Pair<String, String>) =
+        DEFAULT_DECLARATION +
+            ", typedResources = {" +
+            types.joinToString { (n, t) -> "@TypedResource(name = \"$n\", type = \"$t\")" } +
+            "}"
 
     /** A body that waits until a run is stopped by interruption. */
     const val WAIT_FOR_STOP =

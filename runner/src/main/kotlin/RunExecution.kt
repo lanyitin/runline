@@ -141,7 +141,7 @@ internal class RunExecution(
     publish(RunStatus.RUNNING)
     val timer = request.timeout?.let(::startTimeout)
     try {
-      val output = body.apply(input(workspace).also(BoundaryTypes::requireJdkOnly))
+      val output = body.apply(input(workspace))
       BoundaryTypes.requireJdkOnly(output)
       return endOf(output)
     } finally {
@@ -150,13 +150,21 @@ internal class RunExecution(
   }
 
   private fun input(workspace: RunWorkspace): Map<String, Any?> =
-      java.util.HashMap<String, Any?>().apply {
-        put("parameters", java.util.LinkedHashMap(request.parameters))
-        put("sharedDir", workspace.sharedDir.toString())
-        put("runDir", workspace.runDir.toString())
-        put("maxBytesPerScope", workspace.maxBytesPerScope)
-        request.recording?.let { put("recordingMaxEvents", it.maxEvents) }
-      }
+      java.util
+          .HashMap<String, Any?>()
+          .apply {
+            put("parameters", java.util.LinkedHashMap(request.parameters))
+            put("sharedDir", workspace.sharedDir.toString())
+            put("runDir", workspace.runDir.toString())
+            put("maxBytesPerScope", workspace.maxBytesPerScope)
+            request.recording?.let { put("recordingMaxEvents", it.maxEvents) }
+            request.resources?.let { put("resourceTypes", java.util.LinkedHashMap(it.provided)) }
+          }
+          .also(BoundaryTypes::requireJdkOnly)
+          // The one object of the host's own making that enters the run: the call to the host's
+          // side of the accessors, seen by the run only as a JDK Function. The host holds nothing
+          // of the run, and what crosses the call is checked on every call.
+          .also { input -> request.resources?.let { input["resourceCalls"] = HostCall(it) } }
 
   /**
    * After [timeout] asks the run to stop; if it still has not ended [unfinishedGrace] later, marks

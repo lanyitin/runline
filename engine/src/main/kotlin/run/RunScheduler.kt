@@ -244,6 +244,7 @@ class RunScheduler(
                   plan.className,
                   plan.parameters,
                   config.runTimeout,
+                  resources = gate.accessors(plan.id, recorder::note),
               ),
               recorder,
           )

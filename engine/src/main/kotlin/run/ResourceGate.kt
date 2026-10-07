@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.runner.ResourceHost
 import java.util.UUID
 
 /**
@@ -47,6 +48,13 @@ interface ResourceGate {
    * wait, and may be called from any thread. A gate that never needs to say so ignores it.
    */
   fun attach(wake: () -> Unit) = Unit
+
+  /**
+   * The accessors prepared for [runId] when it was granted what it declared (ADR-019), or null when
+   * it holds no typed resource. [log] receives lines for the run's own log. Called once, when the
+   * run is started.
+   */
+  fun accessors(runId: UUID, log: (String) -> Unit): ResourceHost? = null
 }
 
 /**

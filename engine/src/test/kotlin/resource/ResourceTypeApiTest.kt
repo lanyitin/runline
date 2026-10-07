@@ -58,9 +58,7 @@ class ResourceTypeApiTest : ResourceApiSupport() {
 
         val unknown = define("a", 1, """"type":"http-endpoint"""")
         val notYet =
-            listOf("file", "jdbc-pool", "openai-compatible").map {
-              define("b-$it", 1, """"type":"$it"""")
-            }
+            listOf("jdbc-pool", "openai-compatible").map { define("b-$it", 1, """"type":"$it"""") }
 
         assertEquals(HttpStatusCode.UnprocessableEntity, unknown.status)
         assertEquals("invalid_resource", unknown.json().text("error"))

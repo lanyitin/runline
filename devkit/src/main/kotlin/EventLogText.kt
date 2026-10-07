@@ -26,6 +26,7 @@ internal object EventLogText {
             IoCategory.FILE -> "${e.scope} ${e.access} ${e.target}"
             IoCategory.NETWORK -> "${e.access} ${e.target}:${e.port}"
             IoCategory.PROCESS -> "${e.access} ${e.target}"
+            IoCategory.RESOURCE -> "${e.resourceType} ${e.access} ${e.target}"
           }
       appendLine("#${e.sequence} ${e.category} $place${if (e.rejected) " 被拒絕" else ""}")
     }
@@ -36,6 +37,7 @@ internal object EventLogText {
       val place =
           when (s.category) {
             IoCategory.FILE -> "${s.scope} ${s.access}"
+            IoCategory.RESOURCE -> "${s.resourceType} ${s.access} ${s.target}"
             else -> "${s.access} ${s.target}"
           }
       appendLine(

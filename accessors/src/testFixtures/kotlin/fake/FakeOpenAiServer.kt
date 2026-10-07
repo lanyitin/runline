@@ -68,6 +68,9 @@ class FakeOpenAiServer(
   /** How long the default routes keep a client waiting before they answer. */
   @Volatile var responseDelayMillis: Long = 0
 
+  /** How long the default streaming route waits before each chunk. */
+  @Volatile var chunkDelayMillis: Long = 0
+
   /**
    * Answers a request itself; returns false to leave it to the default routes. Runs on the
    * connection's own thread, so it may take as long as it likes (and notice the client leaving).
@@ -208,6 +211,8 @@ class FakeOpenAiServer(
         } else null
     val model = body?.get("model")?.jsonPrimitive?.content ?: "fake-model"
     when {
+      request.method == "POST" && sub == "/chat/completions" && body?.isStreamed() == true ->
+          streamChat(model, body, response)
       request.method == "POST" && sub == "/chat/completions" ->
           response.json(
               200,
@@ -245,6 +250,33 @@ class FakeOpenAiServer(
     }
   }
 
+  private fun JsonObject.isStreamed() = this["stream"]?.jsonPrimitive?.content == "true"
+
+  /**
+   * What a service answers to a streamed chat completion: a chunked `text/event-stream` of
+   * `chat.completion.chunk` events (one per word, [chunkDelayMillis] apart), a last chunk with the
+   * usage when the request asked for it, and `[DONE]`.
+   */
+  private fun streamChat(model: String, body: JsonObject, response: FakeResponse) {
+    response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+    fun chunk(delta: String, finish: String? = null) =
+        """{"id":"chatcmpl-fake","object":"chat.completion.chunk","created":1,"model":"$model","choices":[{"index":0,"delta":$delta,"finish_reason":${finish?.let { "\"$it\"" } ?: "null"}}]}"""
+    response.event(chunk("""{"role":"assistant","content":""}"""))
+    for (word in STREAM_WORDS) {
+      if (chunkDelayMillis > 0) response.pause(chunkDelayMillis)
+      response.event(chunk("""{"content":"$word"}"""))
+    }
+    response.event(chunk("{}", "stop"))
+    val usage = body["stream_options"] as? JsonObject
+    if (usage?.get("include_usage")?.jsonPrimitive?.content == "true") {
+      response.event(
+          """{"id":"chatcmpl-fake","object":"chat.completion.chunk","created":1,"model":"$model","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":${STREAM_WORDS.size},"total_tokens":${3 + STREAM_WORDS.size}}}"""
+      )
+    }
+    response.event("[DONE]")
+    response.endChunked()
+  }
+
   private fun modelObject(id: String) =
       """{"id":"$id","object":"model","created":1,"owned_by":"fake"}"""
 
@@ -272,6 +304,7 @@ class FakeOpenAiServer(
 
   private companion object {
     val MODELS = listOf("fake-model", "fake-embedding")
+    val STREAM_WORDS = listOf("Hello", " from", " the", " fake")
   }
 }
 
@@ -381,6 +414,34 @@ internal constructor(private val client: Socket, private val server: FakeOpenAiS
     send(head.toString().toByteArray(StandardCharsets.ISO_8859_1))
   }
 
+  /** Starts an answer in chunked transfer encoding, as a streaming service does. */
+  fun beginChunked(status: Int, headers: Map<String, String> = emptyMap()) {
+    val head = StringBuilder("HTTP/1.1 $status ${reason(status)}\r\n")
+    for ((name, value) in headers) head.append(name).append(": ").append(value).append("\r\n")
+    head.append("Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+    send(head.toString().toByteArray(StandardCharsets.ISO_8859_1))
+  }
+
+  /** One chunk of a chunked answer; the client can read it as soon as this returns. */
+  fun chunk(bytes: ByteArray) {
+    send(
+        Integer.toHexString(bytes.size).toByteArray(StandardCharsets.ISO_8859_1) +
+            CRLF +
+            bytes +
+            CRLF
+    )
+  }
+
+  /** One server-sent event with [data], as one chunk. */
+  fun event(data: String) = chunk("data: $data\n\n".encodeToByteArray())
+
+  /** The last chunk of a chunked answer: the answer is complete. */
+  fun endChunked() {
+    uncount()
+    send("0\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+    finish()
+  }
+
   fun write(bytes: ByteArray) = send(bytes)
 
   fun write(text: String) = send(text.encodeToByteArray())
@@ -406,6 +467,10 @@ internal constructor(private val client: Socket, private val server: FakeOpenAiS
     } catch (e: IOException) {
       // already closed
     }
+  }
+
+  private companion object {
+    val CRLF = "\r\n".toByteArray(StandardCharsets.ISO_8859_1)
   }
 
   private fun send(bytes: ByteArray) {

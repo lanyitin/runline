@@ -88,6 +88,73 @@ abstract class OpenAiServerContract {
     assertTrue(usage["completion_tokens"]!!.jsonPrimitive.content.toLong() >= 0)
   }
 
+  /** The lines of the answer to a streamed request, read as they come. */
+  private fun streamed(path: String, body: String): Pair<HttpResponse<*>, List<String>> {
+    val builder =
+        HttpRequest.newBuilder(URI.create(target().baseUrl + path))
+            .timeout(Duration.ofMinutes(5))
+            .header("Content-Type", "application/json")
+    target().apiKey?.let { builder.header("Authorization", "Bearer $it") }
+    val response =
+        http.send(
+            builder.POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+            HttpResponse.BodyHandlers.ofLines(),
+        )
+    return response to response.body().toList()
+  }
+
+  @Test
+  fun `a streamed chat completion is a stream of data events of chunk objects that ends with DONE`() {
+    val (response, lines) =
+        streamed(
+            "/chat/completions",
+            """{"model":"${target().model}","messages":[{"role":"user","content":"Say hi"}],"max_tokens":8,"stream":true}""",
+        )
+
+    assertEquals(200, response.statusCode(), lines.joinToString("\n"))
+    assertTrue(
+        response.headers().firstValue("content-type").orElse("").startsWith("text/event-stream")
+    )
+    val events = lines.filter { it.startsWith("data:") }.map { it.removePrefix("data:").trim() }
+    assertTrue(events.size >= 2, "chunks and the end: $lines")
+    assertEquals("[DONE]", events.last())
+    for (event in events.dropLast(1)) {
+      assertEquals("chat.completion.chunk", json(event)["object"]!!.jsonPrimitive.content)
+    }
+    assertTrue(
+        events.dropLast(1).any {
+          json(it)["choices"]!!.jsonArray.firstOrNull()?.jsonObject?.get("delta") != null
+        },
+        "some chunk carries a delta: $events",
+    )
+  }
+
+  private fun json(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
+
+  @Test
+  fun `a streamed chat completion reports its usage in a last chunk when it is asked to`() {
+    val (_, lines) =
+        streamed(
+            "/chat/completions",
+            """{"model":"${target().model}","messages":[{"role":"user","content":"Say hi"}],"max_tokens":8,"stream":true,"stream_options":{"include_usage":true}}""",
+        )
+
+    val events =
+        lines
+            .filter { it.startsWith("data:") }
+            .map { it.removePrefix("data:").trim() }
+            .filter { it != "[DONE]" }
+            .map(::json)
+    val usage = events.last()["usage"]?.jsonObject
+    assertTrue(usage != null, "the last chunk carries the usage: $lines")
+    assertTrue(usage["total_tokens"]!!.jsonPrimitive.content.toLong() >= 0)
+    assertTrue(
+        events.dropLast(1).all {
+          it["usage"] == null || it["usage"] is kotlinx.serialization.json.JsonNull
+        }
+    )
+  }
+
   @Test
   fun `the list of models is a list of model objects, each one retrievable`() {
     val list = send("GET", "/models")

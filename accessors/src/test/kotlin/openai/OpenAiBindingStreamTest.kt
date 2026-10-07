@@ -349,4 +349,60 @@ class OpenAiBindingStreamTest {
       pulling.shutdownNow()
     }
   }
+
+  @Test
+  fun `a stream is never left open by an abort that races its opening, and no share leaks`() {
+    val pool = Executors.newCachedThreadPool()
+    try {
+      repeat(40) {
+        val b = binding()
+        val opening = pool.submit<Map<String, Any?>?> { runCatching { open(b) }.getOrNull() }
+        Thread.sleep((it % 4).toLong())
+        b.abort()
+        val opened = opening.get(5, TimeUnit.SECONDS)
+        await("the service to see no stream open") { server.inFlight == 0 }
+        if (opened != null) {
+          assertEquals(ResourceFailure.CANCELLED, failure { next(b, opened) }.failure)
+        }
+      }
+    } finally {
+      pool.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `shares are given back exactly once, however streams and calls end`() {
+    val b = binding()
+    server.script = { request, response ->
+      if (request.body.contains("\"status\"")) response.json(500, "{}")
+      else {
+        response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+        response.event("""{"n":1}""")
+        response.event("[DONE]")
+        response.endChunked()
+      }
+      true
+    }
+    repeat(3) {
+      failure { open(b, body = """{"status":1}""") }
+      val ended = open(b)
+      while (next(b, ended) != null) {
+        // to the end
+      }
+      close(b, ended)
+      close(b, ended)
+      val closed = open(b)
+      close(b, closed)
+      close(b, closed)
+    }
+    b.abort()
+    val c = binding()
+    endless()
+    val first = open(c)
+
+    val second = failure { callWithQuotaWait(c, 200) }
+
+    assertEquals(ResourceFailure.QUOTA_WAIT_TIMEOUT, second.failure)
+    close(c, first)
+  }
 }

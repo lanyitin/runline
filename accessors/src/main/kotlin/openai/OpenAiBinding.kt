@@ -398,16 +398,19 @@ class OpenAiBinding(
     val wire = Wire(call, response.body(), sentAt)
     val id = streamIds.incrementAndGet()
     val events = ServerSentEvents { wire.read(it) }
+    val headers = answerHeaders(response.headers().map())
     val opened = OpenStream(call, report, endpoint, events)
     call.owner = opened
     streams[id] = opened
     call.keptOpen = true
     report.handedOver = true
-    return mapOf(
-        "stream" to id,
-        "status" to status,
-        "headers" to answerHeaders(response.headers().map()),
-    )
+    // An abort that came while the stream was being made did not find it: it is not given out.
+    val stopped = if (aborted) ResourceFailure.CANCELLED else call.stoppedFor
+    if (stopped != null) {
+      opened.end(stopped)
+      throw ResourceOperationFailure(stopped)
+    }
+    return mapOf("stream" to id, "status" to status, "headers" to headers)
   }
 
   private fun awaitHeaders(

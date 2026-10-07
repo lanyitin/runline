@@ -65,6 +65,9 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
             .prepareStatement(
                 "UPDATE shared_resource SET capacity = COALESCE(?, capacity), " +
                     "enabled = COALESCE(?, enabled), settings = COALESCE(?::jsonb, settings), " +
+                    "check_ok = CASE WHEN $CHANGED THEN NULL ELSE check_ok END, " +
+                    "check_failure = CASE WHEN $CHANGED THEN NULL ELSE check_failure END, " +
+                    "checked_at = CASE WHEN $CHANGED THEN NULL ELSE checked_at END, " +
                     "updated_by = ?, updated_at = ? " +
                     "WHERE name = ? RETURNING $COLUMNS"
             )
@@ -75,10 +78,35 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
                   3,
                   settings?.let { s -> Json.encodeToString(JsonObject.serializer(), s) },
               )
-              it.setString(4, by)
-              it.setObject(5, at.atOffset(ZoneOffset.UTC))
-              it.setString(6, name)
+              val encoded = settings?.let { s -> Json.encodeToString(JsonObject.serializer(), s) }
+              for (index in 4..9) it.setString(index, encoded)
+              it.setString(10, by)
+              it.setObject(11, at.atOffset(ZoneOffset.UTC))
+              it.setString(12, name)
               it.executeQuery().use { rows -> rows.all().singleOrNull() }
+            }
+      }
+
+  override fun recordCheck(
+      name: String,
+      result: CheckResult,
+      settings: JsonObject,
+      secretAlias: String?,
+  ): Boolean =
+      dataSource.connection.use { connection ->
+        connection
+            .prepareStatement(
+                "UPDATE shared_resource SET check_ok = ?, check_failure = ?, checked_at = ? " +
+                    "WHERE name = ? AND settings = ?::jsonb AND secret_alias IS NOT DISTINCT FROM ?"
+            )
+            .use {
+              it.setBoolean(1, result.ok)
+              it.setString(2, result.failure?.wire)
+              it.setObject(3, result.checkedAt.atOffset(ZoneOffset.UTC))
+              it.setString(4, name)
+              it.setString(5, Json.encodeToString(JsonObject.serializer(), settings))
+              it.setString(6, secretAlias)
+              it.executeUpdate() == 1
             }
       }
 
@@ -104,6 +132,14 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
               type = checkNotNull(ResourceType.fromWireName(getString("type"))),
               settings = Json.decodeFromString(JsonObject.serializer(), getString("settings")),
               secretAlias = getString("secret_alias"),
+              lastCheck =
+                  getObject("checked_at", OffsetDateTime::class.java)?.let {
+                    CheckResult(
+                        getBoolean("check_ok"),
+                        getString("check_failure")?.let(CheckFailure::fromWire),
+                        it.toInstant(),
+                    )
+                  },
           )
       )
     }
@@ -112,7 +148,9 @@ class PostgresResourceStore(private val dataSource: DataSource) : ResourceStore 
   private companion object {
     const val COLUMNS =
         "name, capacity, enabled, created_by, created_at, updated_by, updated_at, type, " +
-            "settings::text AS settings, secret_alias"
+            "settings::text AS settings, secret_alias, check_ok, check_failure, checked_at"
+    /** The settings given differ from the stored ones: what a check was made of no longer holds. */
+    const val CHANGED = "(?::jsonb IS NOT NULL AND ?::jsonb IS DISTINCT FROM settings)"
     const val SELECT = "SELECT $COLUMNS FROM shared_resource"
   }
 }

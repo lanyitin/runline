@@ -38,6 +38,12 @@ data class InvalidResourceResponse(
     val problem: String,
 )
 
+/** What a check says: [failure] only when it did not pass; no reason, no path, no address. */
+@Serializable
+data class CheckDoc(val ok: Boolean, val failure: String? = null, val checkedAt: String)
+
+fun CheckResult.toDoc() = CheckDoc(ok, failure?.wire, checkedAt.toString())
+
 @Serializable
 data class HolderDoc(
     val runId: String,
@@ -83,6 +89,8 @@ data class ResourceResponse(
     val enabled: Boolean,
     val settings: JsonObject,
     val secretAlias: String?,
+    /** The last check of the entity; null when never checked or when the settings changed since. */
+    val lastCheck: CheckDoc?,
     val createdBy: String,
     val createdAt: String,
     val updatedBy: String,
@@ -141,6 +149,7 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
       enabled = resource.enabled,
       settings = resource.settings,
       secretAlias = resource.secretAlias,
+      lastCheck = resource.lastCheck?.toDoc(),
       createdBy = resource.createdBy,
       createdAt = resource.createdAt.toString(),
       updatedBy = resource.updatedBy,

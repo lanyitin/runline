@@ -169,4 +169,66 @@ class PostgresResourceStoreTest {
     assertEquals(ResourceType.FILE, store.find("lemonade")!!.type)
     assertEquals(5, store.find("lemonade")!!.capacity)
   }
+
+  // ---- the last check (WI-43) ----
+
+  private val path = JsonObject(mapOf("path" to JsonPrimitive("a.txt")))
+  private val passed = CheckResult(true, null, t0.plusSeconds(5))
+
+  private fun file(name: String = "log") =
+      resource(name).copy(type = ResourceType.FILE, settings = path)
+
+  @Test
+  fun `a resource that was never checked has no last check`() {
+    store.insert(file())
+
+    assertNull(store.find("log")!!.lastCheck)
+  }
+
+  @Test
+  fun `the last check is kept with its result, its failure and its time`() {
+    store.insert(file())
+
+    assertTrue(store.recordCheck("log", passed, path, null))
+    assertEquals(passed, store.find("log")!!.lastCheck)
+    val failed = CheckResult(false, CheckFailure.TIMEOUT, t0.plusSeconds(9))
+    assertTrue(store.recordCheck("log", failed, path, null))
+    assertEquals(failed, store.find("log")!!.lastCheck)
+    assertEquals(failed, store.list().single().lastCheck)
+  }
+
+  @Test
+  fun `a change of settings clears the last check, any other change leaves it`() {
+    store.insert(file())
+    store.recordCheck("log", passed, path, null)
+
+    store.update("log", 3, false, "ops", t0.plusSeconds(6))
+    assertEquals(passed, store.find("log")!!.lastCheck, "capacity and enabled do not touch it")
+
+    val other = JsonObject(mapOf("path" to JsonPrimitive("b.txt")))
+    store.update("log", null, null, "ops", t0.plusSeconds(7), other)
+    assertNull(store.find("log")!!.lastCheck)
+    assertEquals(other, store.find("log")!!.settings)
+  }
+
+  @Test
+  fun `settings given again unchanged do not clear the last check`() {
+    store.insert(file())
+    store.recordCheck("log", passed, path, null)
+
+    store.update("log", null, null, "ops", t0.plusSeconds(7), path)
+
+    assertEquals(passed, store.find("log")!!.lastCheck)
+  }
+
+  @Test
+  fun `a check of settings the resource no longer has is not kept`() {
+    store.insert(file())
+    val old = JsonObject(mapOf("path" to JsonPrimitive("old.txt")))
+
+    assertFalse(store.recordCheck("log", passed, old, null))
+    assertFalse(store.recordCheck("missing", passed, path, null))
+
+    assertNull(store.find("log")!!.lastCheck)
+  }
 }

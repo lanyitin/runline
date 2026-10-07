@@ -259,7 +259,9 @@ class ResourceAdminTest {
       ResourceAdmin(
           store,
           Clock.fixed(now, ZoneOffset.UTC),
-          ResourceBehaviors.forEngine(ResourceSettings(resourceRoot)),
+          ResourceBehaviors.forEngine(
+              ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10))
+          ),
       ) {
         changes.incrementAndGet()
       }

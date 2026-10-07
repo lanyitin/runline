@@ -188,6 +188,15 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceDeclarationStore>(),
       )
     }
+    provide<ResourceChecker> {
+      ResourceChecker(
+          resolve<ResourceStore>(),
+          resolve<ResourceBehaviors>(),
+          resolve<Clock>(),
+          resolve<EngineConfig>().resources.checkTimeout,
+          resolve<ResourceTelemetry>(),
+      )
+    }
     provide<ResourceWarnings> { ResourceWarnings(resolve<ResourceAvailability>()) }
     provide<RunScheduler> {
       val runs = resolve<EngineConfig>().runs

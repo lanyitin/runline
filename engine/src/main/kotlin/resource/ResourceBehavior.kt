@@ -18,6 +18,12 @@ interface ResourceBehavior {
    * type that has no accessor. Fails with [ResourceUnavailable] when the entity cannot be used.
    */
   fun bind(resource: SharedResource): ResourceBinding?
+
+  /**
+   * Looks at the real entity and says what stops it from being used, or null when nothing does. May
+   * block (that is what the limit on a check is for); called on a thread of the checker's.
+   */
+  fun check(resource: SharedResource): CheckFailure?
 }
 
 /** The entity behind a resource cannot be used now; [resource] is named, nothing more. */
@@ -34,6 +40,8 @@ internal object CounterBehavior : ResourceBehavior {
       }
 
   override fun bind(resource: SharedResource): ResourceBinding? = null
+
+  override fun check(resource: SharedResource): CheckFailure? = null
 }
 
 /** The behavior of each type that can be defined; a type without one is not implemented yet. */

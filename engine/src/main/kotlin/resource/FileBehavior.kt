@@ -2,6 +2,8 @@ package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.FileBinding
 import dev.lawlan.runline.accessors.FileEntity
+import dev.lawlan.runline.accessors.FileProbe
+import dev.lawlan.runline.accessors.FileProblem
 import dev.lawlan.runline.accessors.ResourceBinding
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
@@ -27,6 +29,15 @@ internal class FileBehavior(private val root: Path) : ResourceBehavior {
     }
     return FileBinding(FileEntity(root, checkNotNull(pathOf(resource.settings))))
   }
+
+  override fun check(resource: SharedResource): CheckFailure? =
+      when (FileProbe.check(root, checkNotNull(pathOf(resource.settings)))) {
+        null -> null
+        FileProblem.ROOT_UNAVAILABLE -> CheckFailure.ROOT_UNAVAILABLE
+        FileProblem.PARENT_NOT_CREATABLE -> CheckFailure.PARENT_NOT_CREATABLE
+        FileProblem.NOT_READABLE_WRITABLE -> CheckFailure.NOT_READABLE_WRITABLE
+        FileProblem.PATH_OUTSIDE_ROOT -> CheckFailure.PATH_OUTSIDE_ROOT
+      }
 
   /** The path of [settings] when they are exactly `{"path": "<text>"}` with some text. */
   private fun pathOf(settings: JsonObject?): String? {

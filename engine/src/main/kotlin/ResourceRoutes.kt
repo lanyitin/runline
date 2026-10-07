@@ -31,6 +31,9 @@ import kotlinx.coroutines.withContext
  *   are refused. 200 with the resource; 404; 422 `invalid_resource`; 400.
  * - `DELETE /api/v1/resources/{name}`: 204; 404; 409 `resource_in_use` when runs hold it or wait
  *   for it. `?preview=true` answers 200 with what would be touched and changes nothing.
+ * - `POST /api/v1/resources/{name}/check`: looks at the real entity (a file, later a database or a
+ *   service) without taking capacity. 200 `{ok, failure?, checkedAt}`, failure being a category;
+ *   404 `resource_not_found`. The answer is kept as the resource's `lastCheck`.
  * - `POST /api/v1/resources/{name}/holders/{runId}/release`: forces a holder to let go of this
  *   resource. 200; 404 `resource_not_found` or `not_a_holder`. The run itself is not stopped.
  */
@@ -38,6 +41,7 @@ fun Application.configureResourceRoutes() {
   val admin: ResourceAdmin by dependencies
   val catalog: ResourceCatalog by dependencies
   val removal: ResourceRemoval by dependencies
+  val checker: ResourceChecker by dependencies
   val clock: Clock by dependencies
 
   routing {
@@ -169,6 +173,14 @@ fun Application.configureResourceRoutes() {
                           outcome.waiters,
                       ),
                   )
+            }
+          }
+
+          post("/check") {
+            val name = call.parameters["name"].orEmpty()
+            when (val outcome = withContext(Dispatchers.IO) { checker.check(name, call.caller) }) {
+              CheckOutcome.NotFound -> call.respondResourceNotFound()
+              is CheckOutcome.Done -> call.respond(outcome.result.toDoc())
             }
           }
 

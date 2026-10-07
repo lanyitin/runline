@@ -207,9 +207,9 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源由管理員定義，pipeline 在 metadata 中宣告需要的資源名稱，另可宣告期望的型別；規則見 [ADR-007](adr/ADR-007-shared-resources.md) 與 [ADR-019](adr/ADR-019-typed-shared-resources.md)。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
-資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別只有 `counter`（只有名稱與容量，也就是資源原本的語意）；其餘三種在各自的工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。檢查與機密相關的端點由後續工作項寫入本文。
+資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。目前可建立的型別是 `counter`（只有名稱與容量，也就是資源原本的語意）與 `file`（Engine 主機上資源根目錄之下的一個檔案）；其餘兩種在各自的工作項完成前建立時被拒絕（`invalid_resource`，`problem` 為 `unsupported_type`）。機密相關的端點由後續工作項寫入本文。
 
-資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，沒有時為 `null`；機密值不會出現在任何回應）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
+資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，沒有時為 `null`；機密值不會出現在任何回應）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
 `invalid_resource`（422）的本文多一個 `problem`，說明原因類別：
 
@@ -220,8 +220,10 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `nothing_to_change` | 修改沒有要改的欄位 |
 | `unknown_type` | 型別不在封閉集合內 |
 | `unsupported_type` | 型別在集合內，但尚未實作，還不能建立 |
-| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定） |
-| `invalid_secret_alias` | 這個型別沒有機密別名（`counter` 沒有），或別名不合規 |
+| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串） |
+| `path_outside_root` | `file` 的路徑不在資源根目錄內：絕對路徑、`..` 跳出根目錄，或路徑上的符號連結解析後跳出根目錄 |
+| `path_unusable` | `file` 的路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫 |
+| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file` 沒有），或別名不合規 |
 | `immutable_name` | 修改嘗試帶了 `name`；名稱不可修改 |
 | `immutable_type` | 修改嘗試帶了 `type`；型別不可修改，值相同也一樣被拒絕 |
 
@@ -229,7 +231,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、`counter` 帶有設定或機密別名）。
+定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `GET /api/v1/resources`
 
@@ -247,7 +249,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-修改容量或啟用狀態。本文 `{"capacity": 2, "enabled": false}`，至少一項。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、`counter` 帶有設定或機密別名）。
+修改容量、啟用狀態或型別專屬的設定。本文 `{"capacity": 2, "enabled": false, "settings": {...}}`，至少一項；`settings` 整份取代（`file` 為 `{"path": "..."}`，規則同建立），修改的設定使最近一次檢查結果（`lastCheck`）清除，只改容量或啟用狀態不影響它。降低容量不會從持有者手上收回資源；停用會讓正在等待它的 run 失敗，不影響持有者；修改設定不影響已持有者：持有者的存取端綁定取得當下的設定，之後取得的 run 才用新設定。本文帶 `name` 或 `type`（無論值為何）即為嘗試修改不可修改的欄位，被拒絕。200 回傳資源；400 `bad_request`；404 `resource_not_found`；422 `invalid_resource`（容量小於 1、沒有要修改的欄位、嘗試修改名稱或型別、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `DELETE /api/v1/resources/{name}`
 
@@ -265,11 +267,19 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | 404 `resource_not_found` | 沒有這個資源（預覽也一樣） |
 | 409 `resource_in_use` | 有持有者或等待者，什麼都沒改變；本文多 `holders` 與 `waiters`（數量）。需等待結束、先停用資源讓等待者失敗，或強制釋放持有者 |
 
+### `POST /api/v1/resources/{name}/check`
+
+認證：Bearer（admin）
+
+主動檢查資源的實體是否可用，不取得容量，不影響進行中的 run、持有者與等待者；停用的資源也可檢查。檢查內容由型別決定：`counter` 沒有實體，一律通過；`file` 驗證根目錄可用、路徑沒有跳出根目錄、檔案所在的目錄存在或可建立、既有的檔案可讀寫（會真的開啟它，不建立也不截斷任何東西）。檢查有整體時間上限（`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，預設 10 秒），逾時是一種失敗類別。同一資源同時被檢查時共用同一次檢查與同一個答案；逾時而仍卡住的檢查未結束前，再次檢查立即回 `timeout`，不會再開新的檢查。
+
+200 回傳 `{ok, failure, checkedAt}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，同上）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
+
 ### `POST /api/v1/resources/{name}/holders/{runId}/release`
 
 認證：Bearer（admin）
 
-強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
+強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
 
 ## 白名單（管理員）
 

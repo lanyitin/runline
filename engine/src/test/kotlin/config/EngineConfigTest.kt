@@ -297,6 +297,26 @@ class EngineConfigTest {
   }
 
   @Test
+  fun `a check of a resource has a default limit and the limit is configurable`() {
+    assertEquals(java.time.Duration.ofSeconds(10), parse().resources.checkTimeout)
+    assertEquals(
+        java.time.Duration.ofSeconds(3),
+        parse("resources.checkTimeoutSeconds" to "3").resources.checkTimeout,
+    )
+  }
+
+  @Test
+  fun `the limit of a check must be a whole number of seconds, at least one`() {
+    for (value in listOf("0", "-1", "soon")) {
+      val e =
+          assertFailsWith<ConfigurationException>(value) {
+            parse("resources.checkTimeoutSeconds" to value)
+          }
+      assertTrue(e.message!!.contains("resources.checkTimeoutSeconds"), e.message)
+    }
+  }
+
+  @Test
   fun `the wait for shared resources has a default limit`() {
     assertEquals(java.time.Duration.ofHours(1), parse().runs.resourceWaitTimeout)
   }

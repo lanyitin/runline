@@ -125,5 +125,8 @@ retention:
 # file lives under; it must be persistent storage and must not be, contain or lie inside the shared
 # or the run directory. Backup and capacity of it are the deployment's. A root that is missing or
 # not usable does not stop the Engine; the checks and the runs of the resources that need it fail.
+# RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS (optional, default 10): the longest a check of a resource's
+# entity (POST /api/v1/resources/{name}/check) may take; after it the check fails as a timeout.
 resources:
   root: "$RUNLINE_RESOURCE_ROOT:"
+  checkTimeoutSeconds: "$RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS:"

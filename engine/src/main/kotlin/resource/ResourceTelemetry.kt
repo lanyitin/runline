@@ -40,6 +40,23 @@ class ResourceTelemetry(openTelemetry: OpenTelemetry) {
           .build()
   private val forced = meter.counterBuilder("runline.resources.force_released").build()
 
+  private val checks =
+      meter
+          .counterBuilder("runline.resources.checks")
+          .setDescription("Checks of a resource's entity (labelled by name and type only)")
+          .build()
+  private val checkFailures =
+      meter
+          .counterBuilder("runline.resources.check.failures")
+          .setDescription("Checks of a resource's entity that did not pass")
+          .build()
+
+  /** An administrator's check of [resource] ended; the category of a failure is in the log. */
+  fun checked(resource: ResourceLabel, ok: Boolean) {
+    checks.add(1, resource.attributes())
+    if (!ok) checkFailures.add(1, resource.attributes())
+  }
+
   fun waited(resource: ResourceLabel, outcome: WaitOutcome, seconds: Double) {
     wait.record(seconds, resource.attributes(OUTCOME, outcome.name))
   }

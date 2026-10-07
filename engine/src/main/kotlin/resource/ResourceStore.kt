@@ -23,6 +23,8 @@ data class SharedResource(
     val settings: JsonObject = JsonObject(emptyMap()),
     /** The keystore alias of the secret, never the secret itself. */
     val secretAlias: String? = null,
+    /** The last check of the entity; null when never checked or when the settings changed since. */
+    val lastCheck: CheckResult? = null,
 )
 
 /** Persistence of resource definitions. */
@@ -51,6 +53,17 @@ interface ResourceStore {
       at: Instant,
       settings: JsonObject? = null,
   ): SharedResource?
+
+  /**
+   * Keeps [result] as the last check, but only if the resource still has the [settings] and
+   * [secretAlias] that were checked; false when it has other ones now or is gone.
+   */
+  fun recordCheck(
+      name: String,
+      result: CheckResult,
+      settings: JsonObject,
+      secretAlias: String?,
+  ): Boolean
 
   /** Removes the definition; false when there is no resource of that name. */
   fun delete(name: String): Boolean

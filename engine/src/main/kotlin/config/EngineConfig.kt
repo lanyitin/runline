@@ -79,7 +79,11 @@ data class RunSettings(
 )
 
 /** Where the files of `file` shared resources live (ADR-019); every such path is inside it. */
-data class ResourceSettings(val root: Path)
+data class ResourceSettings(
+    val root: Path,
+    /** The longest a check of a resource's entity may take; then it fails as a timeout. */
+    val checkTimeout: Duration,
+)
 
 /** How long run, log and trigger records are kept, and how the clean-up runs (WI-20). */
 data class RetentionSettings(
@@ -149,6 +153,7 @@ data class EngineConfig(
     /** How long a shutdown waits for requests in flight and for runs it asked to stop. */
     const val DEFAULT_SHUTDOWN_GRACE_SECONDS = 30L
     private const val DEFAULT_RESOURCE_WAIT_SECONDS = 3600L
+    private const val DEFAULT_CHECK_TIMEOUT_SECONDS = 10L
 
     /** Parses [config]; reports all problems at once, without echoing any value. */
     fun from(config: ApplicationConfig): EngineConfig {
@@ -260,6 +265,11 @@ data class EngineConfig(
                   .toInt(),
           )
       val resourceRoot = required("resources.root")
+      val checkTimeout =
+          Duration.ofSeconds(
+              optionalNumber("resources.checkTimeoutSeconds", min = 1)
+                  ?: DEFAULT_CHECK_TIMEOUT_SECONDS
+          )
       val runtimeDir = required("runs.runtimeDir")
       val runs =
           RunSettings(
@@ -290,7 +300,7 @@ data class EngineConfig(
           runs,
           retention,
           TelemetryConfig(text("telemetry.serviceName") ?: DEFAULT_SERVICE_NAME),
-          ResourceSettings(Path.of(resourceRoot)),
+          ResourceSettings(Path.of(resourceRoot), checkTimeout),
       )
     }
 

@@ -66,7 +66,8 @@ class RunHarness(
   val resourceAvailability = ResourceAvailability(resourceStore)
   /** Where the files of `file` resources live; a directory of its own, apart from the others. */
   val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
-  val behaviors = ResourceBehaviors.forEngine(ResourceSettings(resourceRoot))
+  val behaviors =
+      ResourceBehaviors.forEngine(ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10)))
   val resourceAdmin =
       ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }
   val workspaceEvents = CopyOnWriteArrayList<WorkspaceEvent>()

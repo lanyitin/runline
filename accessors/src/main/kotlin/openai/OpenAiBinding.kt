@@ -127,7 +127,9 @@ class OpenAiBinding(
         end(null)
         return null
       }
-      return data
+      // A service that echoes the key does not give it to the pipeline through a stream either.
+      val key = (credential as? OpenAiCredential.Key)?.value
+      return if (key != null) data.replace(key, "***") else data
     }
 
     /** The stream is over, whichever way: the connection goes, the share is given back. */

@@ -496,4 +496,37 @@ class OpenAiBindingStreamTest {
     assertEquals("org-1", seen.header("openai-organization"))
     assertEquals("blue", seen.header("x-team"))
   }
+
+  @Test
+  fun `a key that the service echoes in a streamed event or in the headers never reaches the pipeline`() {
+    val key = "sk-echo-0123456789abcdef"
+    server.script = { request, response ->
+      response.beginChunked(
+          200,
+          mapOf(
+              "Content-Type" to "text/event-stream",
+              "X-Echo" to request.header("authorization")!!,
+          ),
+      )
+      response.event("""{"you":"${request.header("authorization")}"}""")
+      response.event("""{"key":"$key"}""")
+      response.endChunked()
+      true
+    }
+    val b = OpenAiBinding("lemon", settingsOf(), OpenAiCredential.Key(key)).also { bindings += it }
+
+    val opened = open(b)
+    val chunks = generateSequence { next(b, opened) }.toList()
+
+    assertEquals(2, chunks.size)
+    assertTrue(chunks.none { it.contains(key) }, chunks.toString())
+    assertEquals("""{"you":"Bearer ***"}""", chunks[0])
+    assertTrue(opened.toString().contains("***") && !opened.toString().contains(key))
+  }
+
+  private fun settingsOf(): OpenAiSettings =
+      (OpenAiSettings.parse(
+              Json.parseToJsonElement("""{"baseUrl":"${server.baseUrl}"}""").jsonObject
+          ) as SettingsResult.Valid)
+          .settings
 }

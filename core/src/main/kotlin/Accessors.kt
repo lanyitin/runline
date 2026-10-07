@@ -1,10 +1,13 @@
 package dev.lawlan.runline.core
 
+import java.time.Duration
 import java.util.function.Function
 
 /** The accessors of the typed shared resources a pipeline declared (ADR-019). */
 interface Accessors {
   fun file(name: String): FileAccessor
+
+  fun openAiCompatible(name: String): OpenAiAccessor
 }
 
 /** Controlled access to the one file behind a `file` resource; the path is never exposed. */
@@ -26,6 +29,63 @@ interface FileAccessor {
 
   fun appendBytes(bytes: ByteArray)
 }
+
+/**
+ * Controlled access to an OpenAI compatible service behind an `openai-compatible` resource. The
+ * address, the key, the headers and the path of every request are the resource's, never the
+ * pipeline's: a pipeline names an entry of the endpoint catalog and gives what that entry takes.
+ */
+interface OpenAiAccessor {
+  /**
+   * Sends one request and returns the whole answer. Fails with [ResourceAccessException] whose
+   * category says what went wrong (a refused request, a timeout, a status from the service) and
+   * whose [ResourceAccessException.status] is the HTTP status when the service answered with one.
+   * The Engine does not retry; whether to retry is the pipeline's decision.
+   */
+  fun call(request: OpenAiRequest): OpenAiResponse
+}
+
+/**
+ * One request to an entry of the endpoint catalog. [endpoint] is the entry's name
+ * (`chat.completions`, `embeddings`, `models.list`, ...); [body] is the JSON text the entry takes,
+ * if it takes one, and the resource's defaults are merged under it; [pathParameters] and [query]
+ * are what the entry lists; [timeouts] can only shorten the resource's.
+ */
+class OpenAiRequest
+@JvmOverloads
+constructor(
+    val endpoint: String,
+    val body: String? = null,
+    val pathParameters: Map<String, String> = emptyMap(),
+    val query: Map<String, String> = emptyMap(),
+    val timeouts: OpenAiTimeouts = OpenAiTimeouts(),
+)
+
+/**
+ * The limits a pipeline may ask for on one call; a limit left out is the resource's, and one that
+ * is longer than the resource's is the resource's. [total] defaults to no limit unless the resource
+ * has one.
+ */
+class OpenAiTimeouts
+@JvmOverloads
+constructor(
+    /** Establishing the connection. */
+    val connect: Duration? = null,
+    /** From sending the request to the first byte of the answer. */
+    val firstByte: Duration? = null,
+    /** Between two reads of the answer. */
+    val idle: Duration? = null,
+    /** The whole call, from sending the request to the last byte of the answer. */
+    val total: Duration? = null,
+    /** Waiting for the run's share of requests at the service. */
+    val quotaWait: Duration? = null,
+)
+
+/**
+ * A complete answer of the service; header names are lower case, and no header carries a
+ * credential.
+ */
+class OpenAiResponse(val status: Int, val headers: Map<String, List<String>>, val body: String)
 
 /** Why an accessor refused to be used or an operation on it failed. */
 enum class ResourceFailure {
@@ -51,6 +111,75 @@ enum class ResourceFailure {
 
   /** The host could not carry the operation out and says no more than that. */
   FAILED,
+
+  // The categories of `openai-compatible` (WI-46). A request the resource's rules refuse never
+  // reaches the service.
+
+  /**
+   * The endpoint exists in the catalog but the administrator did not enable it for this resource.
+   */
+  ENDPOINT_NOT_ENABLED,
+
+  /** The catalog has no such endpoint. */
+  UNKNOWN_ENDPOINT,
+
+  /** A path parameter, a query parameter or the body is not what the endpoint takes. */
+  INVALID_ARGUMENT,
+
+  /** The request sets a parameter the administrator locked. */
+  PARAMETER_LOCKED,
+
+  /** The model is not one the administrator allowed. */
+  MODEL_NOT_ALLOWED,
+
+  /** A numeric parameter is above the administrator's ceiling. */
+  VALUE_ABOVE_LIMIT,
+
+  /** The request asks for a streamed answer, which this call does not give. */
+  STREAM_NOT_SUPPORTED,
+
+  /** The request is larger than the resource allows. */
+  REQUEST_TOO_LARGE,
+
+  /** The answer is larger than the resource allows. */
+  RESPONSE_TOO_LARGE,
+
+  /** The resource names a key that the keystore cannot give. */
+  SECRET_UNAVAILABLE,
+
+  /** The service could not be reached. */
+  CONNECTION_FAILED,
+  CONNECT_TIMEOUT,
+
+  /** No answer began within the time allowed. */
+  FIRST_BYTE_TIMEOUT,
+
+  /** The answer stopped coming for longer than the time allowed. */
+  IDLE_TIMEOUT,
+
+  /** The call as a whole took longer than the limit on it. */
+  TOTAL_TIMEOUT,
+
+  /** The run's share of requests did not become free in time. */
+  QUOTA_WAIT_TIMEOUT,
+
+  /** The service refused the credentials (401, 403). */
+  DENIED,
+
+  /** The service asked to slow down (429). */
+  RATE_LIMITED,
+
+  /** The service failed (5xx). */
+  SERVER_ERROR,
+
+  /** The service found the request wrong (any other 4xx). */
+  REQUEST_REJECTED,
+
+  /** The service redirected somewhere outside the resource's address, which is never followed. */
+  REDIRECT_BLOCKED,
+
+  /** The call was stopped: the run was cancelled or ended, or the holder was released by force. */
+  CANCELLED,
 }
 
 /** Thrown by an accessor; carries the failure category and never a path or system message. */
@@ -58,7 +187,12 @@ class ResourceAccessException(
     val resource: String,
     val failure: ResourceFailure,
     val errorId: String? = null,
-) : RuntimeException("Shared resource '$resource': $failure")
+    /** The HTTP status the service answered with, for the types that talk HTTP. */
+    val status: Int? = null,
+) :
+    RuntimeException(
+        "Shared resource '$resource': $failure" + (status?.let { " (HTTP $it)" } ?: "")
+    )
 
 /**
  * What the host (Engine or development entry) lends a run for its typed resources: the names it

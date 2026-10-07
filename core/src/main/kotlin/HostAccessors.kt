@@ -11,15 +11,20 @@ internal class HostAccessors(
     private val link: ResourceLink?,
     private val recorder: IoRecorder? = null,
 ) : Accessors {
-  override fun file(name: String): FileAccessor {
+  override fun file(name: String): FileAccessor =
+      HostFile(name, linkFor(name, ResourceTypes.FILE), recorder)
+
+  override fun openAiCompatible(name: String): OpenAiAccessor =
+      HostOpenAi(name, linkFor(name, ResourceTypes.OPENAI_COMPATIBLE), recorder)
+
+  /** The host's link, once the pipeline has the right to an accessor of [type] for [name]. */
+  private fun linkFor(name: String, type: String): ResourceLink {
     if (name !in metadata.resources) refuse(name, ResourceFailure.NOT_DECLARED)
     val declared = metadata.resourceTypes[name] ?: refuse(name, ResourceFailure.NO_TYPE_DECLARED)
-    if (declared != ResourceTypes.FILE) refuse(name, ResourceFailure.TYPE_MISMATCH)
+    if (declared != type) refuse(name, ResourceFailure.TYPE_MISMATCH)
     val provided = link?.provided?.get(name)
-    if (link == null || provided != ResourceTypes.FILE) {
-      refuse(name, ResourceFailure.NOT_PROVIDED)
-    }
-    return HostFile(name, link, recorder)
+    if (link == null || provided != type) refuse(name, ResourceFailure.NOT_PROVIDED)
+    return link
   }
 
   private fun refuse(name: String, failure: ResourceFailure): Nothing =
@@ -67,19 +72,73 @@ private class HostFile(
     recorder?.record(IoCategory.RESOURCE, name, access, resourceType = ResourceTypes.FILE)
   }
 
-  private fun call(operation: String, arguments: Map<String, Any?>): Any? {
-    val request = java.util.HashMap<String, Any?>()
-    request["resource"] = name
-    request["operation"] = operation
-    request["arguments"] = java.util.HashMap(arguments)
-    val answer = link.call.apply(request)
-    if (answer["ok"] == true) return answer["value"]
-    throw ResourceAccessException(name, failureOf(answer["failure"]), answer["errorId"] as String?)
+  private fun call(operation: String, arguments: Map<String, Any?>): Any? =
+      callHost(link, name, operation, arguments)
+}
+
+/** One `openai-compatible` accessor: a request becomes one call to the host. */
+private class HostOpenAi(
+    private val name: String,
+    private val link: ResourceLink,
+    private val recorder: IoRecorder?,
+) : OpenAiAccessor {
+  override fun call(request: OpenAiRequest): OpenAiResponse {
+    // Only the name, the type and the kind of action: never an endpoint, a body or an address.
+    recorder?.record(
+        IoCategory.RESOURCE,
+        name,
+        IoAccess.WRITE,
+        resourceType = ResourceTypes.OPENAI_COMPATIBLE,
+    )
+    val arguments = java.util.HashMap<String, Any?>()
+    arguments["endpoint"] = request.endpoint
+    arguments["body"] = request.body
+    arguments["pathParameters"] = java.util.HashMap(request.pathParameters)
+    arguments["query"] = java.util.HashMap(request.query)
+    arguments["timeoutsMillis"] = millisOf(request.timeouts)
+    @Suppress("UNCHECKED_CAST")
+    val answer = callHost(link, name, "openai.call", arguments) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val headers = answer["headers"] as Map<String, List<String>>
+    return OpenAiResponse(answer["status"] as Int, headers, answer["body"] as String)
   }
 
-  /** The category named by the host; one this copy of core does not know is a plain failure. */
-  private fun failureOf(name: Any?): ResourceFailure {
-    for (candidate in ResourceFailure.values()) if (candidate.name == name) return candidate
-    return ResourceFailure.FAILED
+  /** The limits the pipeline asked for, by name, in milliseconds. */
+  private fun millisOf(timeouts: OpenAiTimeouts): Map<String, Long> {
+    val millis = java.util.HashMap<String, Long>()
+    timeouts.connect?.let { millis["connect"] = it.toMillis() }
+    timeouts.firstByte?.let { millis["firstByte"] = it.toMillis() }
+    timeouts.idle?.let { millis["idle"] = it.toMillis() }
+    timeouts.total?.let { millis["total"] = it.toMillis() }
+    timeouts.quotaWait?.let { millis["quotaWait"] = it.toMillis() }
+    return millis
   }
+}
+
+/**
+ * One call to the host; its answer is JDK types only, a failure is an exception of the category.
+ */
+private fun callHost(
+    link: ResourceLink,
+    name: String,
+    operation: String,
+    arguments: Map<String, Any?>,
+): Any? {
+  val request = java.util.HashMap<String, Any?>()
+  request["resource"] = name
+  request["operation"] = operation
+  request["arguments"] = java.util.HashMap(arguments)
+  val answer = link.call.apply(request)
+  if (answer["ok"] == true) return answer["value"]
+  throw ResourceAccessException(
+      name,
+      failureOf(answer["failure"]),
+      answer["errorId"] as String?,
+      answer["status"] as Int?,
+  )
+}
+
+/** The category named by the host; one this copy of core does not know is a plain failure. */
+private fun failureOf(name: Any?): ResourceFailure {
+  for (candidate in ResourceFailure.values()) if (candidate.name == name) return candidate
+  return ResourceFailure.FAILED
 }

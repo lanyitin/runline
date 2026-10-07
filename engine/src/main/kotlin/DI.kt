@@ -218,7 +218,9 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceTelemetry>(),
       )
     }
-    provide<ResourceWarnings> { ResourceWarnings(resolve<ResourceAvailability>()) }
+    provide<ResourceWarnings> {
+      ResourceWarnings(resolve<ResourceAvailability>(), resolve<ResourceStore>())
+    }
     provide<RunScheduler> {
       val runs = resolve<EngineConfig>().runs
       RunScheduler(

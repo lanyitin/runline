@@ -1,5 +1,8 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.openai.OpenAiSettings
+import dev.lawlan.runline.accessors.openai.SettingsResult
+import dev.lawlan.runline.engine.artifact.AccessLimitDoc
 import dev.lawlan.runline.engine.artifact.ArtifactRecord
 import dev.lawlan.runline.engine.artifact.DefinitionRecord
 import kotlinx.serialization.Serializable
@@ -12,13 +15,18 @@ import kotlinx.serialization.Serializable
 
 /**
  * Warns about pipelines that declare shared resources that are missing or disabled, or of another
- * type than declared, and about declared types that do not exist.
+ * type than declared, about declared types that do not exist, and about a `network` that names the
+ * host of a resource, which a pipeline should reach through the resource (ADR-019).
  */
-class ResourceWarnings(private val availability: ResourceAvailability) {
+class ResourceWarnings(
+    private val availability: ResourceAvailability,
+    private val store: ResourceStore,
+) {
   /** A function giving the warnings of any definition of [artifacts], from one lookup. */
   fun lookup(artifacts: List<ArtifactRecord>): (DefinitionRecord) -> List<WarningDoc> {
     val names = artifacts.flatMap { a -> a.definitions.flatMap { it.metadata.resources } }
     val inspection = availability.inspect(names)
+    val hosts = resourceHosts()
     return { definition ->
       val metadata = definition.metadata
       val types = metadata.resourceTypes
@@ -27,8 +35,38 @@ class ResourceWarnings(private val availability: ResourceAvailability) {
       inspection
           .problemsFor(metadata.resources, types)
           .filterNot { it.kind == ResourceProblemKind.TYPE_MISMATCH && it.name in outsideTheSet }
-          .map { it.toWarning() } + outsideTheSet.map { (name, type) -> unknownType(name, type) }
+          .map { it.toWarning() } +
+          outsideTheSet.map { (name, type) -> unknownType(name, type) } +
+          networkHostsOfResources(metadata.network, hosts)
     }
+  }
+
+  /** The host of each resource that has one (the `openai-compatible` ones), in lower case. */
+  private fun resourceHosts(): List<Pair<String, String>> =
+      store
+          .list()
+          .filter { it.type == ResourceType.OPENAI_COMPATIBLE }
+          .mapNotNull { resource ->
+            val settings =
+                (OpenAiSettings.parse(resource.settings) as? SettingsResult.Valid)?.settings
+            settings?.baseUrl?.host?.lowercase()?.let { resource.name to it }
+          }
+
+  private fun networkHostsOfResources(
+      network: AccessLimitDoc,
+      hosts: List<Pair<String, String>>,
+  ): List<WarningDoc> {
+    if (network.unrestricted) return emptyList()
+    val declared = network.allow.map { it.lowercase() }.toSet()
+    return hosts
+        .filter { (_, host) -> host in declared }
+        .map { (resource, host) ->
+          WarningDoc(
+              "network_host_has_resource",
+              resource,
+              "network 宣告的主機「$host」是共享資源「$resource」的主機；請改經由這個資源存取，不需要在 network 宣告它。",
+          )
+        }
   }
 
   private fun unknownType(name: String, type: String) =

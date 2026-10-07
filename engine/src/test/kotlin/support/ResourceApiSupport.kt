@@ -94,9 +94,15 @@ abstract class ResourceApiSupport {
       types: Map<String, String> = emptyMap(),
       body: String = "",
       token: String = TestTokens.ALICE,
+      /** Hosts the pipeline says it may connect to (`network`); none by default. */
+      network: List<String> = emptyList(),
   ): HttpResponse {
     val fqcn = "demo.R${counter++}"
-    var declaration = RunHarness.DEFAULT_DECLARATION
+    var declaration =
+        RunHarness.DEFAULT_DECLARATION.replace(
+            "network = @AccessLimit(allow = {})",
+            "network = @AccessLimit(allow = {${network.joinToString { "\"$it\"" }}})",
+        )
     if (names.isNotEmpty()) {
       declaration += ", resources = {" + names.joinToString { "\"$it\"" } + "}"
     }

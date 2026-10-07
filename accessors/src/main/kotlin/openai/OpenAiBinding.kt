@@ -19,8 +19,11 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -76,14 +79,60 @@ class OpenAiBinding(
 
   @Volatile private var aborted = false
 
-  override fun execute(operation: String, arguments: Map<String, Any?>): Any? {
-    check(operation == OPERATION) { "unknown operation $operation" }
+  override fun execute(operation: String, arguments: Map<String, Any?>): Any? =
+      when (operation) {
+        OPERATION -> call(arguments, streaming = false)
+        STREAM_OPEN -> call(arguments, streaming = true)
+        STREAM_NEXT -> streamOf(arguments).next()
+        else -> error("unknown operation $operation")
+      }
+
+  /** The streams opened and not yet ended, by the number a pipeline pulls them with. */
+  private val streams = ConcurrentHashMap<Long, OpenStream>()
+  private val streamIds = AtomicLong()
+
+  private fun streamOf(arguments: Map<String, Any?>): OpenStream =
+      streams[arguments["stream"] as? Long]
+          ?: throw ResourceOperationFailure(ResourceFailure.INVALID_ARGUMENT)
+
+  /**
+   * A stream a pipeline pulls: its events, as they come. It is the call that opened it, which goes
+   * on holding its share of requests until the stream ends.
+   */
+  private inner class OpenStream(
+      private val call: Call,
+      private val report: Report,
+      private val endpoint: String,
+      private val events: ServerSentEvents,
+  ) {
+    private val ended = AtomicBoolean()
+
+    fun next(): String? {
+      if (ended.get()) return null
+      val data = events.next()
+      if (data == null || data == "[DONE]") {
+        end(null)
+        return null
+      }
+      return data
+    }
+
+    /** The stream is over, whichever way: the connection goes, the share is given back. */
+    fun end(failure: ResourceFailure?) {
+      if (!ended.compareAndSet(false, true)) return
+      runCatching { call.stream?.close() }
+      call.release()
+      report.finish(endpoint, failure, null)
+    }
+  }
+
+  private fun call(arguments: Map<String, Any?>, streaming: Boolean): Any? {
     val endpoint =
         (arguments["endpoint"] as? String)?.let { OpenAiEndpoints.find(it)?.id } ?: "unknown"
     val report = Report()
     var result: Throwable? = null
     try {
-      return run(arguments, endpoint, report)
+      return run(arguments, endpoint, report, streaming)
     } catch (e: Throwable) {
       result = e
       throw e
@@ -94,7 +143,9 @@ class OpenAiBinding(
             is ResourceOperationFailure -> result.failure
             else -> ResourceFailure.FAILED
           }
-      report.finish(endpoint, failure, (result as? ResourceOperationFailure)?.status)
+      if (!report.handedOver) {
+        report.finish(endpoint, failure, (result as? ResourceOperationFailure)?.status)
+      }
     }
   }
 
@@ -108,7 +159,12 @@ class OpenAiBinding(
     var usage: OpenAiTokenUsage? = null
     var status: Int? = null
 
+    /** A stream took the call over, and tells the observer when it ends. */
+    @Volatile var handedOver = false
+    private val finished = AtomicBoolean()
+
     fun finish(endpoint: String, failure: ResourceFailure?, failedStatus: Int?) {
+      if (!finished.compareAndSet(false, true)) return
       val outcome =
           OpenAiOutcome(
               failure,
@@ -138,9 +194,14 @@ class OpenAiBinding(
     }
   }
 
-  private fun run(arguments: Map<String, Any?>, endpoint: String, report: Report): Any? {
+  private fun run(
+      arguments: Map<String, Any?>,
+      endpoint: String,
+      report: Report,
+      streaming: Boolean,
+  ): Any? {
     if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
-    return run(OpenAiRequestPlan.of(settings, arguments), endpoint, report)
+    return run(OpenAiRequestPlan.of(settings, arguments, streaming), endpoint, report)
   }
 
   private fun run(plan: OpenAiRequestPlan, endpoint: String, report: Report): Any? {
@@ -161,19 +222,15 @@ class OpenAiBinding(
     report.quotaWaitMillis = millisSince(waitStart)
     report.acquiredAt = System.nanoTime()
     if (!got) throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
+    val call = Call(plan.limits)
+    live += call
     try {
-      val call = Call(plan.limits)
-      live += call
-      try {
-        if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
-        report.sent = true
-        runCatching { observer.started(resource, endpoint) }
-        return exchange(call, plan, report)
-      } finally {
-        live -= call
-      }
+      if (aborted) throw ResourceOperationFailure(ResourceFailure.CANCELLED)
+      report.sent = true
+      runCatching { observer.started(resource, endpoint) }
+      return exchange(call, plan, report)
     } finally {
-      quota.release()
+      if (!call.keptOpen) call.release()
     }
   }
 
@@ -193,6 +250,19 @@ class OpenAiBinding(
     @Volatile var stoppedFor: ResourceFailure? = null
     @Volatile var future: CompletableFuture<*>? = null
     @Volatile var stream: InputStream? = null
+    @Volatile var total: ScheduledFuture<*>? = null
+
+    /** A stream took the call over: it ends the call, not the exchange that opened it. */
+    @Volatile var keptOpen = false
+    private val released = AtomicBoolean()
+
+    /** The call is over: its timer stops, it can no longer be cut, and its share is free again. */
+    fun release() {
+      if (!released.compareAndSet(false, true)) return
+      total?.cancel(false)
+      live -= this
+      quota.release()
+    }
 
     /** Stops the call for [reason]; the first reason stays. */
     fun stop(reason: ResourceFailure) {
@@ -202,19 +272,15 @@ class OpenAiBinding(
     }
   }
 
-  private fun exchange(call: Call, plan: OpenAiRequestPlan, report: Report): Map<String, Any?> {
-    val total =
+  private fun exchange(call: Call, plan: OpenAiRequestPlan, report: Report): Any? {
+    call.total =
         call.limits.totalMillis?.let {
           TIMERS.schedule({ call.stop(ResourceFailure.TOTAL_TIMEOUT) }, it, TimeUnit.MILLISECONDS)
         }
-    try {
-      return send(call, plan, report)
-    } finally {
-      total?.cancel(false)
-    }
+    return send(call, plan, report)
   }
 
-  private fun send(call: Call, plan: OpenAiRequestPlan, report: Report): Map<String, Any?> {
+  private fun send(call: Call, plan: OpenAiRequestPlan, report: Report): Any? {
     val sentAt = System.nanoTime()
     var uri = plan.uri
     var method = plan.method
@@ -247,6 +313,7 @@ class OpenAiBinding(
         response.body().close()
         throw ResourceOperationFailure(ResourceFailure.RESPONSE_TOO_LARGE, null, status)
       }
+      if (plan.streaming) return startStream(call, response, status, report, plan.endpoint.id)
       val readStart = System.nanoTime()
       val text = readBody(call, response.body(), status)
       report.generationMillis = millisSince(readStart)
@@ -257,6 +324,25 @@ class OpenAiBinding(
           "body" to text,
       )
     }
+  }
+
+  private fun startStream(
+      call: Call,
+      response: HttpResponse<InputStream>,
+      status: Int,
+      report: Report,
+      endpoint: String,
+  ): Map<String, Any?> {
+    val input = response.body()
+    val id = streamIds.incrementAndGet()
+    streams[id] = OpenStream(call, report, endpoint, ServerSentEvents { input.read(it) })
+    call.keptOpen = true
+    report.handedOver = true
+    return mapOf(
+        "stream" to id,
+        "status" to status,
+        "headers" to answerHeaders(response.headers().map()),
+    )
   }
 
   private fun awaitHeaders(
@@ -426,6 +512,8 @@ class OpenAiBinding(
 
   companion object {
     const val OPERATION = "openai.call"
+    const val STREAM_OPEN = "openai.stream.open"
+    const val STREAM_NEXT = "openai.stream.next"
     private val REDIRECTS = setOf(301, 302, 303, 307, 308)
     private const val MAX_REDIRECTS = 5
     private const val BUFFER = 16 * 1024

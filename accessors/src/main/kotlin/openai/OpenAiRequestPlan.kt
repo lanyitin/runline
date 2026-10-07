@@ -24,6 +24,8 @@ private constructor(
     /** The JSON to send, or null for an entry without a body. */
     val body: ByteArray?,
     val limits: OpenAiLimits,
+    /** Whether the answer is a stream of events, which the resource asks the service for. */
+    val streaming: Boolean = false,
 ) {
   val method: String
     get() = endpoint.method
@@ -38,7 +40,11 @@ private constructor(
     /**
      * Applies [settings] to the [arguments] of one call; fails with a [ResourceOperationFailure].
      */
-    fun of(settings: OpenAiSettings, arguments: Map<String, Any?>): OpenAiRequestPlan {
+    fun of(
+        settings: OpenAiSettings,
+        arguments: Map<String, Any?>,
+        streaming: Boolean = false,
+    ): OpenAiRequestPlan {
       val name = arguments["endpoint"] as? String ?: throw invalid()
       val endpoint =
           OpenAiEndpoints.find(name)
@@ -46,17 +52,21 @@ private constructor(
       if (endpoint.id !in settings.endpoints) {
         throw ResourceOperationFailure(ResourceFailure.ENDPOINT_NOT_ENABLED)
       }
+      if (streaming && !endpoint.streams) {
+        throw ResourceOperationFailure(ResourceFailure.STREAM_NOT_SUPPORTED)
+      }
       val path = endpoint.pathFor(stringMap(arguments["pathParameters"]))
       val query = endpoint.queryFor(stringMap(arguments["query"]))
       val limits = limitsOf(settings.timeouts, arguments["timeoutsMillis"])
       val text = arguments["body"]
       if (text != null && text !is String) throw invalid()
-      val body = bodyOf(settings, endpoint, text as String?)
+      val body = bodyOf(settings, endpoint, text as String?, streaming)
       return OpenAiRequestPlan(
           endpoint,
           URI.create(settings.baseUrl.toString() + path + query),
           body,
           limits,
+          streaming,
       )
     }
 
@@ -95,6 +105,7 @@ private constructor(
         settings: OpenAiSettings,
         endpoint: OpenAiEndpoint,
         text: String?,
+        streaming: Boolean,
     ): ByteArray? {
       if (endpoint.body == BodyKind.NONE) {
         if (text != null) throw invalid()
@@ -104,7 +115,12 @@ private constructor(
         throw ResourceOperationFailure(ResourceFailure.REQUEST_TOO_LARGE)
       }
       val given = if (text == null) JsonObject(emptyMap()) else objectOf(text)
-      refuseStreaming(given)
+      if (streaming) {
+        // Whether the answer streams is the resource's to say, in the way the call is made.
+        if ("stream" in given) throw invalid()
+      } else {
+        refuseStreaming(given)
+      }
       refuseLocked(settings, given)
 
       val merged = LinkedHashMap<String, JsonElement>()
@@ -113,6 +129,7 @@ private constructor(
         if (applies) merged[key] = value
       }
       merged.putAll(given)
+      if (streaming) merged["stream"] = JsonPrimitive(true)
 
       if (endpoint.takesModel) checkModel(settings, merged["model"])
       checkCeilings(settings, given)

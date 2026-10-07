@@ -43,7 +43,7 @@ internal class ServerSentEvents(private val read: (ByteArray) -> Int) {
         }
       }
       val b = buffer[position++]
-      if (b == '\n'.code.toByte()) return out.toString(StandardCharsets.UTF_8)
+      if (b == '\n'.code.toByte()) return out.toString(StandardCharsets.UTF_8).removeSuffix("\r")
       out.write(b.toInt())
     }
   }

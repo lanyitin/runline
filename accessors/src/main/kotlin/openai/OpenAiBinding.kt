@@ -86,7 +86,7 @@ class OpenAiBinding(
       when (operation) {
         OPERATION -> call(arguments, streaming = false)
         DOWNLOAD -> call(arguments, streaming = false, binary = true)
-        STREAM_OPEN -> call(arguments, streaming = true)
+        STREAM_OPEN -> call(arguments, streaming = true, binary = arguments["binary"] == true)
         STREAM_NEXT -> streamOf(arguments).next()
         STREAM_CLOSE -> streamOf(arguments).end(null).let { null }
         else -> error("unknown operation $operation")
@@ -108,12 +108,14 @@ class OpenAiBinding(
       private val call: Call,
       private val report: Report,
       private val endpoint: String,
-      private val events: ServerSentEvents,
+      private val events: ServerSentEvents?,
+      /** For a stream of bytes: the wire to read them from. */
+      private val wire: Wire?,
   ) {
     /** Set once, when the stream is over, with why: what every later pull comes to. */
     private val over = AtomicReference<Ending>()
 
-    fun next(): String? {
+    fun next(): Any? {
       over.get()?.let { ending ->
         ending.failure?.let { throw ResourceOperationFailure(it) }
         return null
@@ -122,7 +124,7 @@ class OpenAiBinding(
           try {
             stopped(call)?.let { throw it }
             val waitStart = System.nanoTime()
-            events.next().also {
+            (if (wire != null) chunk(wire) else events!!.next()).also {
               val waited = millisSince(waitStart)
               report.maxChunkGapMillis = maxOf(report.maxChunkGapMillis ?: 0, waited)
             }
@@ -134,10 +136,21 @@ class OpenAiBinding(
         end(null)
         return null
       }
+      if (data is ByteArray) return data
+      data as String
       if (data.contains("\"usage\"")) usageOf(data)?.let { report.usage = it }
       // A service that echoes the key does not give it to the pipeline through a stream either.
       val key = (credential as? OpenAiCredential.Key)?.value
       return if (key != null) data.replace(key, "***") else data
+    }
+
+    /**
+     * The next bytes of the answer, as many as are there (some, at most a chunk); null at its end.
+     */
+    private fun chunk(wire: Wire): ByteArray? {
+      val buffer = ByteArray(BUFFER)
+      val count = wire.read(buffer)
+      return if (count < 0) null else buffer.copyOf(count)
     }
 
     /** The stream is over, whichever way: the connection goes, the share is given back. */
@@ -401,6 +414,7 @@ class OpenAiBinding(
               plan.endpoint.id,
               sentAt,
               plan.sizes.response,
+              plan.binary,
           )
       val readStart = System.nanoTime()
       if (plan.output != null) {
@@ -527,12 +541,13 @@ class OpenAiBinding(
       endpoint: String,
       sentAt: Long,
       maxEventBytes: Long,
+      binary: Boolean,
   ): Map<String, Any?> {
     val wire = Wire(call, response.body(), sentAt, report)
     val id = streamIds.incrementAndGet()
-    val events = ServerSentEvents(maxEventBytes.toInt()) { wire.read(it) }
+    val events = if (binary) null else ServerSentEvents(maxEventBytes.toInt()) { wire.read(it) }
     val headers = answerHeaders(response.headers().map())
-    val opened = OpenStream(call, report, endpoint, events)
+    val opened = OpenStream(call, report, endpoint, events, if (binary) wire else null)
     call.owner = opened
     streams[id] = opened
     call.keptOpen = true

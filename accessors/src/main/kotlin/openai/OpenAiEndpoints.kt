@@ -35,6 +35,10 @@ class OpenAiEndpoint(
     val response: ResponseKind,
     /** Whether the service can answer with an event stream (WI-47). */
     val streams: Boolean = false,
+    /**
+     * Whether the answer is bytes the service sends as they are made (speech), pulled in chunks.
+     */
+    val streamsBytes: Boolean = false,
     val queryParameters: Set<String> = emptySet(),
     /** Whether an administrator has to enable the entry: false only for the default four groups. */
     val defaultEnabled: Boolean = false,
@@ -122,11 +126,11 @@ object OpenAiEndpoints {
           path,
           BodyKind.JSON,
           ResponseKind.JSON,
-          streams,
-          query,
-          default,
-          model,
-          sampling,
+          streams = streams,
+          queryParameters = query,
+          defaultEnabled = default,
+          takesModel = model,
+          takesSampling = sampling,
       )
 
   private fun plain(
@@ -135,7 +139,16 @@ object OpenAiEndpoints {
       path: String,
       query: Set<String> = emptySet(),
       default: Boolean = false,
-  ) = OpenAiEndpoint(id, method, path, BodyKind.NONE, ResponseKind.JSON, false, query, default)
+  ) =
+      OpenAiEndpoint(
+          id,
+          method,
+          path,
+          BodyKind.NONE,
+          ResponseKind.JSON,
+          queryParameters = query,
+          defaultEnabled = default,
+      )
 
   private fun upload(
       id: String,
@@ -225,7 +238,7 @@ object OpenAiEndpoints {
               "/audio/speech",
               BodyKind.JSON,
               ResponseKind.BINARY,
-              true,
+              streamsBytes = true,
               takesModel = true,
               delivered = true,
           ),

@@ -73,11 +73,11 @@ private constructor(
       if (endpoint.id !in settings.endpoints) {
         throw ResourceOperationFailure(ResourceFailure.ENDPOINT_NOT_ENABLED)
       }
-      // The answer of an entry is JSON or bytes, and a pipeline asks for the one it is.
-      if (binary != (endpoint.response == ResponseKind.BINARY)) throw invalid()
-      if (streaming && !endpoint.streams) {
+      if (streaming && !(if (binary) endpoint.streamsBytes else endpoint.streams)) {
         throw ResourceOperationFailure(ResourceFailure.STREAM_NOT_SUPPORTED)
       }
+      // The answer of an entry is JSON or bytes, and a pipeline asks for the one it is.
+      if (binary != (endpoint.response == ResponseKind.BINARY)) throw invalid()
       val path = endpoint.pathFor(stringMap(arguments["pathParameters"]))
       val query = endpoint.queryFor(stringMap(arguments["query"]))
       val limits = limitsOf(settings.timeouts, arguments["timeoutsMillis"])
@@ -94,7 +94,7 @@ private constructor(
       if (text != null && text !is String) throw invalid()
       val body =
           if (upload != null) null
-          else bodyOf(settings, endpoint, text as String?, streaming, sizes.request)
+          else bodyOf(settings, endpoint, text as String?, streaming && !binary, sizes.request)
       return OpenAiRequestPlan(
           endpoint,
           URI.create(settings.baseUrl.toString() + path + query),

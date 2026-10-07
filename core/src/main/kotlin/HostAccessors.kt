@@ -83,6 +83,13 @@ private class HostOpenAi(
     private val recorder: IoRecorder?,
 ) : OpenAiAccessor {
   override fun call(request: OpenAiRequest): OpenAiResponse {
+    @Suppress("UNCHECKED_CAST")
+    val answer = callHost(link, name, "openai.call", arguments(request)) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val headers = answer["headers"] as Map<String, List<String>>
+    return OpenAiResponse(answer["status"] as Int, headers, answer["body"] as String)
+  }
+
+  private fun arguments(request: OpenAiRequest): Map<String, Any?> {
     // Only the name, the type and the kind of action: never an endpoint, a body or an address.
     recorder?.record(
         IoCategory.RESOURCE,
@@ -96,10 +103,14 @@ private class HostOpenAi(
     arguments["pathParameters"] = java.util.HashMap(request.pathParameters)
     arguments["query"] = java.util.HashMap(request.query)
     arguments["timeoutsMillis"] = millisOf(request.timeouts)
+    return arguments
+  }
+
+  override fun stream(request: OpenAiRequest): OpenAiStream {
     @Suppress("UNCHECKED_CAST")
-    val answer = callHost(link, name, "openai.call", arguments) as Map<String, Any?>
-    @Suppress("UNCHECKED_CAST") val headers = answer["headers"] as Map<String, List<String>>
-    return OpenAiResponse(answer["status"] as Int, headers, answer["body"] as String)
+    val opened = callHost(link, name, "openai.stream.open", arguments(request)) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST") val headers = opened["headers"] as Map<String, List<String>>
+    return HostOpenAiStream(name, link, opened["stream"] as Long, opened["status"] as Int, headers)
   }
 
   /** The limits the pipeline asked for, by name, in milliseconds. */
@@ -111,6 +122,35 @@ private class HostOpenAi(
     timeouts.total?.let { millis["total"] = it.toMillis() }
     timeouts.quotaWait?.let { millis["quotaWait"] = it.toMillis() }
     return millis
+  }
+}
+
+/** A streamed answer: the host holds the stream, this is the pipeline's handle on it. */
+private class HostOpenAiStream(
+    private val name: String,
+    private val link: ResourceLink,
+    private val id: Long,
+    override val status: Int,
+    override val headers: Map<String, List<String>>,
+) : OpenAiStream {
+  @Volatile private var ended = false
+
+  override fun next(): String? {
+    if (ended) return null
+    val data = callHost(link, name, "openai.stream.next", mapOf("stream" to id)) as String?
+    if (data == null) ended = true
+    return data
+  }
+
+  override fun close() {
+    if (ended) return
+    ended = true
+    // A host that is done with the run says so by failing; there is nothing left to close then.
+    try {
+      callHost(link, name, "openai.stream.close", mapOf("stream" to id))
+    } catch (e: ResourceAccessException) {
+      // the stream is gone with the run
+    }
   }
 }
 

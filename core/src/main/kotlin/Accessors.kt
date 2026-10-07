@@ -43,6 +43,38 @@ interface OpenAiAccessor {
    * The Engine does not retry; whether to retry is the pipeline's decision.
    */
   fun call(request: OpenAiRequest): OpenAiResponse
+
+  /**
+   * Sends one request for a streamed answer (the entries that stream: chat and text completions,
+   * responses) and returns once the service has begun to answer; the pipeline then pulls the events
+   * one at a time. The stream is the run's share of requests until it ends, is closed, or the run
+   * ends: read it to its end or close it before sending another request. The Engine does not retry,
+   * and `stream` is the resource's to set: a body that sets it is refused.
+   */
+  fun stream(request: OpenAiRequest): OpenAiStream
+}
+
+/**
+ * A streamed answer, pulled by the pipeline's own thread. Only JDK types come out of it. Closing it
+ * (also by try-with-resources) drops the connection and gives the share of requests back.
+ */
+interface OpenAiStream : AutoCloseable {
+  /** The HTTP status the service answered with (always a 2xx: anything else is a failure). */
+  val status: Int
+
+  /** The headers of the answer, lower case, without credentials. */
+  val headers: Map<String, List<String>>
+
+  /**
+   * The data of the next event as text, waiting for it; null once the stream has ended (the service
+   * said so, or closed it cleanly). A stream that breaks off, times out (first byte, idle or total)
+   * or is cancelled fails with a [ResourceAccessException] of the category; what was pulled before
+   * stays with the pipeline, and the same failure comes on every later pull.
+   */
+  fun next(): String?
+
+  /** Ends the stream if it has not ended; never fails, and does nothing the second time. */
+  override fun close()
 }
 
 /**

@@ -162,4 +162,127 @@ class OpenAiAccessorTest {
 
     assertEquals(ResourceFailure.FAILED, e.failure)
   }
+
+  private fun streamAnswer(id: Long = 7L) =
+      mapOf(
+          "ok" to true,
+          "value" to
+              mapOf(
+                  "stream" to id,
+                  "status" to 200,
+                  "headers" to mapOf("content-type" to listOf("text/event-stream")),
+              ),
+      )
+
+  @Test
+  fun `a stream is opened with the same arguments as a call, and gives its status and headers`() {
+    answer = streamAnswer()
+    val request =
+        OpenAiRequest(
+            "chat.completions",
+            body = """{"messages":[]}""",
+            timeouts = OpenAiTimeouts(idle = Duration.ofSeconds(2)),
+        )
+
+    val stream = context().accessors.openAiCompatible("lemon").stream(request)
+
+    val sent = seen.single()
+    assertEquals("lemon", sent["resource"])
+    assertEquals("openai.stream.open", sent["operation"])
+    @Suppress("UNCHECKED_CAST") val arguments = sent["arguments"] as Map<String, Any?>
+    assertEquals("chat.completions", arguments["endpoint"])
+    assertEquals("""{"messages":[]}""", arguments["body"])
+    assertEquals(mapOf("idle" to 2000L), arguments["timeoutsMillis"])
+    assertEquals(200, stream.status)
+    assertEquals(listOf("text/event-stream"), stream.headers["content-type"])
+  }
+
+  private fun open(): OpenAiStream {
+    answer = streamAnswer(7L)
+    val stream =
+        context()
+            .accessors
+            .openAiCompatible("lemon")
+            .stream(OpenAiRequest("chat.completions", "{}"))
+    seen.clear()
+    return stream
+  }
+
+  private fun next(data: String?) = mapOf("ok" to true, "value" to data)
+
+  @Test
+  fun `a pull is one operation of the host with the stream's number, and the end is null and the last call to the host`() {
+    val stream = open()
+    val events = ArrayDeque(listOf("a", "b", null))
+    val pulled = mutableListOf<String?>()
+    while (true) {
+      answer = next(events.removeFirst())
+      val data = stream.next()
+      pulled += data
+      if (data == null) break
+    }
+
+    assertEquals(listOf("a", "b", null), pulled)
+    assertEquals(3, seen.size)
+    assertTrue(seen.all { it["operation"] == "openai.stream.next" && it["resource"] == "lemon" })
+    @Suppress("UNCHECKED_CAST")
+    assertEquals(mapOf("stream" to 7L), (seen[0]["arguments"] as Map<String, Any?>))
+    assertNull(stream.next())
+    assertEquals(3, seen.size, "once it has ended nothing more is asked of the host")
+  }
+
+  @Test
+  fun `closing a stream asks the host once, never fails, and does nothing for a stream that has ended`() {
+    val open = open()
+    answer = mapOf("ok" to true, "value" to null)
+
+    open.close()
+    open.close()
+
+    assertEquals(1, seen.size)
+    assertEquals("openai.stream.close", seen[0]["operation"])
+    @Suppress("UNCHECKED_CAST")
+    assertEquals(mapOf("stream" to 7L), (seen[0]["arguments"] as Map<String, Any?>))
+    assertNull(open.next(), "a closed stream has nothing more")
+
+    val over = open()
+    answer = next(null)
+    over.next()
+    over.close()
+    assertEquals(1, seen.size, "the pull that found the end was the only call")
+
+    val gone = open()
+    answer = mapOf("ok" to false, "failure" to "ENDED")
+    gone.close()
+  }
+
+  @Test
+  fun `a failed pull is an exception with the category and the status, and so is every later one`() {
+    val stream = open()
+    answer = mapOf("ok" to false, "failure" to "IDLE_TIMEOUT")
+
+    val first = assertFailsWith<ResourceAccessException> { stream.next() }
+    val again = assertFailsWith<ResourceAccessException> { stream.next() }
+
+    assertEquals(ResourceFailure.IDLE_TIMEOUT, first.failure)
+    assertEquals(ResourceFailure.IDLE_TIMEOUT, again.failure)
+    assertEquals("lemon", first.resource)
+    stream.close()
+  }
+
+  @Test
+  fun `a stream that cannot be opened is an exception with the category and the status`() {
+    answer = mapOf("ok" to false, "failure" to "RATE_LIMITED", "status" to 429)
+
+    val e =
+        assertFailsWith<ResourceAccessException> {
+          context()
+              .accessors
+              .openAiCompatible("lemon")
+              .stream(OpenAiRequest("chat.completions", "{}"))
+        }
+
+    assertEquals(ResourceFailure.RATE_LIMITED, e.failure)
+    assertEquals(429, e.status)
+  }
 }

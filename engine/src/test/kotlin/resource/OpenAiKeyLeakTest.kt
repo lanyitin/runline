@@ -200,4 +200,49 @@ class OpenAiKeyLeakTest {
     assertTrue(ended.failure!!.message!!.contains("the service said"), ended.failure!!.message)
     assertFalse(everything().contains(key), "the key is in something the Engine said")
   }
+
+  @Test
+  fun `a service that echoes the key in a stream, in its events, its headers and an error in its middle, gives the pipeline no key and no surface has it`() {
+    server.script = { request, response ->
+      response.beginChunked(
+          200,
+          mapOf(
+              "Content-Type" to "text/event-stream",
+              "X-Debug" to "you sent ${request.header("authorization")}",
+              "X-Api-Key" to key,
+          ),
+      )
+      response.event("""{"echo":"${request.header("authorization")}"}""")
+      response.event("""{"error":"Incorrect API key provided: $key"}""")
+      response.abort()
+      throw dev.lawlan.runline.accessors.fake.ClientGone()
+    }
+
+    val ended =
+        run(
+            "streams",
+            """
+            OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+            StringBuilder seen = new StringBuilder();
+            try (OpenAiStream s = lemon.stream(new OpenAiRequest("chat.completions", "{}"))) {
+              seen.append(s.getHeaders()).append("|");
+              String data;
+              while ((data = s.next()) != null) seen.append(data).append("|");
+            } catch (ResourceAccessException e) {
+              seen.append(e.getFailure().name()).append("|").append(e.getStatus()).append("|").append(e.getMessage()).append("|").append(e.getCause());
+            }
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "seen", seen.toString());
+            throw new RuntimeException("the stream said " + seen);
+            """
+                .trimIndent(),
+        )
+
+    assertEquals(RunState.FAILED, ended.state)
+    val seen = Files.readString(h.shared("streams", "seen"))
+    assertFalse(seen.contains(key), seen)
+    assertTrue(seen.contains("Bearer ***"), seen)
+    assertTrue(seen.contains("CONNECTION_FAILED"), seen)
+    assertFalse(seen.contains("x-api-key"), seen)
+    assertFalse(everything().contains(key), "the key is in something the Engine said")
+  }
 }

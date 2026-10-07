@@ -1,5 +1,5 @@
 # Workspace image: JDK 25 base plus a pinned Node toolchain (build-time only; never part of a release artifact).
-# The Node version comes from /.node-version, the single source shared with mise (see docs/stable/dev-environment.md).
+# The Node version comes from /.node-version, the single source for every environment (see docs/stable/dev-environment.md).
 FROM mcr.microsoft.com/devcontainers/java:25-bookworm
 
 COPY .node-version /tmp/.node-version

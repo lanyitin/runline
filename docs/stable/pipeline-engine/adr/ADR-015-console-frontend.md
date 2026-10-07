@@ -42,7 +42,7 @@ Engine 原本只有 HTTP API，沒有操作介面。使用者決定做一個給�
 **建置接線（行為層級）**
 
 - 建置 Engine 時，Gradle 先執行前端建置，產物納入 `shadowJar`，因此 `engineDistribution`、`packagedTest` 與一般的發佈建置都自動含 Console。前端建置的輸入（原始碼、鎖定檔、建置設定）變動時才重建，沒有變動時不重跑，不拖慢後端迭代。
-- 前端相依以鎖定檔固定版本，並以鎖定檔安裝（可重現）。Node 版本在單一處固定（比照 `mise.toml` 與 `gradle/libs.versions.toml` 的單一版本來源原則）。
+- 前端相依以鎖定檔固定版本，並以鎖定檔安裝（可重現）。Node 版本在單一處固定（比照 `gradle/libs.versions.toml` 的單一版本來源原則，固定在 `.node-version`）。
 - 提供「略過前端建置」的明確開關，僅供本機只改後端時使用；略過時 Engine 仍能啟動，`/` 回 404，API 不受影響。發佈用的建置（本機以明確的發佈旗標執行，見 [ADR-016](ADR-016-engine-build-info-endpoint.md)）與 `packagedTest` 遇到此開關時直接失敗，不靜默產出沒有 Console 的產物。
 - 開發模式：前端用 Vite 開發伺服器並把 `/api` 代理到本機 Engine（含 WebSocket）；此代理只存在於開發環境，不進入產物。
 
@@ -66,7 +66,7 @@ Engine 原本只有 HTTP API，沒有操作介面。使用者決定做一個給�
 
 - Node 只在建置階段存在；執行環境（JDK 25 的 Engine）不含 Node，執行期沒有任何前端建置或 Node 相依。建置、發佈、執行三階段仍分離。
 - 專案沒有 CI，也不預期近期導入；所有驗證都必須能在本機完成：前端建置、前端單元測試與型別檢查納入 Gradle `check`，單一指令即可驗證整個產物（含 `packagedTest`）。需要真實瀏覽器（Chrome）與執行中的打包後 Engine 的測試（端對端測試 `npm run e2e`、契約測試 `npm run test:contract`）不接進 `check`，是本機手動執行的腳本，使用方式寫在 README；涉及它們的工作項在回報中附上執行結果。不存在只在 CI 上才執行的步驟。
-- 開發環境需要 Node：devcontainer 只有 JDK 25 與 PostgreSQL，需新增 Node（版本與鎖定檔一致）；本機非 devcontainer 的環境由單一版本來源（如 `mise.toml`）固定 Node 版本。
+- 開發環境需要 Node：devcontainer 只有 JDK 25 與 PostgreSQL，需新增 Node（版本與鎖定檔一致）；本機非 devcontainer 的環境由單一版本來源（`.node-version`）固定 Node 版本。
 - 供應鏈：前端相依由鎖定檔固定；相依漏洞檢查以本機可執行的指令提供（納入發佈用的建置）；建置不得在執行階段下載相依。
 - 日後導入 CI 時只需執行同一個 Gradle 入口，不需調整本決策。
 

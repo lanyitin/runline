@@ -6,7 +6,7 @@
 
 | 項目 | 說明 |
 |---|---|
-| Docker 相容環境 | Docker Desktop 或 colima。腳本只繼承目前 shell 的環境（不讀 `mise.toml`），所以用 colima 時，要先 `colima start`，並讓 `DOCKER_HOST` 在這個 shell 生效（例如 `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`，見 `docs/stable/dev-environment.md`）。`docker info` 能成功即可 |
+| Docker 相容環境 | Docker Desktop 或 colima。腳本只繼承目前 shell 的環境，所以用 colima 時，要先 `colima start`，並讓 `DOCKER_HOST` 在這個 shell 生效（例如 `export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`，見 `docs/stable/dev-environment.md`）。`docker info` 能成功即可 |
 | JDK 25 | 腳本依序找 `RUNLINE_DEV_JAVA`、`JAVA_HOME`、`PATH` 上的 `java`、Gradle 下載的 toolchain（`~/.gradle/jdks`），找到 25 以上就用；都沒有時先跑一次 `./gradlew :engine:engineDistribution` 讓 Gradle 下載 |
 | Node | Console 的建置需要 `.node-version` 指定的精確版本（見根目錄 README 的 Node toolchain）。第一次建置會 `npm ci`，需要網路 |
 | 網路 | 第一次需要下載 Gradle 相依、npm 套件與 `postgres:17-alpine` 映像檔（已在本機則不需要） |
@@ -94,9 +94,9 @@ curl -s -X POST -H "$A" -H 'Content-Type: application/json' -d '{"name":"demo-pr
 
 | 現象 | 處理 |
 |---|---|
-| `連不上 Docker` | 用 colima：`colima start`，並在**執行腳本的這個 shell** 設好 `DOCKER_HOST`（腳本不讀 `mise.toml`） |
+| `連不上 Docker` | 用 colima：`colima start`，並在**執行腳本的這個 shell** 設好 `DOCKER_HOST` |
 | `找不到 JDK 25 以上` | 設 `RUNLINE_DEV_JAVA=/path/to/jdk-25/bin/java`，或先跑一次 `./gradlew :engine:engineDistribution` |
-| `verifyNode` 失敗 | Node 版本必須等於 `.node-version`；用 mise 安裝並確認 `node --version`（見根目錄 README 的 Node toolchain） |
+| `verifyNode` 失敗 | Node 版本必須等於 `.node-version`；安裝該版本並確認 `node --version`（見根目錄 README 的 Node toolchain） |
 | `埠 8080（或 55432）已被占用` | `RUNLINE_DEV_PORT=8081 dev/dev.sh start`；PostgreSQL 用 `RUNLINE_DEV_PG_PORT` |
 | Engine 啟動後立刻結束 | 看腳本印出的最後 30 行，或 `dev/.runline/engine.log`；最常見是設定缺漏（Engine 會明說哪個設定有問題） |
 | 就緒等很久 | 逾時預設 120 秒（`RUNLINE_DEV_READY_TIMEOUT`）；第一次建置 Console 的時間不計入此處 |

@@ -145,6 +145,18 @@ It refuses a working tree with changes (HEAD is what is verified), builds the pl
 
 To build a release yourself: a clean checkout of a commit, then `./gradlew :engine:engineDistribution -Prunline.release=true`. To get the guaranteed bytes, do it in the platform (`release/reproduce.sh` shows how).
 
+## Release checklist
+There is no CI, so a release is checked by hand, on a clean checkout of the commit to be released (no uncommitted changes), in this order. Stop at the first failure.
+
+1. `./gradlew cleanTest check ktfmtCheck` (with `DOCKER_HOST` set if Docker is colima). This runs the unit, integration and packaged tests, the Console's unit tests and type check, and the API documentation check.
+2. **Contract tests against a real Engine:** `npm run test:contract` in `console/` (*Console frontend: shell, design tokens and languages* says which variables it needs). The Engine must be started with two developers and an admin in `API_TOKENS` and `RUNLINE_MAX_CONCURRENT_RUNS=8` or more (the default of `dev/dev.sh` is 2, which makes one test fail).
+3. **Real-browser tests against a real Engine:** `npm run e2e` in `console/` (*Console frontend: sign-in and the authentication boundary*). Start from a fresh database: a contract run leaves extra versions behind, and one admin test fails on them.
+4. **Console security:** `dev/verify-console-security.sh` (*Console frontend: security verification*).
+5. **Reproducible release build:** `./gradlew :engine:verifyReproducibleRelease` (*Reproducible release builds*), which also needs a clean tree.
+6. Record the commit hash and the SHA-256 of every jar that step 5 printed with the release.
+
+Steps 2 to 4 are not part of `check` because they need a browser, Docker and a running Engine; that is why they are listed here and must not be skipped.
+
 ## Shared resources (WI-09, ADR-007)
 Administrators define named resources with a capacity (1 is mutual exclusion) through `/api/v1/resources` (administrator token only; developers get 403, even to look). A pipeline declares the names it needs in its metadata; the Engine takes all of them together, with a concurrency slot, before the pipeline body starts, and gives them back when the run ends in any way. A run that waits holds no slot and waits in first-in-first-out order. Definitions (name, capacity, enabled, who changed them) are in PostgreSQL (migration `V3__shared_resource.sql`); holders and waiters live in the Engine's memory only and are gone after a restart, when unfinished runs become interrupted anyway.
 
@@ -223,10 +235,10 @@ Kotlin sources (`main` and `test` of `core`, `runner`, `analyzer`, `devkit`, `en
 ## Node toolchain (WI-30, ADR-015)
 The Console frontend is built with Node. Node is a build-time tool only: it is not part of the runtime environment or of any release artifact.
 
-- **Version pin:** the version is written once, in `.node-version` at the repository root (an exact version, currently the Node 24 LTS line). Both the devcontainer and `mise` read this file; to change the version, edit only this file (then rebuild the devcontainer).
+- **Version pin:** the version is written once, in `.node-version` at the repository root (an exact version, currently the Node 24 LTS line). The devcontainer and the build check read this file; to change the version, edit only this file (then rebuild the devcontainer).
 - **Devcontainer:** `.devcontainer/Dockerfile` installs exactly that version from nodejs.org (checksum-verified) on top of the JDK 25 image. After a rebuild, `node` and `npm` are on the `PATH`; nothing needs to be installed by hand.
-- **Local machine (no devcontainer):** install [mise](https://mise.jdx.dev) and run `mise install` in the repository root. `mise` picks up `.node-version` when the idiomatic version file setting is enabled for node; `mise.toml` is a personal, untracked file, so add this to yours once: `[settings]` / `idiomatic_version_file_enable_tools = ["node"]` (or run `mise settings add idiomatic_version_file_enable_tools node`).
-- **Verify:** `node --version` must print the version in `.node-version`; `npm --version` must also work. In a mise-managed shell, `mise ls --current` lists node with the source `.node-version`.
+- **Local machine (no devcontainer):** install the exact Node version written in `.node-version` with any tool you like (an official installer, a version manager, or your system package manager) and make sure `node` is on the `PATH` of the shell that runs Gradle.
+- **Verify:** `node --version` must print the version in `.node-version`; `npm --version` must also work. If you use a version manager, check that it resolves to the version in `.node-version`.
 
 ## Console frontend: build and serving (WI-31, ADR-015)
 The Console is a Svelte single page application in `console/` (a plain npm project, not a Gradle module), built by Vite into static files that are packed into `engine.jar` under `console/`. The Engine serves them at `/`.

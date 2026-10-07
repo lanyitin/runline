@@ -45,7 +45,7 @@ abstract class VerifyNode : DefaultTask() {
     val required = versionFile.get().asFile.readText().trim().removePrefix("v")
     val hint =
         "The Console is built with Node $required, pinned in .node-version; the 'Node toolchain' " +
-            "section of README.md says how to get it (devcontainer, or mise). If Node is " +
+            "section of README.md says how to get it (devcontainer, or install that version yourself). If Node is " +
             "installed but is not found, stop the Gradle daemon (./gradlew --stop) so that it " +
             "sees the PATH of this shell."
     val found = answerOf("node", "--version")

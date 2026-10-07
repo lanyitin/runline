@@ -7,14 +7,14 @@
 | 項目 | 說明 |
 |---|---|
 | JDK | 專案基準為 JDK 25。Gradle toolchain 會自動下載，不需手動安裝 |
-| Node | 前端（Console）建置用，只存在於建置期，不進入執行環境或發佈產物。版本固定在專案根目錄的 `.node-version`（單一來源，精確版本，目前為 Node 24 LTS 線）；devcontainer 與 mise 都讀這個檔案，變更版本只改這一處 |
+| Node | 前端（Console）建置用，只存在於建置期，不進入執行環境或發佈產物。版本固定在專案根目錄的 `.node-version`（單一來源，精確版本，目前為 Node 24 LTS 線）；devcontainer 與建置檢查都讀這個檔案，變更版本只改這一處 |
 | Docker 相容的容器執行環境 | 資料庫測試使用 Testcontainers 啟動真實 PostgreSQL，沒有容器環境時這類測試無法執行，也不會以替身取代 |
 
 ## Node 工具鏈
 
 - devcontainer：`.devcontainer/Dockerfile` 依 `.node-version` 從 nodejs.org 安裝該版本（以官方 SHASUMS256 驗證），重建後即可直接使用 `node` 與 `npm`。
-- 非 devcontainer 的本機：以 mise 取得同一版本，在專案根目錄執行 `mise install`。`mise.toml` 為個人檔案（不納入版本控制），需在其中加入 `[settings]` 的 `idiomatic_version_file_enable_tools = ["node"]`（或執行 `mise settings add idiomatic_version_file_enable_tools node`），mise 才會讀取 `.node-version`。
-- 驗證：`node --version` 應等於 `.node-version` 的內容；`mise ls --current` 的 node 來源應為 `.node-version`。
+- 非 devcontainer 的本機：以任何方式（官方安裝程式、版本管理工具或系統套件管理員）安裝與 `.node-version` 完全相同的 Node 版本，並讓執行 Gradle 的 shell 的 `PATH` 找得到 `node`。
+- 驗證：`node --version` 應等於 `.node-version` 的內容；若使用版本管理工具，請確認它解析出的版本等於 `.node-version`。
 
 ## 使用 colima 時的設定
 
@@ -28,7 +28,7 @@ colima 的 socket 不在 Testcontainers 預設尋找的位置，需要在執行�
 ## 環境變數的管理
 
 - 設定只屬於個人環境，不寫入專案的程式或組態檔。
-- 可由 shell 設定檔、IDE 執行組態，或 mise 這類環境管理工具提供；無論來源為何，必須讓執行 Gradle 的程序繼承到。
+- 可由 shell 設定檔、IDE 執行組態，或其他環境管理工具提供；無論來源為何，必須讓執行 Gradle 的程序繼承到。
 - 環境變數未生效時，資料庫測試失敗於 Testcontainers 尋找 Docker 的階段，與專案程式碼無關。
 
 ## 待確認問題

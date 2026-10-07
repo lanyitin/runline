@@ -34,7 +34,7 @@
 | [WI-27](WI-27-repository-baseline.md) | 版本庫的初始整理與初始 commit | 無 |
 | [WI-28](WI-28-build-info-and-system-endpoints.md) | 建置資訊注入，`GET /api/v1/info` 與 `GET /api/v1/system` | WI-18、WI-27 |
 | [WI-29](WI-29-health-probes.md) | 存活與就緒探測端點 | WI-08、WI-18 |
-| [WI-30](WI-30-node-toolchain.md) | 開發環境的 Node 工具鏈（devcontainer、mise） | 無 |
+| [WI-30](WI-30-node-toolchain.md) | 開發環境的 Node 工具鏈（devcontainer、本機安裝） | 無 |
 | [WI-31](WI-31-frontend-build-and-static-serving.md) | 前端建置接進 Gradle，Engine 提供靜態檔與 SPA fallback | WI-28、WI-30 |
 | [WI-32](WI-32-reproducible-release-build.md) | 固定平台上位元組級可重現的發佈建置 | WI-28、WI-31 |
 | [WI-33](WI-33-console-shell-and-i18n.md) | Console 骨架、設計系統、多語系基礎、不可信內容顯示機制 | WI-31 |

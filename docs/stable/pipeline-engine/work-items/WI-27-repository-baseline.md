@@ -12,7 +12,6 @@
 - 專案根目錄有忽略規則，使下列內容不被版本控制：
   - 建置產物與快取：各模組與根目錄的建置輸出、Gradle 與 Kotlin 的快取與工作目錄、Kotlin/JS 的鎖定與暫存目錄。
   - IDE 與工具的個人設定：IntelliJ、VS Code 與 superdesign 的設定目錄。
-  - 個人環境檔：根目錄的 mise 設定檔（含本機的容器 socket 路徑）。
   - 執行期與測試產生的檔案：開發入口預設的錄製與工作目錄（`.runline/`）、測試寫入的暫存檔。
   - 本機覆寫的 Claude Code 設定（若存在）；`.claude/` 中的 agent 定義與共用設定納入版本控制。
 - `.devcontainer/`、`docs/`、各模組的原始碼與建置設定、Gradle wrapper、`gradle/` 目錄、`gradle.properties`、`README.md` 納入版本控制。

@@ -169,4 +169,93 @@ class JdbcInvalidationTest {
     assertFailsWith<IllegalArgumentException> { JdbcProfiles(listOf(silent)) }
     JdbcProfiles(listOf(declared))
   }
+
+  /** A real TCP relay that can be made to stop passing bytes without closing, like a dead route. */
+  private class FreezableProxy(private val targetPort: Int) : AutoCloseable {
+    private val server = java.net.ServerSocket(0)
+    @Volatile var frozen = false
+    val port = server.localPort
+    private val sockets = java.util.concurrent.CopyOnWriteArrayList<java.net.Socket>()
+
+    init {
+      Thread.ofPlatform().daemon().start {
+        try {
+          while (true) {
+            val client = server.accept()
+            val upstream = java.net.Socket(RealPostgres.host, targetPort)
+            sockets += client
+            sockets += upstream
+            pipe(client, upstream)
+            pipe(upstream, client)
+          }
+        } catch (e: java.io.IOException) {
+          // closed
+        }
+      }
+    }
+
+    private fun pipe(from: java.net.Socket, to: java.net.Socket) {
+      Thread.ofPlatform().daemon().start {
+        try {
+          val buffer = ByteArray(8192)
+          while (true) {
+            val n = from.getInputStream().read(buffer)
+            if (n < 0) break
+            while (frozen) Thread.sleep(20)
+            to.getOutputStream().write(buffer, 0, n)
+          }
+        } catch (e: Exception) {
+          // closed
+        }
+      }
+    }
+
+    override fun close() {
+      server.close()
+      sockets.forEach { runCatching { it.close() } }
+    }
+  }
+
+  @Test
+  fun `a forced release returns in bounded time even when the network to the database is dead`() {
+    FreezableProxy(RealPostgres.port).use { proxy ->
+      val host = rig.host(port = proxy.port)
+      assertEquals(1L, rig.query(host, "SELECT 1 AS one").single()["one"])
+      val running =
+          threads.submit<Failed> {
+            assertFailsWith<Failed> { rig.query(host, "SELECT pg_sleep(20)") }
+          }
+      Thread.sleep(500)
+      proxy.frozen = true
+
+      val started = System.nanoTime()
+      host.invalidate("db", Invalidation.FORCE_RELEASED)
+      val tookMillis = (System.nanoTime() - started) / 1_000_000
+      val told = running.get(15, TimeUnit.SECONDS)
+
+      assertEquals(ResourceFailure.CANCELLED, told.failure)
+      assertTrue(tookMillis < 8_000, "the release took $tookMillis ms")
+    }
+  }
+
+  @Test
+  fun `a statement that waits for the run's share is let go when the run is released`() {
+    val host = rig.host(extra = """"timeouts":{"quotaWaitMs":30000}""")
+    val first =
+        threads.submit<Failed> {
+          assertFailsWith<Failed> { rig.query(host, "SELECT pg_sleep(30)") }
+        }
+    while (rig.db.active("runline") < 1) Thread.sleep(20)
+    val waiting = threads.submit<Failed> { assertFailsWith<Failed> { rig.query(host, "SELECT 1") } }
+    Thread.sleep(300)
+
+    host.invalidate("db", Invalidation.FORCE_RELEASED)
+
+    assertEquals(ResourceFailure.CANCELLED, first.get(15, TimeUnit.SECONDS).failure)
+    val second = waiting.get(15, TimeUnit.SECONDS).failure
+    assertTrue(
+        second == ResourceFailure.CANCELLED || second == ResourceFailure.FORCE_RELEASED,
+        "$second",
+    )
+  }
 }

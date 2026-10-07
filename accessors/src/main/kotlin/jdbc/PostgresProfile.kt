@@ -78,6 +78,8 @@ object PostgresProfile : JdbcProfile {
     properties.setProperty("password", password.orEmpty())
     val seconds = (connectTimeoutMillis + 999) / 1000
     properties.setProperty("connectTimeout", seconds.toString())
+    // A cancel that cannot reach the server (a dead route) must not hold up cutting the connection.
+    properties.setProperty("cancelSignalTimeout", CANCEL_SIGNAL_SECONDS.toString())
     // The whole of logging in is allowed a little longer than reaching the server, so that a server
     // that cannot be reached is always the connect limit's failure and never a race between the
     // two.
@@ -120,6 +122,7 @@ object PostgresProfile : JdbcProfile {
   private val DATABASE = Regex("[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}")
   private val IDENTIFIERS =
       Regex("[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}")
+  private const val CANCEL_SIGNAL_SECONDS = 2
   private const val DEFAULT_APPLICATION = "runline"
   private const val LOGIN_MARGIN_SECONDS = 5L
   private val STATE = Regex("[0-9A-Z]{5}")

@@ -29,6 +29,9 @@ internal class OpenedUpload(
     val stream: InputStream,
     private val files: List<Closeable>,
 ) : Closeable {
+  /** The same form read through [wrapped] (a stream that reads from this one). */
+  fun reading(wrapped: InputStream) = OpenedUpload(contentType, length, wrapped, files)
+
   /** Lets go of the files the form reads from. */
   override fun close() {
     files.forEach { runCatching { it.close() } }

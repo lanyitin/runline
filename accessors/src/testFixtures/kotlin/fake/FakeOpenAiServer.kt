@@ -93,6 +93,18 @@ class FakeOpenAiServer(
   /** How long the default routes keep a client waiting before they answer. */
   @Volatile var responseDelayMillis: Long = 0
 
+  /**
+   * How long the Fake waits after each 8 KiB it reads of a request body: a slow receiver. Can be
+   * changed while a request is being received.
+   */
+  @Volatile var uploadChunkDelayMillis: Long = 0
+
+  /** How many bytes of request bodies the Fake has read, also of requests that did not end. */
+  val bytesReceived: Long
+    get() = received.get()
+
+  private val received = java.util.concurrent.atomic.AtomicLong()
+
   /** How long the default streaming route waits before each chunk. */
   @Volatile var chunkDelayMillis: Long = 0
 
@@ -193,9 +205,34 @@ class FakeOpenAiServer(
         if (headers["transfer-encoding"]?.any { it.equals("chunked", true) } == true) {
           chunked(buffered)
         } else {
-          buffered.readNBytes(headers["content-length"]?.firstOrNull()?.toInt() ?: 0)
+          sized(buffered, headers["content-length"]?.firstOrNull()?.toInt() ?: 0) ?: return null
         }
     return FakeRequest(parts[0], parts[1], headers, body)
+  }
+
+  /**
+   * [length] bytes of body, read 8 KiB at a time as slowly as [uploadChunkDelayMillis] says; null
+   * when the client went away before the end of it (counted as gone).
+   */
+  private fun sized(input: InputStream, length: Int): ByteArray? {
+    val out = ByteArrayOutputStream(minOf(length, 1 shl 20))
+    val buffer = ByteArray(8192)
+    while (out.size() < length) {
+      val count =
+          try {
+            input.read(buffer, 0, minOf(buffer.size, length - out.size()))
+          } catch (e: IOException) {
+            -1
+          }
+      if (count < 0) {
+        gone.incrementAndGet()
+        return null
+      }
+      out.write(buffer, 0, count)
+      received.addAndGet(count.toLong())
+      if (uploadChunkDelayMillis > 0) Thread.sleep(uploadChunkDelayMillis)
+    }
+    return out.toByteArray()
   }
 
   private fun line(input: InputStream): String? {

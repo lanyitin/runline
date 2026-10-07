@@ -340,7 +340,16 @@ class OpenAiBinding(
     var hops = 0
     while (true) {
       val client = clientFor(call.limits.connectMillis)
-      val content = upload?.open(settings.maxRequestBytes)?.also { call.holding(it) }
+      val content =
+          upload
+              ?.open(settings.maxRequestBytes)
+              ?.also {
+                call.holding(it)
+                // The idle limit also covers the sending: a form that stops going out is idle.
+              }
+              ?.let { opened ->
+                Progress(call, opened.stream).also { call.holding(it) }.let(opened::reading)
+              }
       val response =
           awaitHeaders(
               call,
@@ -383,6 +392,45 @@ class OpenAiBinding(
           "headers" to answerHeaders(response.headers().map()),
           "body" to text,
       )
+    }
+  }
+
+  /**
+   * The bytes of a form as the client takes them: the idle limit runs from each taking to the next,
+   * so an upload that the service stops reading, or a client that stops sending, ends as idle.
+   */
+  private inner class Progress(private val call: Call, private val inner: InputStream) :
+      InputStream(), Closeable {
+    @Volatile private var timer: ScheduledFuture<*>? = null
+
+    private fun arm() {
+      timer?.cancel(false)
+      timer =
+          TIMERS.schedule(
+              { call.stop(ResourceFailure.IDLE_TIMEOUT) },
+              call.limits.idleMillis,
+              TimeUnit.MILLISECONDS,
+          )
+    }
+
+    private fun disarm() {
+      timer?.cancel(false)
+      timer = null
+    }
+
+    override fun read(): Int {
+      arm()
+      return inner.read().also { if (it < 0) disarm() }
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+      arm()
+      return inner.read(buffer, offset, length).also { if (it < 0) disarm() }
+    }
+
+    override fun close() {
+      disarm()
+      inner.close()
     }
   }
 

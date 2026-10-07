@@ -496,4 +496,112 @@ class OpenAiBindingMultipartTest {
     assertEquals(ResourceFailure.INVALID_ARGUMENT, bodyOnForm.failure)
     assertEquals(0, server.requests.size)
   }
+
+  private fun await(what: String, seconds: Long = 15, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + seconds * 1_000_000_000
+    while (!condition()) {
+      check(System.nanoTime() < deadline) { "gave up waiting for $what" }
+      Thread.sleep(10)
+    }
+  }
+
+  /** Runs [block] on a thread of its own and gives what it threw, or null. */
+  private fun inThread(block: () -> Unit): java.util.concurrent.Future<Throwable?> =
+      java.util.concurrent.Executors.newSingleThreadExecutor().submit<Throwable?> {
+        try {
+          block()
+          null
+        } catch (e: Throwable) {
+          e
+        }
+      }
+
+  private fun bigFile(name: String, bytes: Int) {
+    java.io.RandomAccessFile(shared.resolve(name).toFile(), "rw").use {
+      it.setLength(bytes.toLong())
+    }
+  }
+
+  @Test
+  fun `an upload that is cut off while it goes out ends as cancelled and the service sees the client leave`() {
+    bigFile("big.bin", 20 * 1024 * 1024)
+    server.uploadChunkDelayMillis = 20
+    val b = binding("\"endpoints\":[\"files.create\"],\"maxRequestBytes\":33554432")
+    val outcome = inThread { upload(b, files = listOf(scopedPart("file", shared, "big.bin"))) }
+    await("the service to be receiving") { server.bytesReceived > 64 * 1024 }
+
+    b.abort()
+    server.uploadChunkDelayMillis = 0
+
+    val failure = outcome.get(15, java.util.concurrent.TimeUnit.SECONDS)
+    assertEquals(ResourceFailure.CANCELLED, (failure as ResourceOperationFailure).failure)
+    await("the service to see the client leave") { server.clientsGone == 1 }
+    assertEquals(0, server.requests.size, "the form never arrived whole")
+  }
+
+  @Test
+  fun `an upload that stops making progress for longer than the idle limit ends with the idle category`() {
+    bigFile("big.bin", 20 * 1024 * 1024)
+    server.uploadChunkDelayMillis = 10_000
+    val b =
+        binding(
+            "\"endpoints\":[\"files.create\"],\"maxRequestBytes\":33554432,\"timeouts\":{\"idleMs\":400}"
+        )
+
+    val failure =
+        assertFailsWith<ResourceOperationFailure> {
+          upload(b, files = listOf(scopedPart("file", shared, "big.bin")))
+        }
+    server.uploadChunkDelayMillis = 0
+
+    assertEquals(ResourceFailure.IDLE_TIMEOUT, failure.failure)
+    await("the service to see the client leave") { server.clientsGone == 1 }
+  }
+
+  @Test
+  fun `a slow upload that keeps going is not idle, however long it takes as a whole`() {
+    bigFile("big.bin", 12 * 1024 * 1024)
+    server.uploadChunkDelayMillis = 3
+    val b =
+        binding(
+            "\"endpoints\":[\"files.create\"],\"maxRequestBytes\":33554432,\"timeouts\":{\"idleMs\":300}"
+        )
+
+    val started = System.nanoTime()
+    val answer = upload(b, files = listOf(scopedPart("file", shared, "big.bin")))
+
+    assertEquals(200, answer["status"])
+    assertTrue(
+        (System.nanoTime() - started) / 1_000_000 > 300,
+        "it took longer than the idle limit",
+    )
+    assertEquals(12L * 1024 * 1024, server.storedFiles.values.single().bytes.size.toLong())
+  }
+
+  @Test
+  fun `a file is read as it goes out, not held whole, however large it is`() {
+    bigFile("big.bin", 96 * 1024 * 1024)
+    server.uploadChunkDelayMillis = 10_000
+    val b = binding("\"endpoints\":[\"files.create\"],\"maxRequestBytes\":134217728")
+    val settled = used()
+
+    val outcome = inThread { upload(b, files = listOf(scopedPart("file", shared, "big.bin"))) }
+    await("the upload to be under way") { server.bytesReceived > 0 }
+    Thread.sleep(1000)
+    val during = used()
+    b.abort()
+    server.uploadChunkDelayMillis = 0
+    outcome.get(30, java.util.concurrent.TimeUnit.SECONDS)
+
+    assertTrue(
+        during - settled < 48L * 1024 * 1024,
+        "the heap grew by ${(during - settled) / 1024} KiB",
+    )
+  }
+
+  /** The heap in use after a collection. */
+  private fun used(): Long {
+    repeat(3) { System.gc() }
+    return Runtime.getRuntime().let { it.totalMemory() - it.freeMemory() }
+  }
 }

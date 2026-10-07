@@ -364,6 +364,7 @@ describe('untrusted content is text, on every screen', () => {
 
       await tab.page.goto(`${engineUrl}/resources`);
       await tab.page.getByRole('button', { name: 'Define a resource' }).click();
+      await dialog(tab.page).locator('#resource-type').selectOption('counter');
       await dialog(tab.page).locator('#resource-name').fill(RESOURCE_NAME);
       await dialog(tab.page).locator('#resource-capacity').fill('1');
       await dialog(tab.page).locator('button[type="submit"], button.primary').last().click();

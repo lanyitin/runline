@@ -422,6 +422,7 @@ describe('shared resources', () => {
     const context = await newContext(browser, 'en-US');
     const { page } = await signedIn(context, root, '/resources');
     await page.getByRole('button', { name: 'Define a resource' }).first().click();
+    await dialog(page).locator('#resource-type').selectOption('counter');
     await dialog(page).locator('#resource-name').fill(name);
     await dialog(page).locator('#resource-capacity').fill('0');
     await dialog(page).getByRole('button', { name: 'Define' }).click();

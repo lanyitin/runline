@@ -18,6 +18,8 @@ export interface Metadata {
   network: { unrestricted: boolean; allow: string[] };
   processes: { unrestricted: boolean; allow: string[] };
   resources: string[];
+  /** The type expected of a declared resource, by its name; only those declared with a type. */
+  resourceTypes: Record<string, string>;
 }
 
 export interface Reason {
@@ -134,6 +136,12 @@ function parseMetadata(value: unknown): Metadata {
     network: access(record.network, 'metadata.network'),
     processes: access(record.processes, 'metadata.processes'),
     resources: strings(record.resources, 'metadata.resources'),
+    resourceTypes: Object.fromEntries(
+      Object.entries(obj(record.resourceTypes ?? {}, 'metadata.resourceTypes')).map(([name, type]) => [
+        name,
+        str(type, 'metadata.resourceTypes'),
+      ]),
+    ),
   };
 }
 

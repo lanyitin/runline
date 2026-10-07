@@ -366,6 +366,113 @@ describe('shared resources', () => {
   });
 });
 
+describe('typed resources, checks, deleting and secrets', () => {
+  test('a resource has its type, settings, secret alias and status, last check and the definitions that declare it', async () => {
+    const api = await start();
+    app.engine.backend.secrets.configure([{ alias: 'llm-key', type: 'secret', status: 'found', fingerprint: 'a' }]);
+    app.engine.backend.resources.define('llm', {
+      type: 'openai-compatible',
+      settings: { baseUrl: 'http://llm.internal:8000/v1' },
+      secretAlias: 'llm-key',
+      lastCheck: { ok: false, failure: 'connection_failed', checkedAt: '2026-10-07T01:02:03Z' },
+    });
+    const { artifact } = await api.uploadJar(asFile(demoJars().resource));
+    app.engine.backend.defineResource('demo-printer');
+
+    const byName = Object.fromEntries((await api.resources()).map((r) => [r.name, r]));
+
+    expect(byName.llm).toMatchObject({
+      type: 'openai-compatible',
+      settings: { baseUrl: 'http://llm.internal:8000/v1' },
+      secretAlias: 'llm-key',
+      secretStatus: 'found',
+      lastCheck: { ok: false, failure: 'connection_failed', checkedAt: '2026-10-07T01:02:03Z' },
+      declaredBy: { count: 0, triggers: 0, definitions: [] },
+    });
+    expect(byName['demo-printer']).toMatchObject({
+      type: 'counter',
+      settings: {},
+      secretAlias: null,
+      secretStatus: 'not_set',
+      lastCheck: null,
+      declaredBy: {
+        count: 1,
+        triggers: 0,
+        definitions: [
+          { contentHash: artifact.contentHash, uploader: 'root', pipeline: 'demo-resource', declaredType: null, triggers: 0 },
+        ],
+      },
+    });
+  });
+
+  test('a check gives its result, which is the last check of the resource from then on', async () => {
+    const api = await start();
+    app.engine.backend.resources.define('share', { type: 'file', settings: { path: 'out.txt' }, entityFailure: 'root_unavailable' });
+
+    const result = await api.checkResource('share');
+
+    expect(result).toEqual({ ok: false, failure: 'root_unavailable', checkedAt: expect.any(String) });
+    expect((await api.resources())[0].lastCheck).toEqual(result);
+  });
+
+  test('deleting is previewed, then done; a resource in use is a 409 resource_in_use with the counts', async () => {
+    const api = await start();
+    app.engine.backend.defineResource('printer');
+    app.engine.backend.defineResource('scanner');
+    const run = app.engine.backend.seedRun('ada', { state: 'RUNNING', pipeline: 'r' });
+    app.engine.backend.seedHolder('scanner', run.runId, 'r');
+
+    expect(await api.deleteResource('printer', { preview: true })).toEqual({
+      resource: 'printer',
+      definitions: 0,
+      triggers: 0,
+      holders: 0,
+      waiters: 0,
+      inUse: false,
+    });
+    expect(await api.deleteResource('printer')).toBeNull();
+    expect((await api.resources()).map((r) => r.name)).toEqual(['scanner']);
+    await expect(api.deleteResource('scanner')).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'resource_in_use', holders: 1, waiters: 0 },
+    });
+  });
+
+  test('the secrets are listed with their type, status and users; a reload says how many and what changed', async () => {
+    const api = await start();
+    const secrets = app.engine.backend.secrets;
+    secrets.configure([{ alias: 'llm-key', type: 'secret', status: 'found', fingerprint: 'a' }]);
+    app.engine.backend.resources.define('llm', { type: 'openai-compatible', settings: { baseUrl: 'http://x/v1' }, secretAlias: 'llm-key' });
+
+    expect(await api.secrets()).toEqual([{ alias: 'llm-key', type: 'secret', status: 'found', usedBy: ['llm'] }]);
+
+    secrets.writeFile({
+      entries: [
+        { alias: 'llm-key', type: 'secret', status: 'found', fingerprint: 'b' },
+        { alias: 'ca', type: 'trusted_certificate', status: 'found', fingerprint: 'c' },
+      ],
+    });
+    expect(await api.reloadSecrets()).toEqual({
+      aliases: 2,
+      changed: [
+        { alias: 'ca', usedBy: [] },
+        { alias: 'llm-key', usedBy: ['llm'] },
+      ],
+    });
+  });
+
+  test('a keystore that is not configured or cannot be read is a failure with its code and problem', async () => {
+    const api = await start();
+    await expect(api.secrets()).rejects.toMatchObject({ status: 409, body: { error: 'secret_store_not_configured' } });
+    app.engine.backend.secrets.configure([]);
+    app.engine.backend.secrets.writeFile({ problem: 'wrong_password' });
+    await expect(api.reloadSecrets()).rejects.toMatchObject({
+      status: 422,
+      body: { error: 'secret_store_unreadable', problem: 'wrong_password' },
+    });
+  });
+});
+
 describe('unsafe execution and deleting a version', () => {
   test('unsafe execution is allowed for one pipeline of one version, and the answer says who and when', async () => {
     const api = await start();

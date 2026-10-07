@@ -10,7 +10,12 @@ export type EnumGroup =
   | 'triggerKind'
   | 'firingOutcome'
   | 'allowAction'
-  | 'allowKind';
+  | 'allowKind'
+  | 'resourceType'
+  | 'secretStatus'
+  | 'checkFailure'
+  | 'secretType'
+  | 'keystoreStatus';
 
 /**
  * The words for a value of an enumeration of the API (`state`, `verdict`, `reasons[].kind`, ...),

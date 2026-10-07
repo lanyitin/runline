@@ -279,4 +279,37 @@ describe('the page of a pipeline', () => {
     expect(view.textContent).toContain('宣告的內容');
     expect(view.textContent).toContain('建立 run');
   });
+
+  test('has each shared resource it declares with the type it expects and whether it can be used now, which a developer sees too', async () => {
+    const view = await page({
+      pipelines: [
+        {
+          name: 'order-sync',
+          className: 'com.acme.OrderSync',
+          resources: ['printer', 'scanner', 'report', 'llm', 'odd', 'erp-api'],
+          resourceTypes: { report: 'file', llm: 'openai-compatible', odd: 'quantum' },
+        },
+      ],
+    });
+    app.engine.backend.defineResource('printer');
+    app.engine.backend.defineResource('scanner', false);
+    app.engine.backend.defineResource('report');
+    app.engine.backend.defineResource('odd');
+    app.engine.backend.resources.define('llm', { type: 'openai-compatible', settings: { baseUrl: 'http://x/v1' } });
+    await ready(view);
+
+    const rows = [...section(view, 'Shared resources').querySelectorAll('li')].map((li) => [
+      li.querySelector('.name')!.textContent!.trim(),
+      li.querySelector('.declared-type')!.textContent!.trim(),
+      li.querySelector('.status')!.textContent!.trim(),
+    ]);
+    expect(rows).toEqual([
+      ['printer', 'any type', 'Available'],
+      ['scanner', 'any type', 'Disabled'],
+      ['report', 'expects File', 'Defined as another type'],
+      ['llm', 'expects OpenAI-compatible service', 'Available'],
+      ['odd', 'expects quantum', 'Not a type the Engine knows'],
+      ['erp-api', 'any type', 'Not defined'],
+    ]);
+  });
 });

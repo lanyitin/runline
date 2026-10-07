@@ -470,8 +470,8 @@ describe('creating a run and watching it', () => {
       .waitFor();
     await shot(page, 'create-run-unsafe-en');
 
-    // An Engine cannot delete a shared resource: when the admin tests defined demo-printer, it is
-    // disabled here, and the Engine says that instead.
+    // When the admin tests defined demo-printer (they leave it defined), it is disabled here, and the
+    // Engine says that instead.
     const defined = (await api(root, '/api/v1/resources/demo-printer')).status === 200;
     if (defined) {
       await api(root, '/api/v1/resources/demo-printer', {

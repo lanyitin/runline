@@ -4,7 +4,7 @@
 // enumerations (`kind`, `outcome`, `action`, `problem`) are kept as they came: one that a newer
 // Engine adds is shown as it is, not refused.
 
-import { bool, list, num, obj, str, strOrNull, type Obj } from './parse.ts';
+import { bool, list, num, obj, str, strOrNull, strings, type Obj } from './parse.ts';
 
 export interface Trigger {
   name: string;
@@ -127,16 +127,71 @@ export interface Waiter {
   waitedSeconds: number;
 }
 
+/** The result of a check of a resource's entity: a category when it failed, never a reason. */
+export interface CheckResult {
+  ok: boolean;
+  /** `root_unavailable`, `connection_failed`, `alias_missing`, ...; null when it passed. */
+  failure: string | null;
+  checkedAt: string;
+}
+
+/** A pipeline definition that declares a resource: the version, the pipeline and what it expects. */
+export interface DeclaringDefinition {
+  contentHash: string;
+  uploader: string;
+  pipeline: string;
+  /** The type the definition expects; null when it declares only the name. */
+  declaredType: string | null;
+  /** The triggers bound to this definition. */
+  triggers: number;
+}
+
 export interface Resource {
   name: string;
+  /** `counter`, `file`, `jdbc-pool` or `openai-compatible` (ADR-019). */
+  type: string;
   capacity: number;
   enabled: boolean;
+  /** The type's settings that are not secret, as the Engine wrote them. */
+  settings: Record<string, unknown>;
+  /** The alias of the secret in the keystore; never a secret value. */
+  secretAlias: string | null;
+  /** `not_set`, `found`, `missing` or `invalid_secret`. */
+  secretStatus: string;
+  lastCheck: CheckResult | null;
+  declaredBy: { count: number; triggers: number; definitions: DeclaringDefinition[] };
   createdBy: string;
   createdAt: string;
   updatedBy: string;
   updatedAt: string;
   holders: Holder[];
   waiters: Waiter[];
+}
+
+/** What deleting a resource would touch (`preview=true`); nothing has been changed. */
+export interface RemovalPreview {
+  resource: string;
+  definitions: number;
+  triggers: number;
+  holders: number;
+  waiters: number;
+  inUse: boolean;
+}
+
+/** An alias of the keystore: what it is and which resources use it; never its value. */
+export interface Secret {
+  alias: string;
+  /** `secret`, `trusted_certificate` or `private_key`. */
+  type: string;
+  /** `found` or `invalid_secret`. */
+  status: string;
+  usedBy: string[];
+}
+
+/** What a reload of the keystore found: how many aliases, and those that changed. */
+export interface SecretReload {
+  aliases: number;
+  changed: Array<{ alias: string; usedBy: string[] }>;
 }
 
 export interface Release {
@@ -284,12 +339,45 @@ export function parseAllowListChange(json: unknown): AllowListChange {
   };
 }
 
+export function parseCheck(json: unknown): CheckResult {
+  const r = obj(json, 'a check');
+  return {
+    ok: bool(r.ok, 'check ok'),
+    failure: strOrNull(r.failure, 'check failure'),
+    checkedAt: str(r.checkedAt, 'check checkedAt'),
+  };
+}
+
+function readDeclaredBy(value: unknown): Resource['declaredBy'] {
+  const r = obj(value, 'resource declaredBy');
+  return {
+    count: num(r.count, 'declaredBy count'),
+    triggers: num(r.triggers, 'declaredBy triggers'),
+    definitions: list(r.definitions, 'declaredBy definitions', (d) => {
+      const definition = obj(d, 'a declaring definition');
+      return {
+        contentHash: str(definition.contentHash, 'declaring contentHash'),
+        uploader: str(definition.uploader, 'declaring uploader'),
+        pipeline: str(definition.pipeline, 'declaring pipeline'),
+        declaredType: strOrNull(definition.declaredType, 'declaring declaredType'),
+        triggers: num(definition.triggers, 'declaring triggers'),
+      };
+    }),
+  };
+}
+
 export function parseResource(json: unknown): Resource {
   const r = obj(json, 'a shared resource');
   return {
     name: str(r.name, 'resource name'),
+    type: str(r.type, 'resource type'),
     capacity: num(r.capacity, 'resource capacity'),
     enabled: bool(r.enabled, 'resource enabled'),
+    settings: obj(r.settings, 'resource settings'),
+    secretAlias: strOrNull(r.secretAlias, 'resource secretAlias'),
+    secretStatus: str(r.secretStatus, 'resource secretStatus'),
+    lastCheck: r.lastCheck === null || r.lastCheck === undefined ? null : parseCheck(r.lastCheck),
+    declaredBy: readDeclaredBy(r.declaredBy),
     createdBy: str(r.createdBy, 'resource createdBy'),
     createdAt: str(r.createdAt, 'resource createdAt'),
     updatedBy: str(r.updatedBy, 'resource updatedBy'),
@@ -318,6 +406,41 @@ export function parseResource(json: unknown): Resource {
 
 export function parseResources(json: unknown): Resource[] {
   return list(obj(json, 'the resources').resources, 'resources', parseResource);
+}
+
+export function parseRemovalPreview(json: unknown): RemovalPreview {
+  const r = obj(json, 'a preview of deleting a resource');
+  return {
+    resource: str(r.resource, 'preview resource'),
+    definitions: num(r.definitions, 'preview definitions'),
+    triggers: num(r.triggers, 'preview triggers'),
+    holders: num(r.holders, 'preview holders'),
+    waiters: num(r.waiters, 'preview waiters'),
+    inUse: bool(r.inUse, 'preview inUse'),
+  };
+}
+
+export function parseSecrets(json: unknown): Secret[] {
+  return list(obj(json, 'the secrets').secrets, 'secrets', (v) => {
+    const r = obj(v, 'a secret');
+    return {
+      alias: str(r.alias, 'secret alias'),
+      type: str(r.type, 'secret type'),
+      status: str(r.status, 'secret status'),
+      usedBy: strings(r.usedBy, 'secret usedBy'),
+    };
+  });
+}
+
+export function parseSecretReload(json: unknown): SecretReload {
+  const r = obj(json, 'a reload of the keystore');
+  return {
+    aliases: num(r.aliases, 'reload aliases'),
+    changed: list(r.changed, 'reload changed', (v) => {
+      const changed = obj(v, 'a changed alias');
+      return { alias: str(changed.alias, 'changed alias'), usedBy: strings(changed.usedBy, 'changed usedBy') };
+    }),
+  };
 }
 
 export function parseRelease(json: unknown): Release {

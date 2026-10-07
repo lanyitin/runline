@@ -2,14 +2,20 @@
   import { ApiFailure } from '../api/failure';
   import type { Resource } from '../api/admin-model';
   import { useApp } from '../app/context';
+  import { enumLabel } from '../i18n/enums';
+  import { formTypes } from './resource-types';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
   import Dialog from '../ui/Dialog.svelte';
+  import PlainText from '../ui/PlainText.svelte';
 
   // Defines a shared resource (`POST /api/v1/resources`) or changes the capacity and whether it is
-  // enabled (`PATCH`). It says what lowering the capacity and disabling do (ADR-007: nothing is taken
-  // back from the holders; the runs that wait for a disabled resource fail), and warns, with the
-  // number, when disabling would fail runs that are waiting now. What the Engine refuses is said at
-  // the field it is about, or in the dialog.
+  // enabled (`PATCH`). A new resource's type is chosen first, among the types the Console has a form
+  // for (resource-types.ts; ADR-019), and the fields of that type follow; the name and the type
+  // cannot be changed afterwards, so a change shows them as they are. No form takes a secret value:
+  // secrets are in the keystore, which operators manage. It says what lowering the capacity and
+  // disabling do (ADR-007: nothing is taken back from the holders; the runs that wait for a disabled
+  // resource fail), and warns, with the number, when disabling would fail runs that are waiting now.
+  // What the Engine refuses is said at the field it is about, or in the dialog.
   interface Props {
     /** The resource to change; none to define a new one. */
     resource?: Resource;
@@ -21,6 +27,8 @@
   const { i18n, api } = useApp();
   // svelte-ignore state_referenced_locally
   const editing = resource !== undefined;
+  /** The type chosen for a new resource; '' until one is. */
+  let type = $state('');
   // svelte-ignore state_referenced_locally
   let name = $state(resource?.name ?? '');
   // svelte-ignore state_referenced_locally
@@ -40,6 +48,10 @@
     if (busy) return;
     failure = null;
     const found: Record<string, string> = {};
+    if (!editing && type === '') {
+      errors = { 'resource-type': i18n.t('resources.form.type.required') };
+      return;
+    }
     if (!editing && name.trim() === '') found['resource-name'] = i18n.t('resources.form.name.required');
     const count = /^\d+$/.test(capacity.trim()) ? Number(capacity.trim()) : NaN;
     if (!Number.isInteger(count) || count < 1) {
@@ -59,7 +71,7 @@
             ...(count !== resource!.capacity ? { capacity: count } : {}),
             ...(enabled !== resource!.enabled ? { enabled } : {}),
           })
-        : await api.createResource({ name: name.trim(), capacity: count });
+        : await api.createResource({ name: name.trim(), type, capacity: count });
       onfinished(done);
     } catch (error) {
       const refused = asFailure(error);
@@ -87,44 +99,78 @@
       void save();
     }}
   >
-    {#if !editing}
+    {#if editing}
+      <dl class="fixed">
+        <div>
+          <dt>{i18n.t('resources.form.name')}</dt>
+          <dd><PlainText value={resource!.name} mono /></dd>
+        </div>
+        <div>
+          <dt>{i18n.t('resources.form.type')}</dt>
+          <dd>{enumLabel(i18n.translate, 'resourceType', resource!.type)}</dd>
+        </div>
+      </dl>
+      <span class="rl-help">{i18n.t('resources.form.fixed')}</span>
+    {:else}
       <div class="rl-field">
-        <label for="resource-name">{i18n.t('resources.form.name')}</label>
-        <input
-          id="resource-name"
-          class="rl-input mono"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
+        <label for="resource-type">{i18n.t('resources.form.type')}</label>
+        <select
+          id="resource-type"
+          class="rl-input"
           data-autofocus
-          aria-invalid={errors['resource-name'] ? 'true' : undefined}
-          bind:value={name}
-          oninput={() => delete errors['resource-name']}
-        />
-        <span class="rl-help">{i18n.t('resources.form.name.help')}</span>
-        {#if errors['resource-name']}<span class="rl-field-error">{errors['resource-name']}</span>{/if}
+          aria-invalid={errors['resource-type'] ? 'true' : undefined}
+          bind:value={type}
+          onchange={() => delete errors['resource-type']}
+        >
+          <option value="">{i18n.t('resources.form.type.choose')}</option>
+          {#each formTypes as option (option)}
+            <option value={option}>{enumLabel(i18n.translate, 'resourceType', option)}</option>
+          {/each}
+        </select>
+        <span class="rl-help">{i18n.t('resources.form.type.help')}</span>
+        {#if errors['resource-type']}<span class="rl-field-error">{errors['resource-type']}</span>{/if}
       </div>
     {/if}
 
-    <div class="rl-field">
-      <label for="resource-capacity">{i18n.t('resources.form.capacity')}</label>
-      <input
-        id="resource-capacity"
-        class="rl-input mono"
-        type="text"
-        inputmode="numeric"
-        autocomplete="off"
-        data-autofocus={editing ? true : undefined}
-        aria-invalid={errors['resource-capacity'] ? 'true' : undefined}
-        bind:value={capacity}
-        oninput={() => {
-          delete errors['resource-capacity'];
-          delete errors['resource-form'];
-        }}
-      />
-      <span class="rl-help">{i18n.t('resources.form.capacity.help')}</span>
-      {#if errors['resource-capacity']}<span class="rl-field-error">{errors['resource-capacity']}</span>{/if}
-    </div>
+    {#if editing || type !== ''}
+      {#if !editing}
+        <div class="rl-field">
+          <label for="resource-name">{i18n.t('resources.form.name')}</label>
+          <input
+            id="resource-name"
+            class="rl-input mono"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            aria-invalid={errors['resource-name'] ? 'true' : undefined}
+            bind:value={name}
+            oninput={() => delete errors['resource-name']}
+          />
+          <span class="rl-help">{i18n.t('resources.form.name.help')}</span>
+          {#if errors['resource-name']}<span class="rl-field-error">{errors['resource-name']}</span>{/if}
+        </div>
+      {/if}
+
+      <div class="rl-field">
+        <label for="resource-capacity">{i18n.t('resources.form.capacity')}</label>
+        <input
+          id="resource-capacity"
+          class="rl-input mono"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          data-autofocus={editing ? true : undefined}
+          aria-invalid={errors['resource-capacity'] ? 'true' : undefined}
+          bind:value={capacity}
+          oninput={() => {
+            delete errors['resource-capacity'];
+            delete errors['resource-form'];
+          }}
+        />
+        <span class="rl-help">{i18n.t('resources.form.capacity.help')}</span>
+        {#if errors['resource-capacity']}<span class="rl-field-error">{errors['resource-capacity']}</span>{/if}
+      </div>
+    {/if}
 
     {#if editing}
       <div class="rl-field">
@@ -161,6 +207,23 @@
 </Dialog>
 
 <style>
+  .fixed {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+  }
+  .fixed div {
+    display: grid;
+    grid-template-columns: 8rem 1fr;
+    gap: var(--space-2);
+  }
+  .fixed dt {
+    color: var(--text-muted);
+  }
+  .fixed dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
   .form {
     display: grid;
     gap: var(--space-4);

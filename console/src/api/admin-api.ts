@@ -9,10 +9,14 @@ import {
   parseAllowList,
   parseAllowListChange,
   parseAllowListVersions,
+  parseCheck,
   parseFirings,
   parseRelease,
   parseResource,
+  parseRemovalPreview,
   parseResources,
+  parseSecretReload,
+  parseSecrets,
   parseTrigger,
   parseTriggers,
   parseTriggerWithSecret,
@@ -21,9 +25,13 @@ import {
   type AllowList,
   type AllowListChange,
   type AllowListVersion,
+  type CheckResult,
   type Firing,
   type Release,
+  type RemovalPreview,
   type Resource,
+  type Secret,
+  type SecretReload,
   type Trigger,
   type TriggerWithSecret,
   type UnsafeSetting,
@@ -163,7 +171,7 @@ export function createAdminApi(transport: Transport) {
     async resources(): Promise<Resource[]> {
       return parseResources(await succeed(await json('/api/v1/resources')));
     },
-    async createResource(request: { name: string; capacity: number }): Promise<Resource> {
+    async createResource(request: { name: string; type?: string; capacity: number }): Promise<Resource> {
       return parseResource(
         await succeed(await json('/api/v1/resources', jsonBody('POST', request))),
       );
@@ -176,12 +184,36 @@ export function createAdminApi(transport: Transport) {
         await succeed(await json(`/api/v1/resources/${q(name)}`, jsonBody('PATCH', change))),
       );
     },
+    /** Checks the entity of the resource now; the answer is its last check from then on. */
+    async checkResource(name: string): Promise<CheckResult> {
+      return parseCheck(
+        await succeed(await json(`/api/v1/resources/${q(name)}/check`, { method: 'POST' })),
+      );
+    },
+    /** With `preview`, what deleting it would touch, and nothing is changed; without, null once deleted. */
+    async deleteResource(name: string, options: ChangeOptions = {}): Promise<RemovalPreview | null> {
+      const answered = await succeed(
+        await json(withPreview(`/api/v1/resources/${q(name)}`, options), { method: 'DELETE' }),
+      );
+      return options.preview ? parseRemovalPreview(answered) : null;
+    },
     /** Makes a holder let go of the resource; its run is not stopped. */
     async releaseHolder(name: string, runId: string): Promise<Release> {
       return parseRelease(
         await succeed(
           await json(`/api/v1/resources/${q(name)}/holders/${q(runId)}/release`, { method: 'POST' }),
         ),
+      );
+    },
+
+    // ---- secrets -----------------------------------------------------------------------------
+    /** The aliases of the keystore; no value of any of them is ever in an answer. */
+    async secrets(): Promise<Secret[]> {
+      return parseSecrets(await succeed(await json('/api/v1/secrets')));
+    },
+    async reloadSecrets(): Promise<SecretReload> {
+      return parseSecretReload(
+        await succeed(await json('/api/v1/secrets/reload', { method: 'POST' })),
       );
     },
 

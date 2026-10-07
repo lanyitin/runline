@@ -10,7 +10,11 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Statement
+import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -134,12 +138,45 @@ internal constructor(
   override fun abort() {
     aborted = true
     lock.withLock { freed.signalAll() }
+    cutRunning()
+  }
+
+  /** Cancels what is running in the database and cuts the connections it runs on. */
+  private fun cutRunning() {
     for ((statement, connection) in running) {
       // The cancel goes to the database over a new connection and can take as long as that does,
       // so it has a limit; the connection is cut whatever came of it.
       val cancel = Thread.ofPlatform().daemon().start { runCatching { statement.cancel() } }
       runCatching { cancel.join(CANCEL_LIMIT_MILLIS) }
       runCatching { connection.abort(Runnable::run) }
+    }
+  }
+
+  /** Where statements are carried out, so that the run's own thread can be told to stop. */
+  private val workers: ExecutorService by lazy {
+    Executors.newCachedThreadPool { task ->
+      Thread.ofPlatform().name("jdbc-statement-$resource").daemon().unstarted(task)
+    }
+  }
+
+  /**
+   * Carries [body] out on a thread of the binding and waits for it on the run's own. A socket read
+   * of a driver does not end when its thread is interrupted, and a run is cancelled by interrupting
+   * it; so the waiting thread is the one that is interrupted, and it then cancels the statement in
+   * the database and cuts its connection, which is what ends the read.
+   */
+  private fun <T> interruptibly(body: () -> T): T {
+    val work = workers.submit(Callable { body() })
+    try {
+      return work.get()
+    } catch (e: InterruptedException) {
+      cutRunning()
+      runCatching { work.get(CANCEL_LIMIT_MILLIS * 2, TimeUnit.MILLISECONDS) }
+      work.cancel(true)
+      Thread.currentThread().interrupt()
+      throw cancelled()
+    } catch (e: ExecutionException) {
+      throw e.cause ?: e
     }
   }
 
@@ -164,6 +201,7 @@ internal constructor(
       }
     } finally {
       if (timerOnce.isInitialized()) timer.shutdownNow()
+      runCatching { workers.shutdownNow() }
       done()
     }
   }
@@ -190,12 +228,14 @@ internal constructor(
     val parameters = parametersOf(arguments["parameters"])
     val open = transaction
     if (open != null) {
-      return open.lock.withLock { guarded { run(open.held.connection, sql, parameters) } }
+      return open.lock.withLock {
+        interruptibly { guarded { run(open.held.connection, sql, parameters) } }
+      }
     }
     val held = acquire()
     var keep = true
     try {
-      return guarded { run(held.connection, sql, parameters) }
+      return interruptibly { guarded { run(held.connection, sql, parameters) } }
     } catch (e: ResourceOperationFailure) {
       // A connection that was cut off, or that broke, or whose statement was stopped halfway, is
       // not used again.
@@ -257,7 +297,13 @@ internal constructor(
           observer.acquireFailed(resource, ResourceFailure.QUOTA_WAIT_TIMEOUT)
           throw ResourceOperationFailure(ResourceFailure.QUOTA_WAIT_TIMEOUT)
         }
-        freed.awaitNanos(left)
+        try {
+          freed.awaitNanos(left)
+        } catch (e: InterruptedException) {
+          // The run was cancelled while it waited for a connection.
+          Thread.currentThread().interrupt()
+          throw cancelled()
+        }
       }
     } finally {
       lock.unlock()
@@ -329,8 +375,10 @@ internal constructor(
         transaction = null
         val connection = open.held.connection
         try {
-          if (commit) connection.commit() else connection.rollback()
-          connection.autoCommit = true
+          interruptibly {
+            if (commit) connection.commit() else connection.rollback()
+            connection.autoCommit = true
+          }
           free(open.held)
         } catch (e: SQLException) {
           // Whatever state it is in, the connection is closed, which ends the transaction.

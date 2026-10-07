@@ -117,6 +117,10 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
   fun activeConnections(resource: String): Int =
       synchronized(lock) { all[resource]?.sumOf { it.pool.active } ?: 0 }
 
+  /** How many runs hold [resource] now, in every generation. */
+  fun holders(resource: String): Int =
+      synchronized(lock) { all[resource]?.sumOf { it.holders } ?: 0 }
+
   /** The connections in use now, by resource, for the resources that have any pool. */
   fun snapshot(): Map<String, Int> =
       synchronized(lock) {

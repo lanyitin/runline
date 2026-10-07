@@ -76,9 +76,16 @@ class AccessorGate(
   private fun prepare(run: PendingRun): Prepared {
     val granted = coordinator.granted(run.id)
     val bindings = LinkedHashMap<String, ResourceBinding>()
-    for (name in run.resourceTypes.keys) {
-      val resource = granted[name] ?: continue
-      behaviors.of(resource.type)?.bind(resource)?.let { bindings[name] = it }
+    try {
+      for (name in run.resourceTypes.keys) {
+        val resource = granted[name] ?: continue
+        behaviors.of(resource.type)?.bind(resource)?.let { bindings[name] = it }
+      }
+    } catch (e: Throwable) {
+      // What was bound before the refusal is let go of: a binding that is never closed holds its
+      // resource's pool for good (a generation of connections that can then never be closed).
+      bindings.values.forEach { runCatching { it.close() } }
+      throw e
     }
     val observer = EngineResourceObserver(run.id, run.pipelineName, runTelemetry, telemetry)
     return Prepared(BoundResources(bindings, observer), observer)

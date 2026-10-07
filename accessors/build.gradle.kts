@@ -14,11 +14,17 @@ dependencies {
   implementation(project(":runner"))
   // The JSON of the requests an `openai-compatible` resource merges and the answers it reads.
   implementation(libs.kotlinx.serialization.json)
+  // The driver of the first database of `jdbc-pool` (WI-48). It ships with the Engine and is loaded
+  // by the Engine's class loader; the run's class loader never has it.
+  implementation(libs.postgresql)
 
   // The behavior every host of accessors must show, run by the Engine's and the development
   // entry's own tests (WI-43): the same acceptance tests for both.
   testFixturesImplementation(kotlin("test-junit5"))
   testFixturesImplementation(libs.kotlinx.serialization.json)
+  // A real PostgreSQL for every test of `jdbc-pool` (WI-48): the same image as the Engine's tests.
+  testFixturesImplementation(libs.testcontainers.postgresql)
+  testFixturesImplementation(libs.postgresql)
 
   testImplementation(kotlin("test"))
   testImplementation(testFixtures(project(":runner")))

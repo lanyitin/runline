@@ -84,6 +84,7 @@ class OpenAiBinding(
         OPERATION -> call(arguments, streaming = false)
         STREAM_OPEN -> call(arguments, streaming = true)
         STREAM_NEXT -> streamOf(arguments).next()
+        STREAM_CLOSE -> streamOf(arguments).end(null).let { null }
         else -> error("unknown operation $operation")
       }
 
@@ -514,6 +515,7 @@ class OpenAiBinding(
     const val OPERATION = "openai.call"
     const val STREAM_OPEN = "openai.stream.open"
     const val STREAM_NEXT = "openai.stream.next"
+    const val STREAM_CLOSE = "openai.stream.close"
     private val REDIRECTS = setOf(301, 302, 303, 307, 308)
     private const val MAX_REDIRECTS = 5
     private const val BUFFER = 16 * 1024

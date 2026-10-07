@@ -125,4 +125,39 @@ class OpenAiBindingStreamTest {
     assertEquals(200, callWithQuotaWait(b, 200)["status"])
     assertEquals(1, server.peakInFlight)
   }
+
+  private fun await(what: String, seconds: Long = 10, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + seconds * 1_000_000_000
+    while (!condition()) {
+      check(System.nanoTime() < deadline) { "gave up waiting for $what" }
+      Thread.sleep(10)
+    }
+  }
+
+  /** A service that sends one event and then goes on without ending the stream. */
+  private fun endless() {
+    server.script = { _, response ->
+      response.beginChunked(200, mapOf("Content-Type" to "text/event-stream"))
+      response.event("""{"n":1}""")
+      response.hang()
+      true
+    }
+  }
+
+  @Test
+  fun `a pipeline that closes a stream drops the connection at once and has its share back`() {
+    endless()
+    val b = binding()
+    val opened = open(b)
+    assertEquals("""{"n":1}""", next(b, opened))
+
+    close(b, opened)
+
+    await("the service to see the connection go") { server.clientsGone == 1 }
+    assertEquals(0, server.inFlight)
+    server.script = null
+    assertEquals(200, callWithQuotaWait(b, 200)["status"])
+    assertNull(next(b, opened), "a closed stream has nothing more")
+    close(b, opened)
+  }
 }

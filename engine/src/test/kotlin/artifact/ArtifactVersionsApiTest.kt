@@ -13,6 +13,8 @@ import io.ktor.server.testing.*
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.*
 
 /**
@@ -361,5 +363,55 @@ class ArtifactVersionsApiTest {
             delete("/api/v1/artifacts/$hash?uploader=carol", TestTokens.ROOT).status,
         )
         assertEquals(2, count("SELECT count(*) FROM pipeline_artifact"))
+      }
+
+  @Test
+  fun `a refusal depends on the bytes and the limits only, so another uploader of stored bytes is refused as for any bytes and nothing is left`() {
+    val bytes = jar()
+    testApplication {
+      engine()
+      assertEquals(HttpStatusCode.Created, upload(bytes, TestTokens.ALICE).status)
+    }
+    testApplication {
+      configureEngine(database, mapOf("upload.maxExpandedBytes" to "10"))
+
+      val dupe = upload(bytes, TestTokens.BOB)
+      val fresh = upload(jar(name = "other"), TestTokens.BOB)
+
+      assertEquals(HttpStatusCode.UnprocessableEntity, dupe.status)
+      assertEquals(fresh.status, dupe.status)
+      assertEquals(fresh.json()["error"], dupe.json()["error"])
+      assertEquals(1, count("SELECT count(*) FROM pipeline_artifact"))
+      assertEquals(1, count("SELECT count(*) FROM artifact_content"))
+    }
+  }
+
+  @Test
+  fun `two uploaders sending the same bytes at the same moment each get their version, and one uploader sending them twice at once gets one`() =
+      testApplication {
+        engine()
+        val bytes = jar()
+
+        val results = coroutineScope {
+          listOf(
+                  TestTokens.ALICE,
+                  TestTokens.BOB,
+                  TestTokens.ALICE,
+                  TestTokens.BOB,
+                  TestTokens.ALICE,
+              )
+              .map { token -> async { token to upload(bytes, token).status } }
+              .map { it.await() }
+        }
+
+        for (token in listOf(TestTokens.ALICE, TestTokens.BOB)) {
+          val statuses = results.filter { it.first == token }.map { it.second }
+          assertEquals(1, statuses.count { it == HttpStatusCode.Created }, "$token: $statuses")
+        }
+        assertTrue(
+            results.all { it.second == HttpStatusCode.Created || it.second == HttpStatusCode.OK }
+        )
+        assertEquals(2, count("SELECT count(*) FROM pipeline_artifact"))
+        assertEquals(1, count("SELECT count(*) FROM artifact_content"))
       }
 }

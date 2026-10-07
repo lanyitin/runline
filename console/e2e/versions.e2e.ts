@@ -135,9 +135,8 @@ describe('one jar uploaded by two people', () => {
     await page.locator('button.submit').click();
     await page.waitForURL(/\/triggers\/detail/);
     await page.locator('h1').filter({ hasText: triggerName }).waitFor();
-    expect(await page.locator('section').filter({ hasText: 'Runs' }).first().innerText()).toContain(
-      bob.name,
-    );
+    const binding = page.locator('section', { has: page.locator('h2', { hasText: /^Runs$/ }) });
+    expect(await binding.innerText()).toContain(bob.name);
     const trigger = await (await api(root, `/api/v1/triggers/${triggerName}`)).json();
     expect(trigger).toMatchObject({ contentHash: hash, uploader: bob.name });
     await context.close();

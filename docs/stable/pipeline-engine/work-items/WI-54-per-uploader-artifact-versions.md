@@ -1,6 +1,6 @@
 # WI-54 相同位元組的 jar 由不同上傳者各自成為版本
 
-本文回答：兩位開發人員上傳位元組完全相同的 jar 時，如何讓每位都得到自己可見、可用的版本，且不洩漏他人是否上傳過。狀態：2026-10-07 納入，已核可（決策見 ADR-020），其「待使用者確認」所列採推薦值，待使用者確認。相依：WI-06、WI-07、WI-08、WI-10、WI-18、WI-35、WI-36、WI-40。決策見 [ADR-020](../adr/ADR-020-per-uploader-artifact-versions.md)；建議在 WI-49 之前完成（WI-49 的「宣告者」顯示會帶出 `uploader`；WI-49 已完成時順帶調整）。
+本文回答：兩位開發人員上傳位元組完全相同的 jar 時，如何讓每位都得到自己可見、可用的版本，且不洩漏他人是否上傳過。狀態：2026-10-07 納入，已核可（決策見 ADR-020），其「待使用者確認」所列採推薦值，待使用者確認；已實作（2026-10-07，見「實作結果」，其中列出未驗證與未做的項目）。相依：WI-06、WI-07、WI-08、WI-10、WI-18、WI-35、WI-36、WI-40。決策見 [ADR-020](../adr/ADR-020-per-uploader-artifact-versions.md)；建議在 WI-49 之前完成（WI-49 的「宣告者」顯示會帶出 `uploader`；WI-49 已完成時順帶調整）。
 
 ## 背景
 
@@ -67,3 +67,26 @@
 - 被 trigger 或 run 引用的版本不得刪除（`in_use`），所有參照 definition 的表維持「拒絕刪除」的參照方式。
 - 遷移單向前進，不在啟動時自動執行；機密與 token 不得出現在 log、trace 或錯誤訊息。
 - 不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化；嚴格 TDD。
+
+## 實作結果（2026-10-07）
+
+**結構。** 遷移 `V9__artifact_versions_per_uploader.sql`：新表 `artifact_content`（內容雜湊為主鍵，位元組與大小）；`pipeline_artifact` 保留為「版本」，代理鍵不變，移除 `content`、`size_bytes` 與雜湊的唯一性，改為 `(content_hash, uploaded_by)` 唯一，並以 `ON DELETE RESTRICT` 的外鍵參照內容。definition、trigger、run 的參照原樣有效。程式：`VersionResolver`（`artifact/`）是 `uploader` 參數唯一被判斷的地方：只在呼叫者可見的版本之內解析，開發人員給別人的名稱得到與不存在相同的結果，管理員可見多個而未給名稱得到 `ambiguous_version`，不偏好自己的版本。`ArtifactContentLock` 以內容雜湊為鍵取交易層級 advisory lock，讓「刪除最後一個版本時移除內容」與並行上傳互斥。
+
+**實作時的決定（超出條文之處，供審閱）。**
+
+- `uploader` 的消歧義放在 `RunService`、`TriggerAdmin`、`UnsafeExecutionSettings`、`ArtifactCatalog` 各自呼叫 `VersionResolver`，而不是在路由層，使「誰可以用哪個版本」的規則不依賴 HTTP。
+- 建立 trigger 時，管理員沒給 `uploader` 而同一內容只有一個版本，照舊可用；修改 trigger 時，沒給 `contentHash` 與 `uploader` 就維持原綁定的版本（即使同一內容後來有了其他上傳者的版本），給了任何一個就視為移動，必須明確到某位上傳者。
+- trigger 的觸發（cron、webhook）以綁定的版本自己的 `uploader` 建立 run，不經過消歧義。
+- 響應的 `uploader` 與既有的 `uploadedBy` 值相同；Console 以 `uploader` 為準。
+- Console 的清單與詳細頁一律帶 `uploader` 的連結（含開發人員，值為自己的名稱，Engine 接受）；網址沒有 `uploader` 而管理員可見多個版本時，頁面列出各上傳者的連結請管理員選，不自動挑選。Console 的 Fake Engine（`console/test-support`）依同樣規則改寫，`console/contract/pipelines-contract.ts` 新增八個測試，同一組在 Fake 與真實 Engine 上通過。
+- `API_TOKENS` 名稱重複的檢查在設定解析（`EngineConfig`），與其他設定錯誤一起列出。
+
+**驗證。** 真實 PostgreSQL（Testcontainers）與真實編譯的 jar：遷移前後（含被 trigger 與 run 引用者）、上傳 200／201 與回應結構相同、並行（不同上傳者、同一上傳者、上傳與刪除競爭）、逐版本的判定與 unsafe 設定、刪除與 `in_use`、白名單重判與預覽、開發人員不能經由 `uploader` 取得別人的版本、`API_TOKENS` 名稱重複（單元與 `packagedTest` 的真實行程）。對真實打包的 Engine（`engine.jar` 加 PostgreSQL 17）跑了 `npm run test:contract`（85 個，含新增八個）與 `npm run e2e`（77 個，含新增的 `e2e/versions.e2e.ts`：甲乙上傳同一 jar、乙在頁面建立並跑完 run、管理員在列表看到兩個版本、選乙的版本綁 trigger、刪除甲的版本後乙仍可執行）。
+
+**未驗證或未做。**
+
+- 時間側通道：第二位上傳走完整分析的路徑（有測試以「不複製既有判定」驗證路徑相同），但沒有量測回應時間；殘餘差異是「寫入位元組被略過」的部分，如 ADR-020 所列。
+- 「重判時同一內容雜湊只分析一次」的最佳化沒有做（ADR 允許延後）：現在每個版本各分析一次，結果相同，成本隨版本數增加。
+- 日誌與 trace 沒有新增「該雜湊已有其他版本」的記錄（ADR 為「可」）。
+- 沒有對含大量資料的資料庫量測遷移所需時間；遷移把每個 jar 的位元組複製一次到新表（資料庫暫時需要兩倍的 artifact 空間，舊欄位隨後移除，空間待 vacuum 回收）。
+- 並行測試證明上傳與刪除的互斥在 25 輪、每輪兩個執行緒下沒有出現版本指向不存在的內容；這不是形式化證明，另有外鍵作為第二道保證。

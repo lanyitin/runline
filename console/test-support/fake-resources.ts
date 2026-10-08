@@ -7,6 +7,7 @@
 
 import { answer, failure, jsonObject, type ApiAnswer, type ApiRequest, type FakeRoute } from './fake-api';
 import { TYPE_RULES } from './fake-resource-settings';
+import { RESOURCE_TYPES_ANSWER } from './fake-resource-types';
 
 export interface FakeResource {
   name: string;
@@ -206,6 +207,12 @@ export class FakeResources {
   }
 
   readonly routes: FakeRoute[] = [
+    {
+      method: 'GET',
+      pattern: /^\/api\/v1\/resource-types$/,
+      admin: true,
+      handle: () => answer(200, RESOURCE_TYPES_ANSWER),
+    },
     { method: 'POST', pattern: /^\/api\/v1\/resources$/, admin: true, handle: (r) => this.create(r) },
     { method: 'GET', pattern: /^\/api\/v1\/resources$/, admin: true, handle: () => this.list() },
     {

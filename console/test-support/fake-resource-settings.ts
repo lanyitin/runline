@@ -2,7 +2,9 @@
 // ADR-019): what the Engine accepts for a type, the `problem` of what it refuses, and the settings
 // as it writes them back (every effective value written out). One set of rules per type, as the
 // Engine has one behavior per type; the contract tests (contract/admin-contract.ts) hold each to the
-// Engine.
+// Engine. What the Engine tells of its types (fake-resource-types.ts) is what these rules accept.
+
+import { accepts, DATABASES, ENDPOINTS, REQUEST_PARAMETERS } from './fake-resource-types';
 
 /** The settings as written, or the `problem` of `invalid_resource` that refuses them. */
 export type SettingsAnswer = { settings: Record<string, unknown> } | { problem: string };
@@ -88,15 +90,7 @@ const DAY_MS = 24 * 3600 * 1000;
 const JDBC_MEMBERS = ['kind', 'host', 'port', 'database', 'username', 'connectionsPerRun', 'timeouts', 'maxRows', 'maxResponseBytes', 'properties', 'trustAliases', 'clientCertAlias'];
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])$/;
 const DATABASE = /^[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}$/;
-const IDENTIFIERS = /^[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}$/;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
-
-/** The extra connection properties PostgreSQL's profile allows, with what each accepts. */
-const POSTGRES_PROPERTIES: Record<string, (value: string) => boolean> = {
-  ApplicationName: (value) => value.length <= 64 && !CONTROL.test(value),
-  currentSchema: (value) => IDENTIFIERS.test(value),
-  tcpKeepAlive: (value) => value === 'true' || value === 'false',
-};
 
 /**
  * Times in milliseconds, each a whole number from 1 to a day: [defaults] has every one there is,
@@ -120,7 +114,7 @@ function timeoutsOf(
   return written;
 }
 
-/** The connection pool of a PostgreSQL database, the only kind of the first version. */
+/** The connection pool of a database of a kind the catalog has (PostgreSQL, in the first version). */
 const jdbcPool: TypeRules = {
   takesSecret: true,
   settings(given) {
@@ -131,7 +125,8 @@ const jdbcPool: TypeRules = {
     const text = (key: string) => (typeof settings[key] === 'string' && settings[key] !== '' ? (settings[key] as string) : undefined);
     const kind = text('kind');
     if (kind === undefined) return { problem: 'invalid_settings' };
-    if (kind !== 'postgresql') return { problem: 'unsupported_database' };
+    const profile = DATABASES.find((database) => database.kind === kind);
+    if (profile === undefined) return { problem: 'unsupported_database' };
     const host = text('host');
     const database = text('database');
     const username = text('username');
@@ -152,9 +147,10 @@ const jdbcPool: TypeRules = {
     const properties = settings.properties === undefined ? {} : objectOf(settings.properties);
     if (properties === null || Object.keys(properties).length > 16) return { problem: 'invalid_settings' };
     // A name that is not allowed is the first thing said, whatever its value is.
-    if (Object.keys(properties).some((name) => !(name in POSTGRES_PROPERTIES))) return { problem: 'property_not_allowed' };
+    const ruleOf = (name: string) => profile.properties.find((property) => property.name === name);
+    if (Object.keys(properties).some((name) => ruleOf(name) === undefined)) return { problem: 'property_not_allowed' };
     for (const [name, value] of Object.entries(properties)) {
-      if (typeof value !== 'string' || !POSTGRES_PROPERTIES[name](value)) return { problem: 'invalid_settings' };
+      if (typeof value !== 'string' || !accepts(ruleOf(name)!, value)) return { problem: 'invalid_settings' };
     }
     const written: Record<string, unknown> = {
       kind,
@@ -174,38 +170,9 @@ const jdbcPool: TypeRules = {
   },
 };
 
-/** The endpoint catalog of the Engine, in its order (08-api.md: `openai-compatible`). */
-const CATALOG = [
-  'chat.completions',
-  'completions',
-  'embeddings',
-  'models.list',
-  'models.retrieve',
-  'responses.create',
-  'responses.retrieve',
-  'responses.delete',
-  'responses.cancel',
-  'responses.input_items',
-  'moderations',
-  'rerank',
-  'reranking',
-  'images.generations',
-  'images.edits',
-  'images.variations',
-  'audio.speech',
-  'audio.transcriptions',
-  'audio.translations',
-  'files.create',
-  'files.list',
-  'files.retrieve',
-  'files.delete',
-  'files.content',
-  'batches.create',
-  'batches.list',
-  'batches.retrieve',
-  'batches.cancel',
-];
-const DEFAULT_ENDPOINTS = CATALOG.slice(0, 5);
+/** The endpoints that can be enabled, in the Engine's order, and those a new resource has. */
+const CATALOG = ENDPOINTS.map((entry) => entry.id);
+const DEFAULT_ENDPOINTS = ENDPOINTS.filter((entry) => entry.defaultEnabled).map((entry) => entry.id);
 
 const OPENAI_MEMBERS = [
   'baseUrl',
@@ -225,21 +192,9 @@ const OPENAI_MEMBERS = [
   'trustAliases',
   'clientCertAlias',
 ];
-const NUMERIC = [
-  'temperature',
-  'top_p',
-  'top_k',
-  'min_p',
-  'max_tokens',
-  'max_completion_tokens',
-  'max_output_tokens',
-  'seed',
-  'presence_penalty',
-  'frequency_penalty',
-  'repeat_penalty',
-  'n',
-];
-const DEFAULTABLE = [...NUMERIC, 'model', 'stop', 'response_format', 'reasoning_effort'];
+/** The request parameters a resource may default or lock, and those it may also cap. */
+const DEFAULTABLE = REQUEST_PARAMETERS.map((parameter) => parameter.name);
+const NUMERIC = REQUEST_PARAMETERS.filter((parameter) => parameter.ceiling).map((parameter) => parameter.name);
 const CREDENTIAL_WORDS = ['auth', 'key', 'token', 'secret', 'cookie'];
 const ENGINE_MANAGED = [
   'host',
@@ -282,10 +237,18 @@ const nonEmptyStrings = (value: unknown): string[] | undefined =>
 
 /** Whether [value] is the kind of value the request parameter [name] takes. */
 function fits(name: string, value: unknown): boolean {
-  if (NUMERIC.includes(name)) return typeof value === 'number';
-  if (name === 'stop') return typeof value === 'string' || nonEmptyStrings(value) !== undefined;
-  if (name === 'response_format') return objectOf(value) !== null;
-  return typeof value === 'string' && value !== '';
+  switch (REQUEST_PARAMETERS.find((parameter) => parameter.name === name)?.kind) {
+    case 'number':
+      return typeof value === 'number';
+    case 'textOrList':
+      return typeof value === 'string' || nonEmptyStrings(value) !== undefined;
+    case 'object':
+      return objectOf(value) !== null;
+    case 'text':
+      return typeof value === 'string' && value !== '';
+    default:
+      return false;
+  }
 }
 
 /** An OpenAI compatible service: where it is, what goes with each request, and what may be asked. */

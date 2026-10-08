@@ -1,9 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe, expect, test } from 'vitest';
+import { FakeEngine } from '../test-support/fake-engine';
 import { storedZip } from '../test-support/zip';
 import type { DemoJars } from '../test-support/fake-jars';
 import { describeAdminContract } from './admin-contract';
 import { describeInfoContract } from './info-contract';
+import { describeResourceTypesContract } from './resource-types-contract';
 import { describePipelinesContract } from './pipelines-contract';
 import { describeSystemContract, parseCallers } from './system-contract';
 
@@ -59,4 +62,35 @@ describeAdminContract('the real Engine', {
   callers: () => callers,
   jars: jars,
   uploadLimitBytes,
+});
+describeResourceTypesContract('the real Engine', {
+  baseUrl: () => url,
+  callers: () => callers,
+  jars,
+  uploadLimitBytes,
+});
+
+// The Fake Engine's catalog is a copy of the Engine's (test-support/fake-resource-types.ts): the
+// two answers must be the same, entry for entry, so that what the Console is tested with is what
+// the Engine tells.
+describe('the resource types of the real Engine and of the Fake Engine', () => {
+  test('are the same answer', async () => {
+    const admin = callers.find((c) => c.role === 'admin')!;
+    const fake = await FakeEngine.start(
+      { version: '0.0.0', commitHash: '0'.repeat(40), dirty: false },
+      { callers: [admin] },
+    );
+    try {
+      const read = async (base: string) => {
+        const response = await fetch(`${base}/api/v1/resource-types`, {
+          headers: { Authorization: `Bearer ${admin.token}` },
+        });
+        expect(response.status).toBe(200);
+        return response.json();
+      };
+      expect(await read(url)).toEqual(await read(fake.url));
+    } finally {
+      await fake.stop();
+    }
+  });
 });

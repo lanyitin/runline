@@ -12,6 +12,7 @@ ktor:
     modules:
       - dev.lawlan.runline.engine.DIKt.configureDependencyInjection
       - dev.lawlan.runline.engine.LoggingKt.configureLogging
+      - dev.lawlan.runline.engine.UploadSendBufferStartupKt.configureUploadSendBuffer
       - dev.lawlan.runline.engine.GracefulShutdownKt.configureGracefulShutdown
       - dev.lawlan.runline.engine.CleanExitKt.configureCleanExit
       - dev.lawlan.runline.engine.StartupKt.configureStartupChecks

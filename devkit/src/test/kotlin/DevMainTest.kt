@@ -35,6 +35,15 @@ class DevMainTest {
   }
 
   @Test
+  fun `bounds the send buffer of the JDK HTTP client for the whole JVM as it starts, as the Engine does`() {
+    System.setProperty("jdk.httpclient.sendBufferSize", "65536")
+
+    DevMain.run(listOf("only-a-jar"), emptyMap(), tmp, out)
+
+    assertEquals("262144", System.getProperty("jdk.httpclient.sendBufferSize"))
+  }
+
+  @Test
   fun `runs a pipeline, each execution under its own generated run id`() {
     val jar =
         PipelineJars.build(

@@ -134,6 +134,10 @@ class DevSessionResourcesTest {
             """{"baseUrl":"ftp://x"}""" to "invalid_base_url",
             """{"baseUrl":"http://x/v1","apiKey":"sk-in-the-file"}""" to "invalid_settings",
             """{"baseUrl":"http://x/v1","secretAlias":"no good"}""" to "invalid_secret_alias",
+            // Certificates are the Engine's for now (WI-52): the development entry does not quietly
+            // fall back to the JVM's default trust, it says it cannot use them.
+            """{"baseUrl":"https://x/v1","trustAliases":["internal-ca"]}""" to "certificates",
+            """{"baseUrl":"https://x/v1","clientCertAlias":"client"}""" to "certificates",
         )
     for ((file, said) in cases) {
       buffer.reset()

@@ -17,6 +17,7 @@ import dev.lawlan.runline.accessors.openai.OpenAiBinding
 import dev.lawlan.runline.accessors.openai.OpenAiCredential
 import dev.lawlan.runline.accessors.openai.OpenAiSettings
 import dev.lawlan.runline.accessors.openai.SettingsResult
+import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.analyzer.PipelineMetadata
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
@@ -163,6 +164,7 @@ internal class LocalResources(
               )
           is SettingsResult.Valid -> result.settings
         }
+    refuseCertificates("openai-compatible", name, parsed.tls)
     val credential =
         if (alias == null) OpenAiCredential.None
         else
@@ -187,12 +189,27 @@ internal class LocalResources(
               )
           is JdbcSettingsResult.Valid -> result.settings
         }
+    refuseCertificates("jdbc-pool", name, parsed.tls)
     val credential =
         if (alias == null) JdbcCredential.None
         else
             settings.secrets.lookup(alias)?.let { JdbcCredential.Password(it) }
                 ?: JdbcCredential.Unavailable
     return pools.bind(name, parsed, credential, capacity = 1)
+  }
+
+  /**
+   * Certificates (WI-52) are used by the Engine only, until what the development entry should do
+   * with them is decided: a resource that names some is refused here rather than connected with the
+   * JVM's default trust, which would be weaker than what its settings say.
+   */
+  private fun refuseCertificates(type: String, name: String, tls: TlsAliases) {
+    if (tls.isEmpty) return
+    throw LocalResourceProblem(
+        "The $type resource '$name' (RUNLINE_RESOURCES) cannot be set up: its settings name " +
+            "certificates (trustAliases, clientCertAlias), which the development entry does not " +
+            "use yet."
+    )
   }
 
   private companion object {

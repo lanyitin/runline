@@ -4,6 +4,8 @@ import dev.lawlan.runline.engine.support.CapturedLogs
 import dev.lawlan.runline.engine.support.awaitCondition
 import dev.lawlan.runline.engine.support.configureEngine
 import dev.lawlan.runline.engine.support.migratedDatabase
+import dev.lawlan.runline.engine.support.unusedPort
+import dev.lawlan.runline.engine.support.withSystemProperties
 import io.ktor.server.testing.*
 import kotlin.test.*
 
@@ -53,30 +55,50 @@ class MetricsOutputTest {
         }
       }
 
-  /**
-   * Runs [block] with traces and logs exported over OTLP, as a deployment does, so that the
-   * exporters' threads are among those that have to end. Nothing listens at the endpoint: an Engine
-   * that is only started and stopped has nothing to send.
-   */
-  private fun withOtlpExport(block: () -> Unit) {
-    val settings =
-        mapOf(
-            "otel.traces.exporter" to "otlp",
-            "otel.logs.exporter" to "otlp",
-            "otel.exporter.otlp.endpoint" to "http://127.0.0.1:${unusedPort()}",
-        )
-    val previous = settings.keys.associateWith { System.getProperty(it) }
-    settings.forEach { (key, value) -> System.setProperty(key, value) }
-    try {
-      block()
-    } finally {
-      previous.forEach { (key, value) ->
-        if (value == null) System.clearProperty(key) else System.setProperty(key, value)
+  @Test
+  fun `an Engine started and stopped many times leaves no shutdown hook of the JVM behind`() =
+      withOtlpExport {
+        val database = migratedDatabase()
+        fun startAndStop() = testApplication {
+          configureEngine(database)
+          startApplication()
+        }
+        startAndStop()
+        val before = shutdownHooks()
+
+        repeat(CYCLES) { startAndStop() }
+
+        // What OpenTelemetry needs done at the end, the Engine does as it stops (07 "可觀測性").
+        assertEquals(before, shutdownHooks())
       }
-    }
+
+  /** The hooks the JVM runs as it exits (registered with `Runtime.addShutdownHook`). */
+  private fun shutdownHooks(): Set<Thread> {
+    val hooks =
+        Class.forName("java.lang.ApplicationShutdownHooks").getDeclaredField("hooks").apply {
+          isAccessible = true
+        }
+    val registered = hooks.get(null) as Map<*, *>
+    return synchronized(hooks.declaringClass) { registered.keys.map { it as Thread }.toSet() }
   }
 
-  private fun unusedPort(): Int = java.net.ServerSocket(0).use { it.localPort }
+  /**
+   * Runs [block] with traces, metrics and logs exported over OTLP, as a deployment does, so that
+   * the exporters' threads are among those that have to end. Nothing listens at the endpoint: what
+   * an Engine that is only started and stopped has to send is refused, and not tried again, so that
+   * each stop does not wait out the retries (that wait is MetricsExportTest's).
+   */
+  private fun withOtlpExport(block: () -> Unit) =
+      withSystemProperties(
+          mapOf(
+              "otel.traces.exporter" to "otlp",
+              "otel.metrics.exporter" to "otlp",
+              "otel.logs.exporter" to "otlp",
+              "otel.exporter.otlp.endpoint" to "http://127.0.0.1:${unusedPort()}",
+              "otel.java.exporter.otlp.retry.disabled" to "true",
+          ),
+          block,
+      )
 
   /**
    * The live threads, apart from the pools every coroutine and parallel stream of the process share

@@ -34,6 +34,7 @@ import dev.lawlan.runline.runner.Workspaces
 import io.ktor.server.application.*
 import io.ktor.server.plugins.di.*
 import io.opentelemetry.api.OpenTelemetry
+import io.opentelemetry.sdk.OpenTelemetrySdk
 import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
@@ -52,11 +53,17 @@ private val PROBE_DATABASE_CACHE = Duration.ofSeconds(2)
  */
 fun Application.configureDependencyInjection() {
   val applicationConfig = environment.config
+  // Read once; the closing of OpenTelemetry needs the grace time and is given no resolver.
+  val engineConfig by lazy { EngineConfig.from(applicationConfig) }
   dependencies {
-    provide<EngineConfig> { EngineConfig.from(applicationConfig) }
+    provide<EngineConfig> { engineConfig }
+    // Closed when the Engine stops, nearly last (it is declared first but one), so that what the
+    // rest records as it stops is sent with everything else not sent yet (07 "可觀測性"). Ktor then
+    // closes it once more, as it does every AutoCloseable dependency; that returns at once (the SDK
+    // notes the second call in one line).
     provide<OpenTelemetry> {
       getOpenTelemetry(serviceName = resolve<EngineConfig>().telemetry.serviceName)
-    }
+    } cleanup { (it as OpenTelemetrySdk).shutdownWithin(engineConfig.runs.shutdownGrace) }
     provide<BuildInfo> { BuildInfo.load() }
     // Secrets (WI-41): opened when first needed, which is at startup (see configureStartupChecks);
     // with no keystore configured the store finds nothing.

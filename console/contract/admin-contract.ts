@@ -957,13 +957,13 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       // A check also says what it found of the certificates the resource uses (WI-52): none here.
       expect(checked.body).toMatchObject({ ok: true, failure: null, certificates: [], warnings: [] });
       expect(checked.body.checkedAt).toMatch(ISO);
-      // The Engine answers the time of the check to the nanosecond and keeps it to the microsecond:
-      // the same check, at the same instant as far as a millisecond can tell.
+      // The time is answered as it is kept (WI-56): the last check read back says the same text.
       const sameCheck = (kept: any) => {
-        expect({ ok: kept.ok, failure: kept.failure }).toEqual({ ok: true, failure: null });
-        expect(Math.abs(Date.parse(kept.checkedAt) - Date.parse(checked.body.checkedAt))).toBeLessThanOrEqual(1);
+        expect(kept).toEqual({ ok: true, failure: null, checkedAt: checked.body.checkedAt });
       };
       sameCheck((await resource(resourceName)).lastCheck);
+      const listed = (await call(root(), 'GET', '/api/v1/resources')).body.resources;
+      sameCheck(listed.find((r: any) => r.name === resourceName).lastCheck);
 
       await call(root(), 'PATCH', resourcePath(resourceName), { capacity: 2, enabled: false });
       sameCheck((await resource(resourceName)).lastCheck);

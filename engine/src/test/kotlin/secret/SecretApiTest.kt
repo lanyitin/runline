@@ -85,7 +85,14 @@ class SecretApiTest : ResourceApiSupport() {
               listOf(it.text("alias"), it.text("type"), it.text("status"), "${it["usedBy"]}")
             },
         )
-        assertTrue(listed.all { it.keys == setOf("alias", "type", "status", "usedBy") })
+        // A certificate entry also says what may be shown of its certificates (WI-52).
+        assertTrue(
+            listed.all {
+              it.keys ==
+                  setOf("alias", "type", "status", "usedBy") +
+                      (if (it.text("type") == "secret") emptySet() else setOf("certificates"))
+            }
+        )
         assertFalse(response.bodyAsText().contains("marker-value-api"))
       }
 

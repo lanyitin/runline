@@ -29,6 +29,8 @@ class FakeRequest(
     val headers: Map<String, List<String>>,
     /** The body exactly as it came, bytes. */
     val rawBody: ByteArray,
+    /** Over TLS: the subject of the certificate the client presented, if it presented one. */
+    val clientCertificate: String? = null,
 ) {
   /** The body as text, for the requests that are JSON. */
   val body: String = rawBody.toString(StandardCharsets.UTF_8)
@@ -208,7 +210,14 @@ class FakeOpenAiServer(
       }
       val response = FakeResponse(client, this)
       try {
-        val request = read(client.getInputStream()) ?: return
+        val request =
+            read(client.getInputStream())?.let { read ->
+              val peer =
+                  (client as? SSLSocket)?.let {
+                    runCatching { it.session.peerPrincipal.name }.getOrNull()
+                  }
+              FakeRequest(read.method, read.target, read.headers, read.rawBody, peer)
+            } ?: return
         seen += request
         response.started()
         try {

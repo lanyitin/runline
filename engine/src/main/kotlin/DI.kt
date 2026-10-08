@@ -80,7 +80,13 @@ fun Application.configureDependencyInjection() {
     }
     provide<SecretTelemetry> { SecretTelemetry(resolve<OpenTelemetry>()) }
     provide<SecretCatalog> {
-      SecretCatalog(resolve<SecretStore>(), resolve<ResourceStore>(), resolve<SecretTelemetry>())
+      SecretCatalog(
+          resolve<SecretStore>(),
+          resolve<ResourceStore>(),
+          resolve<SecretTelemetry>(),
+          resolve<Clock>(),
+          resolve<EngineConfig>().resources.certificateWarningDays,
+      )
     }
     provide<SystemStatus> {
       SystemStatus(resolve<BuildInfo>(), resolve<Clock>(), resolve<AllowListStore>())
@@ -185,14 +191,19 @@ fun Application.configureDependencyInjection() {
     // closed when the Engine is, after the runs that use them (declared before the scheduler).
     provide<JdbcProfiles> { JdbcProfiles(listOf(PostgresProfile)) }
     provide<JdbcPools> { JdbcPools(resolve<JdbcProfiles>()) }
+    provide<TlsTelemetry> { TlsTelemetry(resolve<OpenTelemetry>()) }
     provide<ResourceBehaviors> {
       ResourceBehaviors.forEngine(
           resolve<EngineConfig>().resources,
           resolve<SecretStore>(),
-          OpenAiTelemetry(resolve<OpenTelemetry>(), resolve<OpenAiUsage>()),
+          OpenAiTelemetry(
+              resolve<OpenTelemetry>(),
+              resolve<OpenAiUsage>(),
+              resolve<TlsTelemetry>(),
+          ),
           resolve<JdbcProfiles>(),
           resolve<JdbcPools>(),
-          JdbcTelemetry(resolve<OpenTelemetry>(), resolve<JdbcPools>()),
+          JdbcTelemetry(resolve<OpenTelemetry>(), resolve<JdbcPools>(), resolve<TlsTelemetry>()),
       )
     }
     provide<ResourceAdmin> {

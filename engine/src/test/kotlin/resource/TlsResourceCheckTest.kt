@@ -118,7 +118,14 @@ class TlsResourceCheckTest : ResourceApiSupport() {
     defineOpenAi("no-client", ""","trustAliases":["internal-ca"]""")
     defineOpenAi("default-trust", ""","clientCertAlias":"app-client"""")
 
-    assertEquals("hostname_mismatch", check("by-number").failure())
+    val lines =
+        dev.lawlan.runline.engine.support.CapturedLogs().use { logs ->
+          assertEquals("hostname_mismatch", check("by-number").failure())
+          logs.lines
+        }
+    // The Engine's log says the category with the aliases of the certificates, nothing of them.
+    val line = lines.single { it.contains("by-number") && it.contains("hostname_mismatch") }
+    assertTrue(line.contains("internal-ca") && line.contains("app-client"), line)
     assertEquals("trust_failed", check("other-trust").failure())
     assertEquals("client_cert_rejected", check("no-client").failure())
     // Without trust aliases the JVM's default trust is used, which does not know the authority.

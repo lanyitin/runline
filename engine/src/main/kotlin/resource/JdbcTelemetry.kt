@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.jdbc.JdbcObserver
 import dev.lawlan.runline.accessors.jdbc.JdbcPools
+import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
 import io.opentelemetry.api.OpenTelemetry
@@ -14,7 +15,11 @@ import io.opentelemetry.api.common.Attributes
  * resource's name and its type, or the kind of operation or of failure: a fixed set, never a
  * statement, a parameter or an address. Nothing of what is sent or answered is recorded.
  */
-class JdbcTelemetry(openTelemetry: OpenTelemetry, private val pools: JdbcPools) : JdbcObserver {
+class JdbcTelemetry(
+    openTelemetry: OpenTelemetry,
+    private val pools: JdbcPools,
+    private val tls: TlsTelemetry = TlsTelemetry(openTelemetry),
+) : JdbcObserver {
   private val meter = openTelemetry.getMeter("runline.resources.jdbc")
   private val acquireFailures =
       meter
@@ -43,6 +48,9 @@ class JdbcTelemetry(openTelemetry: OpenTelemetry, private val pools: JdbcPools) 
   override fun acquireFailed(resource: String, failure: ResourceFailure) {
     acquireFailures.add(1, attributes(resource, KIND to failure.name.lowercase()))
   }
+
+  override fun tlsFailed(resource: String, failure: TlsFailure) =
+      tls.failed(resource, ResourceTypes.JDBC_POOL, failure)
 
   override fun finished(
       resource: String,

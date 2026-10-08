@@ -20,8 +20,11 @@ import io.opentelemetry.context.Context
  * catalog, an outcome or a kind of timeout: a fixed set, never a model, a prompt or an address.
  * Nothing of a request or an answer is recorded.
  */
-class OpenAiTelemetry(openTelemetry: OpenTelemetry, private val usage: OpenAiUsage) :
-    OpenAiObserver {
+class OpenAiTelemetry(
+    openTelemetry: OpenTelemetry,
+    private val usage: OpenAiUsage,
+    private val tls: TlsTelemetry = TlsTelemetry(openTelemetry),
+) : OpenAiObserver {
   private val meter = openTelemetry.getMeter("runline.resources.openai")
   private val tracer = openTelemetry.getTracer("runline.resources.openai")
   private val inFlight =
@@ -100,6 +103,7 @@ class OpenAiTelemetry(openTelemetry: OpenTelemetry, private val usage: OpenAiUsa
       maxGap.record(outcome.maxChunkGapMillis!! / 1000.0, byEndpoint)
     }
     outcome.failure?.let(::timeoutKind)?.let { timeouts.add(1, attributes(resource, KIND to it)) }
+    outcome.tlsFailure?.let { tls.failed(resource, ResourceTypes.OPENAI_COMPATIBLE, it) }
     outcome.usage?.prompt?.let { tokens.add(it, attributes(resource, KIND to "prompt")) }
     outcome.usage?.completion?.let { tokens.add(it, attributes(resource, KIND to "completion")) }
     // A stream has a span of its own, which is told when the stream is over.

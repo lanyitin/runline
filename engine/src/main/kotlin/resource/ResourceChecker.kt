@@ -71,14 +71,16 @@ class ResourceChecker(
     try {
       val done = checkAndKeep(resource)
       val result = done.result
+      // The certificates a check used are said by alias only (WI-52).
+      val aliases = done.certificates.map { it.alias }.distinct()
       log.info(
-          "Shared resource {} ({}) checked by {}: {}",
+          "Shared resource {} ({}) checked by {}: {}{}",
           name,
           resource.type.wireName,
           by.name,
           result.failure?.wire ?: "ok",
+          if (aliases.isEmpty()) "" else aliases.joinToString(", ", " (certificate aliases: ", ")"),
       )
-      // Certificates are said by alias and category only (WI-52).
       done.warnings.forEach {
         log.warn(
             "Shared resource {} uses certificate alias {}: certificate_expiring, {} days left",

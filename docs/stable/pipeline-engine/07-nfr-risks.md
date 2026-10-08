@@ -71,6 +71,7 @@
 - Metric：進行中 run 數、排隊數、逾時未結束數、class loader 回收數、unsafe 比例、上傳判定結果、共享資源的等待時間／持有時間／佇列長度、trigger 的觸發／被拒絕／失敗／重複／驗證失敗數。
 - 型別化資源（[ADR-019](adr/ADR-019-typed-shared-resources.md)）：資源指標帶資源名稱與型別標籤（不放 SQL、路徑、網址或模型的使用者輸入）；另有 `jdbc-pool` 的使用中連線數（`runline.resources.jdbc.connections.active`）、取得失敗數（`runline.resources.jdbc.acquire.failures`）與語句耗時（`runline.resources.jdbc.statement.duration`），`openai-compatible` 的進行中請求數、依狀態類別的請求數與延遲、等待請求額度的時間、生成時間（首位元組到完成；串流另有首塊時間與塊間最長間隔）、依逾時種類的逾時次數、服務回報的 token 用量，`file` 的操作數與路徑檢查失敗數，所有型別的實體檢查結果，機密重載的次數與結果。
 - Run 的 trace 之下每次資源操作一個 span，只記錄資源名稱、型別與操作類別。Run 的 log 記錄資源的取得、存取端失效與實體錯誤類別，不記錄 SQL 參數、請求與回應本文、機密。資源的建立、修改、刪除、檢查、強制釋放與機密重載記錄管理員名稱。
+- 指標只經 OpenTelemetry 匯出，不定期寫入 log；log 只記錄事件（12-Factor 的事件串流）。Engine 啟動的所有指標、匯出與排程相關背景工作，都在 Engine 停止時停止；同一個 JVM 內多次啟動與停止 Engine 不會累積背景工作。需要本機檢視指標時，以 OTLP 匯出到本機收集器的方式提供，不恢復定期寫 log。
 
 ## 安全
 

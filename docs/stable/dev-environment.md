@@ -10,6 +10,8 @@
 | Node | 前端（Console）建置用，只存在於建置期，不進入執行環境或發佈產物。版本固定在專案根目錄的 `.node-version`（單一來源，精確版本，目前為 Node 24 LTS 線）；devcontainer 與建置檢查都讀這個檔案，變更版本只改這一處 |
 | Docker 相容的容器執行環境 | 資料庫測試使用 Testcontainers 啟動真實 PostgreSQL，沒有容器環境時這類測試無法執行，也不會以替身取代 |
 
+`./gradlew check` 以 root（開發容器的預設）或一般使用者執行都應通過；檔案權限相關的測試在 root 下也會被驗證（測試在放棄了略過檔案權限的能力的執行緒上執行）。Console 的真實瀏覽器腳本（`npm run e2e`）不屬於 `check`，它的前置條件（瀏覽器、金鑰庫項目、Fake 服務行程、全新資料庫）只寫在 [console/e2e/README.md](../../console/e2e/README.md)。
+
 ## Node 工具鏈
 
 - devcontainer：`.devcontainer/Dockerfile` 依 `.node-version` 從 nodejs.org 安裝該版本（以官方 SHASUMS256 驗證），重建後即可直接使用 `node` 與 `npm`。

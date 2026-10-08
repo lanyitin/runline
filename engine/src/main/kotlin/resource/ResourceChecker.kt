@@ -4,6 +4,7 @@ import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.secret.infoOf
 import java.time.Clock
 import java.time.Duration
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -115,7 +116,10 @@ class ResourceChecker(
     // A certificate past its validity fails the check without a connection being tried.
     val expired = certificates.any { it.notAfter.isBefore(now) }
     val failure = if (expired) CheckFailure.CERTIFICATE_EXPIRED else probe(resource)
-    val result = CheckResult(failure == null, failure, clock.instant())
+    // The time is answered as the database keeps it (to the microsecond), so that the answer and
+    // the resource's lastCheck read back later say the same (WI-56).
+    val result =
+        CheckResult(failure == null, failure, clock.instant().truncatedTo(ChronoUnit.MICROS))
     store.recordCheck(resource.name, result, resource.settings, resource.secretAlias)
     telemetry.checked(ResourceLabel(resource.name, resource.type.wireName), result.ok)
     val warnings =

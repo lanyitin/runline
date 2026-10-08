@@ -16,6 +16,8 @@ import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.createSymbolicLinkPointingTo
@@ -203,6 +205,20 @@ class ResourceCheckerTest {
     val result = outcome("log")
 
     assertTrue(result.ok)
+    assertEquals(result, store.find("log")!!.lastCheck)
+  }
+
+  @Test
+  fun `a check answers the time the database keeps, also from a clock finer than a microsecond`() {
+    defineFile("log", "out.txt")
+    val finer = Clock.fixed(Instant.parse("2026-10-08T01:02:03.123456789Z"), ZoneOffset.UTC)
+    val checker =
+        ResourceChecker(store, behaviors, finer, Duration.ofMillis(800), ResourceTelemetry(otel))
+            .also { checkers += it }
+
+    val result = outcome("log", checker)
+
+    assertEquals(Instant.parse("2026-10-08T01:02:03.123456Z"), result.checkedAt)
     assertEquals(result, store.find("log")!!.lastCheck)
   }
 

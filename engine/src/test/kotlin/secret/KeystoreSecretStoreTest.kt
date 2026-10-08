@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.secret
 
+import dev.lawlan.runline.accessors.support.PermissionsEnforced
 import dev.lawlan.runline.engine.support.CapturedLogs
 import dev.lawlan.runline.engine.support.Keystores
 import java.nio.file.Files
@@ -127,29 +128,36 @@ class KeystoreSecretStoreTest {
   }
 
   @Test
-  fun `the file is opened read only, so a read only file in a read only directory works and is untouched`() {
-    val dir = Files.createDirectory(keystores.dir.resolve("mounted"))
-    val file = keystores.pkcs12("seed.p12", mapOf("a" to "value-a"))
-    val mounted = Files.copy(file, dir.resolve("keystore.p12"))
-    Files.setPosixFilePermissions(mounted, PosixFilePermissions.fromString("r--------"))
-    Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-x------"))
-    val bytes = Files.readAllBytes(mounted)
-    val modified = Files.getLastModifiedTime(mounted)
-    try {
-      val store = open(mounted)
-      assertEquals("value-a", store.value("a"))
-      assertEquals(ReloadResult.Reloaded(1, emptyList()), store.reload())
+  fun `the file is opened read only, so a read only file in a read only directory works and is untouched`() =
+      // As for any user, also for root (WI-57): a store that opened the file for writing fails
+      // here.
+      PermissionsEnforced.run {
+        val dir = Files.createDirectory(keystores.dir.resolve("mounted"))
+        val file = keystores.pkcs12("seed.p12", mapOf("a" to "value-a"))
+        val mounted = Files.copy(file, dir.resolve("keystore.p12"))
+        Files.setPosixFilePermissions(mounted, PosixFilePermissions.fromString("r--------"))
+        Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-x------"))
+        val bytes = Files.readAllBytes(mounted)
+        val modified = Files.getLastModifiedTime(mounted)
+        try {
+          // Otherwise a store that opened the file for writing would pass as well.
+          check(!Files.isWritable(mounted) && !Files.isWritable(dir)) {
+            "permissions are not enforced here, so the test would prove nothing"
+          }
+          val store = open(mounted)
+          assertEquals("value-a", store.value("a"))
+          assertEquals(ReloadResult.Reloaded(1, emptyList()), store.reload())
 
-      assertContentEquals(bytes, Files.readAllBytes(mounted))
-      assertEquals(modified, Files.getLastModifiedTime(mounted))
-      assertEquals(
-          listOf("keystore.p12"),
-          Files.list(dir).use { it.map { p -> p.fileName.toString() }.toList() },
-      )
-    } finally {
-      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"))
-    }
-  }
+          assertContentEquals(bytes, Files.readAllBytes(mounted))
+          assertEquals(modified, Files.getLastModifiedTime(mounted))
+          assertEquals(
+              listOf("keystore.p12"),
+              Files.list(dir).use { it.map { p -> p.fileName.toString() }.toList() },
+          )
+        } finally {
+          Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"))
+        }
+      }
 
   @Test
   fun `opening a keystore that cannot be opened throws the category`() {

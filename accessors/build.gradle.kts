@@ -32,7 +32,12 @@ dependencies {
 
 // Measurements against a real OpenAI compatible service are run by hand (WI-46) and are not part of
 // `check`: they are tagged and left out of `test`, and have a task of their own.
-tasks.test { useJUnitPlatform { excludeTags("real-service") } }
+tasks.test {
+  useJUnitPlatform { excludeTags("real-service") }
+  // PermissionsEnforced (test fixtures) calls the C library to give up root's capabilities on a
+  // thread of its own (WI-57).
+  jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
 
 tasks.register<Test>("verifyOpenAiService") {
   group = "verification"

@@ -157,11 +157,21 @@ class InfoRoutesTest {
       testApplication {
         val database = migratedDatabase()
         configureEngine(database)
+        val system = client.get("/api/v1/system") { bearer(TestTokens.ROOT) }.json()
 
+        // The caller is the one thing the answer says about who asks: the name and role the token
+        // was given, exactly. It is held whole here, and the rest is searched, so that a token
+        // whose
+        // name happens to be the system user's (`root` in a development container) is not taken
+        // for the system user's name leaking.
+        assertEquals(
+            JsonObject(mapOf("name" to JsonPrimitive("root"), "role" to JsonPrimitive("admin"))),
+            system["caller"],
+        )
         val bodies =
             listOf(
                 client.get("/api/v1/info").bodyAsText(),
-                client.get("/api/v1/system") { bearer(TestTokens.ROOT) }.bodyAsText(),
+                JsonObject(system - "caller").toString(),
             )
 
         val secrets =

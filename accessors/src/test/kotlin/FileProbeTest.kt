@@ -1,5 +1,6 @@
 package dev.lawlan.runline.accessors
 
+import dev.lawlan.runline.accessors.support.PermissionsEnforced
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
@@ -35,10 +36,11 @@ class FileProbeTest {
   }
 
   /**
-   * A permission that is not enforced (a privileged user) would make the test below meaningless.
+   * A permission that is not enforced would make the test below meaningless. The tests that need
+   * one run in [PermissionsEnforced], where it holds for root as well (WI-57).
    */
   private fun requireEnforced(denied: Boolean) {
-    if (!denied) fail("permissions are not enforced for this user: run as an unprivileged user")
+    if (!denied) fail("permissions are not enforced here, so the test would prove nothing")
   }
 
   @Test
@@ -74,7 +76,7 @@ class FileProbeTest {
   }
 
   @Test
-  fun `a directory nobody may write into cannot take the file`() {
+  fun `a directory nobody may write into cannot take the file`() = PermissionsEnforced.run {
     val d = root.resolve("d").createDirectories()
     chmod(d, "r-xr-xr-x")
     requireEnforced(!Files.isWritable(d))
@@ -84,16 +86,17 @@ class FileProbeTest {
   }
 
   @Test
-  fun `a file that cannot be both read and written is reported as that`() {
-    val file = root.resolve("out.txt").also { it.writeText("x") }
-    chmod(file, "r--r--r--")
-    requireEnforced(!Files.isWritable(file))
-    assertEquals(FileProblem.NOT_READABLE_WRITABLE, FileProbe.check(root, "out.txt"))
+  fun `a file that cannot be both read and written is reported as that`() =
+      PermissionsEnforced.run {
+        val file = root.resolve("out.txt").also { it.writeText("x") }
+        chmod(file, "r--r--r--")
+        requireEnforced(!Files.isWritable(file))
+        assertEquals(FileProblem.NOT_READABLE_WRITABLE, FileProbe.check(root, "out.txt"))
 
-    chmod(file, "-w--w--w-")
-    requireEnforced(!Files.isReadable(file))
-    assertEquals(FileProblem.NOT_READABLE_WRITABLE, FileProbe.check(root, "out.txt"))
-  }
+        chmod(file, "-w--w--w-")
+        requireEnforced(!Files.isReadable(file))
+        assertEquals(FileProblem.NOT_READABLE_WRITABLE, FileProbe.check(root, "out.txt"))
+      }
 
   @Test
   fun `a path that leaves the root, by name or by a link, is reported as outside`() {

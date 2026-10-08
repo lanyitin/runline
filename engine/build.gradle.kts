@@ -63,6 +63,9 @@ tasks.test {
   useJUnitPlatform()
   // Runs against the packaged Engine have their own task (packagedTest).
   exclude("**/packaged/**")
+  // PermissionsEnforced (test fixtures of accessors) calls the C library to give up root's
+  // capabilities on a thread of its own (WI-57).
+  jvmArgs("--enable-native-access=ALL-UNNAMED")
   // No OTLP collector runs during tests; without this, closing the SDK at application shutdown
   // waits for the exporter to time out.
   systemProperty("otel.traces.exporter", "none")

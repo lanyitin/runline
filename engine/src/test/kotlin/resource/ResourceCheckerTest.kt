@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.support.PermissionsEnforced
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.config.ResourceSettings
@@ -113,34 +114,39 @@ class ResourceCheckerTest {
   }
 
   @Test
-  fun `each way the file cannot be used has its own category`() {
-    defineFile("a", "a/out.txt")
-    defineFile("b", "b/out.txt")
-    defineFile("c", "c.txt")
-    defineFile("d", "d/x.txt")
-    root.resolve("b").writeText("a file where the directory should be")
-    root.resolve("c.txt").writeText("x").also {
-      Files.setPosixFilePermissions(
-          root.resolve("c.txt"),
-          PosixFilePermissions.fromString("r--r--r--"),
-      )
-      permissions.add(root.resolve("c.txt"))
-    }
-    check(!Files.isWritable(root.resolve("c.txt"))) { "permissions are not enforced for this user" }
-    val outside = Files.createTempDirectory("check-outside")
-    root.resolve("d").createSymbolicLinkPointingTo(outside)
+  fun `each way the file cannot be used has its own category`() =
+      // As for any user, also for root: the permission set below holds (WI-57). The checker's
+      // thread is started from here, so it holds for the check as well.
+      PermissionsEnforced.run {
+        defineFile("a", "a/out.txt")
+        defineFile("b", "b/out.txt")
+        defineFile("c", "c.txt")
+        defineFile("d", "d/x.txt")
+        root.resolve("b").writeText("a file where the directory should be")
+        root.resolve("c.txt").writeText("x").also {
+          Files.setPosixFilePermissions(
+              root.resolve("c.txt"),
+              PosixFilePermissions.fromString("r--r--r--"),
+          )
+          permissions.add(root.resolve("c.txt"))
+        }
+        check(!Files.isWritable(root.resolve("c.txt"))) {
+          "permissions are not enforced for this user"
+        }
+        val outside = Files.createTempDirectory("check-outside")
+        root.resolve("d").createSymbolicLinkPointingTo(outside)
 
-    assertEquals(CheckFailure.PARENT_NOT_CREATABLE, outcome("b").failure)
-    assertEquals(CheckFailure.NOT_READABLE_WRITABLE, outcome("c").failure)
-    assertEquals(CheckFailure.PATH_OUTSIDE_ROOT, outcome("d").failure)
-    val moved = root.resolveSibling(root.fileName.toString() + "-moved")
-    Files.move(root, moved)
-    try {
-      assertEquals(CheckFailure.ROOT_UNAVAILABLE, outcome("a").failure)
-    } finally {
-      Files.move(moved, root)
-    }
-  }
+        assertEquals(CheckFailure.PARENT_NOT_CREATABLE, outcome("b").failure)
+        assertEquals(CheckFailure.NOT_READABLE_WRITABLE, outcome("c").failure)
+        assertEquals(CheckFailure.PATH_OUTSIDE_ROOT, outcome("d").failure)
+        val moved = root.resolveSibling(root.fileName.toString() + "-moved")
+        Files.move(root, moved)
+        try {
+          assertEquals(CheckFailure.ROOT_UNAVAILABLE, outcome("a").failure)
+        } finally {
+          Files.move(moved, root)
+        }
+      }
 
   @Test
   fun `a check that blocks fails as a timeout when the limit is reached, and does not wait longer`() {

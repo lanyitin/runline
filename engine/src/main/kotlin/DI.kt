@@ -230,6 +230,7 @@ fun Application.configureDependencyInjection() {
           resolve<Clock>(),
           resolve<EngineConfig>().resources.checkTimeout,
           resolve<ResourceTelemetry>(),
+          resolve<EngineConfig>().resources.certificateWarningDays,
       )
     }
     provide<ResourceWarnings> {

@@ -46,6 +46,49 @@ data class CheckDoc(val ok: Boolean, val failure: String? = null, val checkedAt:
 
 fun CheckResult.toDoc() = CheckDoc(ok, failure?.wire, checkedAt.toString())
 
+/** A certificate a check used (WI-52): never anything of a key. */
+@Serializable
+data class CertificateReportDoc(
+    val alias: String,
+    val subject: String,
+    val notAfter: String,
+    val daysLeft: Long,
+    val fingerprint: String,
+)
+
+@Serializable
+data class CertificateWarningDoc(val warning: String, val alias: String, val daysLeft: Long)
+
+/**
+ * The answer to a check: what is kept as the last check, and what it found of the certificates the
+ * resource uses (WI-52), which is not kept.
+ */
+@Serializable
+data class CheckResponse(
+    val ok: Boolean,
+    val failure: String?,
+    val checkedAt: String,
+    val certificates: List<CertificateReportDoc>,
+    val warnings: List<CertificateWarningDoc>,
+)
+
+fun CheckOutcome.Done.toResponse() =
+    CheckResponse(
+        result.ok,
+        result.failure?.wire,
+        result.checkedAt.toString(),
+        certificates.map {
+          CertificateReportDoc(
+              it.alias,
+              it.subject,
+              it.notAfter.toString(),
+              it.daysLeft,
+              it.fingerprint,
+          )
+        },
+        warnings.map { CertificateWarningDoc(it.warning, it.alias, it.daysLeft) },
+    )
+
 /**
  * What a type says about its use now: `{"inFlightRequests": n}` for an `openai-compatible`
  * resource, `{"activeConnections": n}` for a `jdbc-pool` one. A member that is not the type's is
@@ -55,6 +98,9 @@ fun ResourceUsage.toDoc(): JsonObject = buildJsonObject {
   inFlightRequests?.let { put("inFlightRequests", it) }
   activeConnections?.let { put("activeConnections", it) }
 }
+
+/** An alias and what it comes to against the keystore; never what the entry holds. */
+@Serializable data class AliasStatusDoc(val alias: String, val status: String)
 
 @Serializable
 data class HolderDoc(
@@ -107,6 +153,10 @@ data class ResourceResponse(
      * `invalid_secret`. Never the secret.
      */
     val secretStatus: String,
+    /** Each trusted certificate alias with its status against the keystore (WI-52), in order. */
+    val trustStatus: List<AliasStatusDoc>,
+    /** The client certificate alias's status (WI-52); `not_set` when there is none. */
+    val clientCertStatus: String,
     /**
      * The most requests the entity can have at once (capacity times what each holder may do at
      * once), for the types that can say; null for the others.
@@ -175,6 +225,8 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
       settings = resource.settings,
       secretAlias = resource.secretAlias,
       secretStatus = aliasState.wire,
+      trustStatus = trustStates.map { (alias, state) -> AliasStatusDoc(alias, state.wire) },
+      clientCertStatus = clientCertState.wire,
       concurrencyLimit = concurrencyLimit,
       usage = usage?.toDoc(),
       lastCheck = resource.lastCheck?.toDoc(),

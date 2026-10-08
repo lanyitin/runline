@@ -9,9 +9,12 @@ import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
 import dev.lawlan.runline.accessors.jdbc.JdbcSettings
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsProblem
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsResult
+import dev.lawlan.runline.accessors.tls.TlsAliases
+import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.engine.secret.SecretLookup
 import dev.lawlan.runline.engine.secret.SecretStore
+import java.security.cert.X509Certificate
 import java.time.Duration
 import kotlinx.serialization.json.JsonObject
 
@@ -29,15 +32,19 @@ internal class JdbcPoolBehavior(
     private val checkTimeout: Duration,
     private val observer: JdbcObserver,
 ) : ResourceBehavior {
+  private val aliases = ResourceAliases(secrets)
+
   override fun problemWith(settings: JsonObject?, secretAlias: String?): InvalidResource? {
     if (settings == null) return InvalidResource.INVALID_SETTINGS
-    when (val parsed = JdbcSettings.parse(settings, profiles)) {
-      is JdbcSettingsResult.Invalid -> return parsed.problem.toInvalid()
-      is JdbcSettingsResult.Valid -> Unit
-    }
+    val parsed =
+        when (val result = JdbcSettings.parse(settings, profiles)) {
+          is JdbcSettingsResult.Invalid -> return result.problem.toInvalid()
+          is JdbcSettingsResult.Valid -> result.settings
+        }
     if (secretAlias != null && !ALIAS.matches(secretAlias)) {
       return InvalidResource.INVALID_SECRET_ALIAS
     }
+    if (aliases.wrongType(parsed.tls, secretAlias)) return InvalidResource.ALIAS_WRONG_TYPE
     return null
   }
 
@@ -48,26 +55,58 @@ internal class JdbcPoolBehavior(
   override fun concurrencyLimit(resource: SharedResource): Int? =
       settingsOf(resource)?.let { resource.capacity * it.connectionsPerRun }
 
+  override fun tlsAliasesOf(resource: SharedResource): TlsAliases =
+      settingsOf(resource)?.tls ?: TlsAliases.NONE
+
   override fun hostOf(resource: SharedResource): String? = settingsOf(resource)?.host
 
+  override fun certificatesOf(resource: SharedResource): List<Pair<String, X509Certificate>> =
+      aliases.certificates(tlsAliasesOf(resource))
+
+  /**
+   * The password and the certificates as the keystore has them now. Certificates it cannot give
+   * leave the resource unusable, as a password does: the connection is never made without them.
+   */
   override fun bind(resource: SharedResource): ResourceBinding {
     val settings = settingsOf(resource) ?: throw ResourceUnavailable(resource.name)
-    return pools.bind(resource.name, settings, credentialOf(resource), resource.capacity, observer)
+    return when (val tls = aliases.resolve(settings.tls)) {
+      is ResourceAliases.Resolved.Unusable ->
+          pools.bind(
+              resource.name,
+              settings,
+              JdbcCredential.Unavailable,
+              resource.capacity,
+              observer,
+          )
+      is ResourceAliases.Resolved.Ready ->
+          pools.bind(
+              resource.name,
+              settings,
+              credentialOf(resource),
+              resource.capacity,
+              observer,
+              tls.tls,
+          )
+    }
   }
 
   override fun check(resource: SharedResource): CheckFailure? {
     val settings = settingsOf(resource) ?: return CheckFailure.ERROR
-    val credential = credentialOf(resource)
-    if (credential is JdbcCredential.Unavailable) {
-      return if (secrets.lookup(resource.secretAlias!!) is SecretLookup.Invalid) {
-        CheckFailure.ALIAS_INVALID
-      } else {
-        CheckFailure.ALIAS_MISSING
-      }
+    aliases.secretFailure(resource.secretAlias)?.let {
+      return it
     }
+    val tls =
+        when (val resolved = aliases.resolve(settings.tls)) {
+          is ResourceAliases.Resolved.Unusable -> return aliases.failureOf(resolved.state)
+          is ResourceAliases.Resolved.Ready -> resolved.tls
+        }
     val profile = profiles.find(settings.kind) ?: return CheckFailure.ERROR
     val failure =
-        JdbcProbe.check(profile, settings, credential, checkTimeout.toMillis()) ?: return null
+        JdbcProbe.check(profile, settings, credentialOf(resource), checkTimeout.toMillis(), tls)
+            ?: return null
+    failure.tls?.let {
+      return it.toCheck()
+    }
     return when (failure.failure) {
       ResourceFailure.CONNECTION_FAILED -> CheckFailure.CONNECTION_FAILED
       ResourceFailure.CONNECT_TIMEOUT,
@@ -77,6 +116,9 @@ internal class JdbcPoolBehavior(
       else -> CheckFailure.ERROR
     }
   }
+
+  /** The check's category for a failure of TLS: the same word (WI-52). */
+  private fun TlsFailure.toCheck(): CheckFailure = CheckFailure.fromWire(wire)
 
   private fun settingsOf(resource: SharedResource): JdbcSettings? =
       (JdbcSettings.parse(resource.settings, profiles) as? JdbcSettingsResult.Valid)?.settings

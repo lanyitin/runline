@@ -8,9 +8,12 @@ import dev.lawlan.runline.accessors.openai.OpenAiProbe
 import dev.lawlan.runline.accessors.openai.OpenAiSettings
 import dev.lawlan.runline.accessors.openai.OpenAiSettingsProblem
 import dev.lawlan.runline.accessors.openai.SettingsResult
+import dev.lawlan.runline.accessors.tls.TlsAliases
+import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.engine.secret.SecretLookup
 import dev.lawlan.runline.engine.secret.SecretStore
+import java.security.cert.X509Certificate
 import java.time.Duration
 import kotlinx.serialization.json.JsonObject
 
@@ -26,15 +29,19 @@ internal class OpenAiCompatibleBehavior(
     private val checkTimeout: Duration,
     private val observer: OpenAiObserver,
 ) : ResourceBehavior {
+  private val aliases = ResourceAliases(secrets)
+
   override fun problemWith(settings: JsonObject?, secretAlias: String?): InvalidResource? {
     if (settings == null) return InvalidResource.INVALID_SETTINGS
-    when (val parsed = OpenAiSettings.parse(settings)) {
-      is SettingsResult.Invalid -> return parsed.problem.toInvalid()
-      is SettingsResult.Valid -> Unit
-    }
+    val parsed =
+        when (val result = OpenAiSettings.parse(settings)) {
+          is SettingsResult.Invalid -> return result.problem.toInvalid()
+          is SettingsResult.Valid -> result.settings
+        }
     if (secretAlias != null && !ALIAS.matches(secretAlias)) {
       return InvalidResource.INVALID_SECRET_ALIAS
     }
+    if (aliases.wrongType(parsed.tls, secretAlias)) return InvalidResource.ALIAS_WRONG_TYPE
     return null
   }
 
@@ -44,24 +51,44 @@ internal class OpenAiCompatibleBehavior(
   override fun concurrencyLimit(resource: SharedResource): Int? =
       settingsOf(resource)?.let { resource.capacity * it.requestsPerRun }
 
+  override fun tlsAliasesOf(resource: SharedResource): TlsAliases =
+      settingsOf(resource)?.tls ?: TlsAliases.NONE
+
   override fun hostOf(resource: SharedResource): String? = settingsOf(resource)?.baseUrl?.host
 
+  override fun certificatesOf(resource: SharedResource): List<Pair<String, X509Certificate>> =
+      aliases.certificates(tlsAliasesOf(resource))
+
+  /**
+   * The key and the certificates as the keystore has them now. Certificates it cannot give leave
+   * the resource unusable, as a key does: the JVM's default trust is never used instead.
+   */
   override fun bind(resource: SharedResource): ResourceBinding {
     val settings = settingsOf(resource) ?: throw ResourceUnavailable(resource.name)
-    return OpenAiBinding(resource.name, settings, credentialOf(resource), observer)
+    return when (val tls = aliases.resolve(settings.tls)) {
+      is ResourceAliases.Resolved.Unusable ->
+          OpenAiBinding(resource.name, settings, OpenAiCredential.Unavailable, observer)
+      is ResourceAliases.Resolved.Ready ->
+          OpenAiBinding(resource.name, settings, credentialOf(resource), observer, tls.tls)
+    }
   }
 
   override fun check(resource: SharedResource): CheckFailure? {
     val settings = settingsOf(resource) ?: return CheckFailure.ERROR
-    val credential = credentialOf(resource)
-    if (credential is OpenAiCredential.Unavailable) {
-      return if (secrets.lookup(resource.secretAlias!!) is SecretLookup.Invalid) {
-        CheckFailure.ALIAS_INVALID
-      } else {
-        CheckFailure.ALIAS_MISSING
-      }
+    aliases.secretFailure(resource.secretAlias)?.let {
+      return it
     }
-    val failure = OpenAiProbe.check(settings, credential, checkTimeout.toMillis()) ?: return null
+    val tls =
+        when (val resolved = aliases.resolve(settings.tls)) {
+          is ResourceAliases.Resolved.Unusable -> return aliases.failureOf(resolved.state)
+          is ResourceAliases.Resolved.Ready -> resolved.tls
+        }
+    val failure =
+        OpenAiProbe.check(settings, credentialOf(resource), checkTimeout.toMillis(), tls)
+            ?: return null
+    failure.tls?.let {
+      return it.toCheck()
+    }
     return when (failure.failure) {
       ResourceFailure.CONNECTION_FAILED -> CheckFailure.CONNECTION_FAILED
       ResourceFailure.CONNECT_TIMEOUT,
@@ -76,6 +103,9 @@ internal class OpenAiCompatibleBehavior(
       else -> CheckFailure.ERROR
     }
   }
+
+  /** The check's category for a failure of TLS: the same word (WI-52). */
+  private fun TlsFailure.toCheck(): CheckFailure = CheckFailure.fromWire(wire)
 
   private fun settingsOf(resource: SharedResource): OpenAiSettings? =
       (OpenAiSettings.parse(resource.settings) as? SettingsResult.Valid)?.settings

@@ -55,7 +55,10 @@ class ResourceCheckApiTest : ResourceApiSupport() {
         assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
         val body = response.json()
         assertEquals(JsonPrimitive(true), body["ok"])
-        assertEquals(setOf("ok", "failure", "checkedAt"), body.keys)
+        // The certificates a check used and its warnings (WI-52): none for a resource without any.
+        assertEquals(setOf("ok", "failure", "checkedAt", "certificates", "warnings"), body.keys)
+        assertEquals(JsonArray(emptyList()), body["certificates"])
+        assertEquals(JsonArray(emptyList()), body["warnings"])
         assertEquals(JsonNull, body["failure"], "no failure category when it passed")
         assertFalse(response.bodyAsText().contains(root.toString()))
       }

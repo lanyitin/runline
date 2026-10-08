@@ -76,7 +76,7 @@ class KeystoreSnapshot(private val entries: Map<String, LoadedEntry>) {
  * as `keytool -list` prints it (upper case hexadecimal pairs separated by colons), so that an
  * operator can compare it with what the tool says.
  */
-internal fun infoOf(certificate: X509Certificate): CertificateInfo =
+fun infoOf(certificate: X509Certificate): CertificateInfo =
     CertificateInfo(
         certificate.subjectX500Principal.name,
         certificate.notAfter.toInstant(),

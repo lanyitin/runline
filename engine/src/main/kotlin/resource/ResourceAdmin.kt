@@ -58,6 +58,12 @@ enum class InvalidResource(val problem: String) {
   /** An extra connection property of a `jdbc-pool` resource that its database does not allow. */
   PROPERTY_NOT_ALLOWED("property_not_allowed"),
 
+  /**
+   * An alias that names an entry of another kind than its member wants: a certificate as the
+   * secret, a secret or a private key as a trusted certificate, and so on (WI-52).
+   */
+  ALIAS_WRONG_TYPE("alias_wrong_type"),
+
   /** A change of name: a resource is identified by its name for good. */
   IMMUTABLE_NAME("immutable_name"),
 

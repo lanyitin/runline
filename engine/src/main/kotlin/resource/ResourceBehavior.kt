@@ -6,9 +6,11 @@ import dev.lawlan.runline.accessors.jdbc.JdbcPools
 import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
 import dev.lawlan.runline.accessors.jdbc.PostgresProfile
 import dev.lawlan.runline.accessors.openai.OpenAiObserver
+import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.engine.config.ResourceSettings
 import dev.lawlan.runline.engine.secret.NoSecretStore
 import dev.lawlan.runline.engine.secret.SecretStore
+import java.security.cert.X509Certificate
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -53,6 +55,15 @@ interface ResourceBehavior {
    * not need to name to use the resource (it is warned if it does). Null for a type without one.
    */
   fun hostOf(resource: SharedResource): String? = null
+
+  /** The keystore aliases of the certificates [resource]'s connections use (WI-52); none here. */
+  fun tlsAliasesOf(resource: SharedResource): TlsAliases = TlsAliases.NONE
+
+  /**
+   * The certificates [resource] uses, by alias, as the keystore has them now (WI-52): each trusted
+   * one, then the client certificate's chain. Aliases the keystore cannot give are left out.
+   */
+  fun certificatesOf(resource: SharedResource): List<Pair<String, X509Certificate>> = emptyList()
 
   /**
    * The accessor for a run that holds [resource], bound to its settings as they are now; null for a

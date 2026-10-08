@@ -180,7 +180,7 @@ fun Application.configureResourceRoutes() {
             val name = call.parameters["name"].orEmpty()
             when (val outcome = withContext(Dispatchers.IO) { checker.check(name, call.caller) }) {
               CheckOutcome.NotFound -> call.respondResourceNotFound()
-              is CheckOutcome.Done -> call.respond(outcome.result.toDoc())
+              is CheckOutcome.Done -> call.respond(outcome.toResponse())
             }
           }
 
@@ -256,6 +256,8 @@ private fun InvalidResource.message() =
       InvalidResource.INVALID_LIMIT -> "每 run 同時請求數或大小上限超出允許範圍。"
       InvalidResource.UNSUPPORTED_DATABASE -> "資料庫種類不在這個 Engine 支援的清單內（目前只有 postgresql）。"
       InvalidResource.PROPERTY_NOT_ALLOWED -> "額外連線屬性不在這個資料庫允許的清單內；載入類別、寫檔、機密與 TLS 相關的屬性都不接受。"
+      InvalidResource.ALIAS_WRONG_TYPE ->
+          "別名指向的金鑰庫項目類型不符：機密別名只接受機密項目，信任別名只接受受信任憑證項目，用戶端憑證別名只接受私鑰項目。"
       InvalidResource.IMMUTABLE_NAME -> "資源名稱建立後不能修改。"
       InvalidResource.IMMUTABLE_TYPE -> "資源型別建立後不能修改；要換型別請刪除後重新建立。"
     }

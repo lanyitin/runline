@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.jdbc.JdbcPools
+import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.secret.SecretLookup
 import dev.lawlan.runline.engine.secret.SecretStore
@@ -17,6 +18,12 @@ enum class AliasState(val wire: String) {
 
   /** The alias is there but its secret cannot be used (ADR-019 decision 11). */
   INVALID_SECRET("invalid_secret"),
+
+  /** The alias names an entry of another kind than the member wants (WI-52). */
+  WRONG_TYPE("wrong_type"),
+
+  /** The alias names a private key the keystore's password does not open (WI-52). */
+  INVALID_KEY("invalid_key"),
 }
 
 /**
@@ -32,6 +39,10 @@ data class ResourceView(
     val concurrencyLimit: Int? = null,
     /** What the type says about its use right now; null for a type that has nothing to say. */
     val usage: ResourceUsage? = null,
+    /** Each trusted certificate alias with its status (WI-52), in order. */
+    val trustStates: List<Pair<String, AliasState>> = emptyList(),
+    /** The client certificate alias's status (WI-52). */
+    val clientCertState: AliasState = AliasState.NOT_SET,
 )
 
 sealed interface ForceReleaseOutcome {
@@ -57,6 +68,8 @@ class ResourceCatalog(
     private val usage: OpenAiUsage = OpenAiUsage(),
     private val jdbcPools: JdbcPools? = null,
 ) {
+  private val certificates = ResourceAliases(secrets)
+
   fun list(): List<ResourceView> = views(store.list())
 
   fun find(name: String): ResourceView? = store.find(name)?.let { views(listOf(it)).single() }
@@ -72,6 +85,7 @@ class ResourceCatalog(
   private fun views(resources: List<SharedResource>): List<ResourceView> {
     val declaredBy = declarations.declaredBy(resources.map { it.name })
     return resources.map {
+      val tls = behaviors.of(it.type)?.tlsAliasesOf(it) ?: TlsAliases.NONE
       ResourceView(
           it,
           coordinator.activity(it.name),
@@ -79,6 +93,8 @@ class ResourceCatalog(
           aliasStateOf(it),
           behaviors.of(it.type)?.concurrencyLimit(it),
           usageOf(it),
+          certificates.trustStates(tls),
+          certificates.clientState(tls),
       )
     }
   }
@@ -96,8 +112,8 @@ class ResourceCatalog(
     val alias = resource.secretAlias ?: return AliasState.NOT_SET
     return when (secrets.lookup(alias)) {
       is SecretLookup.Found -> AliasState.FOUND
-      SecretLookup.Missing,
-      SecretLookup.WrongType -> AliasState.MISSING
+      SecretLookup.Missing -> AliasState.MISSING
+      SecretLookup.WrongType -> AliasState.WRONG_TYPE
       SecretLookup.Invalid -> AliasState.INVALID_SECRET
     }
   }

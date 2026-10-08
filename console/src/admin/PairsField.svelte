@@ -4,17 +4,20 @@
 
   // A list of names with a value each, none of them secret: the extra headers of a service, the
   // extra connection properties of a database. A row whose name is left empty is not sent. What the
-  // Engine refuses of them is said below the list (`error`).
+  // Engine refuses of them is said below the list (`error`); what may be given, where the Engine
+  // tells it, is said with the help (`allowed`).
   interface Props {
     id: string;
     legend: string;
     help: string;
+    /** The names that may be given, in words; none when it is not known. */
+    allowed?: string;
     add: string;
     pairs: Pair[];
     error?: string;
     onchange?: () => void;
   }
-  let { id, legend, help, add, pairs = $bindable(), error, onchange }: Props = $props();
+  let { id, legend, help, allowed, add, pairs = $bindable(), error, onchange }: Props = $props();
 
   const { i18n } = useApp();
 </script>
@@ -55,6 +58,7 @@
   {/each}
   <div><button class="rl-btn small" type="button" onclick={() => pairs.push({ name: '', value: '' })}>{add}</button></div>
   <span class="rl-help">{help}</span>
+  {#if allowed}<span class="rl-help allowed">{allowed}</span>{/if}
   {#if error}<span class="rl-field-error">{error}</span>{/if}
 </fieldset>
 

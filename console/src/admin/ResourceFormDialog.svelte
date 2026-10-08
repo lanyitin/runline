@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ApiFailure } from '../api/failure';
-  import type { Resource } from '../api/admin-model';
+  import type { Resource, ResourceTypeCatalog } from '../api/admin-model';
   import { useApp } from '../app/context';
   import { enumLabel } from '../i18n/enums';
   import FileFields from './FileFields.svelte';
@@ -24,14 +24,18 @@
   // last check), the alias when another is chosen. It says what lowering the capacity and disabling
   // do (ADR-007: nothing is taken back from the holders; the runs that wait for a disabled resource
   // fail), and warns, with the number, when disabling would fail runs that are waiting now. What the
-  // Engine refuses is said at the field its `problem` is about, or in the dialog.
+  // Engine refuses is said at the field its `problem` is about, or in the dialog. The choices of the
+  // types that need them (database kinds, endpoints, request parameters) are the Engine's catalog;
+  // without it those types are offered as not available, and one of them cannot be changed.
   interface Props {
     /** The resource to change; none to define a new one. */
     resource?: Resource;
+    /** What the Engine tells of its resource types; null when it could not be read. */
+    catalog: ResourceTypeCatalog | null;
     /** Done: with the resource as the Engine gives it, or null when the dialog was left. */
     onfinished: (resource: Resource | null) => void;
   }
-  let { resource, onfinished }: Props = $props();
+  let { resource, catalog, onfinished }: Props = $props();
 
   const { i18n, api } = useApp();
   // svelte-ignore state_referenced_locally
@@ -47,11 +51,13 @@
   let enabled = $state(resource?.enabled ?? true);
   // svelte-ignore state_referenced_locally
   let secretAlias = $state(resource?.secretAlias ?? '');
-  const form = $derived(formOf(type));
+  const form = $derived(formOf(type, catalog));
+  /** A type the Console has a form for, which has none now: the Engine's catalog could not be read. */
+  const unavailable = $derived(type !== '' && formTypes.includes(type) && form === undefined);
   /** The fields of the type, as typed; they start again when another type is chosen. */
   // svelte-ignore state_referenced_locally
   let fields = $state<any>(
-    resource === undefined ? undefined : formOf(resource.type)?.fromSettings(resource.settings),
+    resource === undefined ? undefined : formOf(resource.type, catalog)?.fromSettings(resource.settings),
   );
   let errors = $state<Record<string, string>>({});
   let failure = $state.raw<ApiFailure | null>(null);
@@ -64,7 +70,7 @@
 
   function chooseType() {
     delete errors['resource-type'];
-    fields = formOf(type)?.empty();
+    fields = formOf(type, catalog)?.empty();
   }
 
   /** The fields at these ids changed: what was said at them is no longer so. */
@@ -99,7 +105,7 @@
         : JSON.stringify(value);
 
   async function save() {
-    if (busy) return;
+    if (busy || unavailable) return;
     failure = null;
     const found: Record<string, string> = {};
     if (!editing && type === '') {
@@ -198,7 +204,12 @@
         >
           <option value="">{i18n.t('resources.form.type.choose')}</option>
           {#each formTypes as option (option)}
-            <option value={option}>{enumLabel(i18n.translate, 'resourceType', option)}</option>
+            {@const offered = formOf(option, catalog) !== undefined}
+            <option value={option} disabled={!offered}>
+              {offered
+                ? enumLabel(i18n.translate, 'resourceType', option)
+                : i18n.t('resources.form.type.unavailable', { type: enumLabel(i18n.translate, 'resourceType', option) })}
+            </option>
           {/each}
         </select>
         <span class="rl-help">{i18n.t('resources.form.type.help')}</span>
@@ -206,7 +217,9 @@
       </div>
     {/if}
 
-    {#if editing || type !== ''}
+    {#if unavailable}
+      <p class="rl-notice warning catalog-unavailable">{i18n.t('resources.form.catalogUnavailable')}</p>
+    {:else if editing || type !== ''}
       {#if !editing}
         <div class="rl-field">
           <label for="resource-name">{i18n.t('resources.form.name')}</label>
@@ -249,9 +262,9 @@
         {#if type === 'file'}
           <FileFields bind:fields {errors} onchange={cleared} />
         {:else if type === 'jdbc-pool'}
-          <JdbcPoolFields bind:fields {errors} {capacity} onchange={cleared} />
+          <JdbcPoolFields bind:fields databases={catalog!.jdbc!.databases} {errors} {capacity} onchange={cleared} />
         {:else if type === 'openai-compatible'}
-          <OpenAiFields bind:fields {errors} {capacity} onchange={cleared} />
+          <OpenAiFields bind:fields catalog={catalog!.openAi!} {errors} {capacity} onchange={cleared} />
         {/if}
       {/if}
       {#if form?.takesSecret}
@@ -274,7 +287,7 @@
       {/if}
     {/if}
 
-    {#if editing}
+    {#if editing && !unavailable}
       <div class="rl-field">
         <label class="enabled">
           <input id="resource-enabled" type="checkbox" bind:checked={enabled} onchange={() => delete errors['resource-form']} />
@@ -300,7 +313,7 @@
     <button
       class="rl-btn {failsWaiters ? 'danger solid' : 'primary'}"
       type="button"
-      disabled={busy}
+      disabled={busy || unavailable}
       onclick={() => void save()}
     >
       {i18n.t(!editing ? 'resources.form.define' : failsWaiters ? 'resources.form.saveFail' : 'resources.form.save')}

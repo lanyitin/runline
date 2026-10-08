@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ApiFailure } from '../api/failure';
-  import type { Holder, Resource } from '../api/admin-model';
+  import type { Holder, Resource, ResourceTypeCatalog } from '../api/admin-model';
   import { createPolled } from '../api/polled.svelte';
   import ResourceCard from '../admin/ResourceCard.svelte';
   import ResourceDeleteDialog from '../admin/ResourceDeleteDialog.svelte';
@@ -16,7 +16,11 @@
   // it), a way to define one, to change its capacity and whether it is enabled (the dialog says what
   // that does), to delete one after a preview, and to make a holder let go after a confirmation;
   // below, the keystore (SecretsPanel). The page is read again every 3 s while the tab is shown, as
-  // the runs are; a check is made only when the admin asks.
+  // the runs are; a check is made only when the admin asks. What the Engine tells of its resource
+  // types (`GET /api/v1/resource-types`, ADR-021), which the forms of `jdbc-pool` and
+  // `openai-compatible` take their choices from, is read once, when the page is opened: it does not
+  // change while the Engine runs. When it cannot be read the page says so, and those two types can
+  // be neither defined nor changed; nothing else depends on it.
   interface Props {
     /** Where the time comes from; the tests give their own. */
     clock?: Clock;
@@ -39,6 +43,21 @@
     void list.start();
     return () => list.dispose();
   });
+
+  /** The catalog of resource types: undefined while it is read, then it or why it could not be. */
+  let catalog = $state.raw<{ types: ResourceTypeCatalog } | { failure: ApiFailure } | undefined>(undefined);
+  $effect(() => {
+    let current = true;
+    api.resourceTypes().then(
+      (types) => current && (catalog = { types }),
+      (error) => current && (catalog = { failure: asFailure(error) }),
+    );
+    return () => {
+      current = false;
+    };
+  });
+  const catalogTypes = $derived(catalog !== undefined && 'types' in catalog ? catalog.types : null);
+  const catalogFailure = $derived(catalog !== undefined && 'failure' in catalog ? catalog.failure : null);
 
   const resources = $derived<Resource[]>([...(list.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)));
   const updated = $derived(list.updatedAt === 0 ? '' : new Date(list.updatedAt).toLocaleTimeString(i18n.locale));
@@ -89,7 +108,7 @@
     <ApiErrorNotice failure={list.error} />
     <div><button class="rl-btn retry" type="button" onclick={() => list.reload()}>{i18n.t('common.retry')}</button></div>
   </div>
-{:else if list.status === 'loading'}
+{:else if list.status === 'loading' || catalog === undefined}
   <p class="muted" role="status" aria-busy="true">{i18n.t('common.loading')}</p>
 {:else}
   <div class="rl-toolbar">
@@ -104,6 +123,12 @@
 
   {#if list.error}
     <div class="problem"><ApiErrorNotice failure={list.error} /></div>
+  {/if}
+  {#if catalogFailure}
+    <div class="problem catalog-failed">
+      <p class="rl-notice warning">{i18n.t('resources.catalog.failed')}</p>
+      <ApiErrorNotice failure={catalogFailure} />
+    </div>
   {/if}
 
   {#if resources.length === 0}
@@ -133,7 +158,7 @@
 <SecretsPanel {clock} {visibility} />
 
 {#if form}
-  <ResourceFormDialog resource={form.resource} onfinished={formDone} />
+  <ResourceFormDialog resource={form.resource} catalog={catalogTypes} onfinished={formDone} />
 {/if}
 
 {#if deleting}

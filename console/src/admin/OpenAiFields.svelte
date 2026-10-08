@@ -1,6 +1,6 @@
 <script lang="ts">
+  import type { ResourceTypeCatalog } from '../api/admin-model';
   import { useApp } from '../app/context';
-  import { ENDPOINTS, PARAMETERS } from './openai-catalog';
   import type { OpenAiFields } from './resource-forms';
   import PairsField from './PairsField.svelte';
   import TextField from './TextField.svelte';
@@ -11,15 +11,20 @@
   // enabled, the request parameters with their default, lock and ceiling, the allowed models, the
   // five timeouts and the requests each run may have in flight. It says what a lock and a ceiling
   // do, and what the limit of requests at once comes to: the capacity times the requests per run.
+  // The entries, by their group, and the parameters are those the Engine tells ([catalog]); each
+  // entry says whether a new resource has it and whether it makes, cancels or deletes what the
+  // service keeps, and a group can be enabled or disabled at once (the entries are still what is
+  // stored).
   interface Props {
     fields: OpenAiFields;
+    catalog: NonNullable<ResourceTypeCatalog['openAi']>;
     errors: Record<string, string>;
     /** The capacity as typed, for the limit of requests at once. */
     capacity: string;
     /** A field changed: the errors said at these ids are no longer so. */
     onchange: (...ids: string[]) => void;
   }
-  let { fields = $bindable(), errors, capacity, onchange }: Props = $props();
+  let { fields = $bindable(), catalog, errors, capacity, onchange }: Props = $props();
 
   const { i18n } = useApp();
   const whole = (text: string, empty: number | null) =>
@@ -36,12 +41,25 @@
   /** What is wrong with the parameters: the Engine's word, then each parameter's, by its name. */
   const parameterErrors = $derived([
     ...(errors['openai-parameters'] ? [errors['openai-parameters']] : []),
-    ...PARAMETERS.flatMap(({ name }) =>
+    ...catalog.requestParameters.flatMap(({ name }) =>
       [errors[`openai-parameter-${name}`], errors[`openai-max-${name}`]]
         .filter((error) => error !== undefined)
         .map((error) => `${name}: ${error}`),
     ),
   ]);
+  /** The entries by their group, in the order of the catalog. */
+  const groups = $derived.by(() => {
+    const byGroup = new Map<string, typeof catalog.endpoints>();
+    for (const entry of catalog.endpoints) byGroup.set(entry.group, [...(byGroup.get(entry.group) ?? []), entry]);
+    return [...byGroup].map(([name, entries]) => ({ name, entries }));
+  });
+  /** Enables or disables every entry of a group; the others stay as they are. */
+  function setGroup(entries: typeof catalog.endpoints, enabled: boolean) {
+    const ids = entries.map((entry) => entry.id);
+    const others = fields.endpoints.filter((id) => !ids.includes(id));
+    fields.endpoints = enabled ? [...others, ...ids] : others;
+    onchange('openai-endpoints');
+  }
   const TIMEOUTS = [
     ['connectMs', 'openai-connect-ms', '10000'],
     ['firstByteMs', 'openai-first-byte-ms', '900000'],
@@ -89,21 +107,36 @@
 <fieldset id="openai-endpoints">
   <legend>{i18n.t('resources.form.openai.endpoints')}</legend>
   <span class="rl-help">{i18n.t('resources.form.openai.endpoints.help')}</span>
-  <div class="endpoints">
-    {#each ENDPOINTS as entry (entry.id)}
-      <label class="endpoint">
-        <input
-          type="checkbox"
-          name="endpoint"
-          value={entry.id}
-          bind:group={fields.endpoints}
-          onchange={() => onchange('openai-endpoints')}
-        />
-        <span class="rl-mono">{entry.id}</span>
-        <span class="rl-help rl-mono">{entry.method} {entry.path}</span>
-      </label>
-    {/each}
-  </div>
+  {#each groups as group (group.name)}
+    <div class="group" data-group={group.name}>
+      <div class="group-head">
+        <span class="group-name rl-mono">{group.name}</span>
+        <button class="rl-btn small" type="button" onclick={() => setGroup(group.entries, true)}>
+          {i18n.t('resources.form.openai.group.enable')}
+        </button>
+        <button class="rl-btn small" type="button" onclick={() => setGroup(group.entries, false)}>
+          {i18n.t('resources.form.openai.group.disable')}
+        </button>
+      </div>
+      <div class="endpoints">
+        {#each group.entries as entry (entry.id)}
+          <label class="endpoint">
+            <input
+              type="checkbox"
+              name="endpoint"
+              value={entry.id}
+              bind:group={fields.endpoints}
+              onchange={() => onchange('openai-endpoints')}
+            />
+            <span class="rl-mono">{entry.id}</span>
+            <span class="rl-help rl-mono">{entry.method} {entry.path}</span>
+            {#if entry.defaultEnabled}<span class="tag default">{i18n.t('resources.form.openai.endpoint.default')}</span>{/if}
+            {#if entry.stateful}<span class="tag stateful">{i18n.t('resources.form.openai.endpoint.stateful')}</span>{/if}
+          </label>
+        {/each}
+      </div>
+    </div>
+  {/each}
   {#if errors['openai-endpoints']}<span class="rl-field-error">{errors['openai-endpoints']}</span>{/if}
 </fieldset>
 
@@ -121,7 +154,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each PARAMETERS as parameter (parameter.name)}
+        {#each catalog.requestParameters as parameter (parameter.name)}
           {@const typed = fields.parameters[parameter.name]}
           <tr>
             <td class="mono"><label for="openai-parameter-{parameter.name}">{parameter.name}</label></td>
@@ -148,7 +181,7 @@
               />
             </td>
             <td>
-              {#if parameter.kind === 'number'}
+              {#if parameter.ceiling}
                 <input
                   id="openai-max-{parameter.name}"
                   class="rl-input mono"
@@ -230,10 +263,35 @@
     font-size: var(--text-xs);
     font-weight: 600;
   }
+  .group {
+    display: grid;
+    gap: var(--space-1);
+  }
+  .group-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
   .endpoints {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
     gap: var(--space-1) var(--space-3);
+  }
+  .tag {
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+  }
+  .tag.default {
+    background: var(--accent-tint);
+    color: var(--accent-text);
+  }
+  .tag.stateful {
+    background: var(--warning-tint);
+    color: var(--warning-text);
   }
   .endpoint {
     display: flex;

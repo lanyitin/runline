@@ -14,11 +14,14 @@ const page = async (
   options: {
     languages?: string[];
     seed?: (backend: TestApp['engine']['backend']) => void;
+    /** What the Engine answers to `GET /api/v1/resource-types` instead of its own catalog. */
+    catalog?: { status: number; body: unknown };
   } = {},
 ) => {
   app = await createTestApp({ identity: root, languages: options.languages });
   app.engine.backend.autoRun = false;
   options.seed?.(app.engine.backend);
+  if (options.catalog) app.engine.faults.push({ match: /GET \/api\/v1\/resource-types/, ...options.catalog, times: Infinity });
   app.context.router.navigate('/resources');
   const clock = new ManualClock();
   const visibility = new ManualVisibility();
@@ -842,7 +845,8 @@ describe('the form of a jdbc-pool', () => {
     await loaded(view);
     await defineForm(view, 'jdbc-pool', 'orders-db');
     const kinds = dialog(view).querySelector<HTMLSelectElement>('#jdbc-kind')!;
-    expect([...kinds.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([['postgresql', 'PostgreSQL']]);
+    // The kinds the Engine tells, each as it names it (WI-55: the Console has no list or label of its own).
+    expect([...kinds.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([['postgresql', 'postgresql']]);
     type(field(view, 'jdbc-host'), 'db.internal');
     type(field(view, 'jdbc-port'), '6543');
     type(field(view, 'jdbc-database'), 'orders');
@@ -1322,5 +1326,170 @@ describe('the certificates of a resource (WI-52)', () => {
     expect(certificates[0].classList.contains('expiring')).toBe(true);
     expect(shown).toBeDefined();
     expect(section().querySelector('[data-certificates-of="orders-pass"]')).toBeNull();
+  });
+});
+
+describe('the choices of the forms are what the Engine tells (WI-55)', () => {
+  /** Another Engine's catalog, which this Console was never built with. */
+  const another = {
+    types: [
+      { type: 'counter' },
+      { type: 'file' },
+      {
+        type: 'jdbc-pool',
+        databases: [
+          { kind: 'otherdb', properties: [{ name: 'Flavor', rule: 'oneOf', values: ['mild', 'hot'] }] },
+          { kind: 'postgresql', properties: [{ name: 'ApplicationName', rule: 'text', maxLength: 64 }] },
+        ],
+      },
+      {
+        type: 'openai-compatible',
+        endpoints: [
+          { id: 'a.read', group: 'alpha', method: 'GET', path: '/a', request: 'none', response: 'json', streams: false, defaultEnabled: true, stateful: false },
+          { id: 'a.drop', group: 'alpha', method: 'DELETE', path: '/a/{id}', request: 'none', response: 'json', streams: false, defaultEnabled: false, stateful: true },
+          { id: 'b.make', group: 'beta', method: 'POST', path: '/b', request: 'multipart', response: 'binary', streams: false, defaultEnabled: false, stateful: false },
+        ],
+        requestParameters: [
+          { name: 'top_q', kind: 'number', ceiling: true },
+          { name: 'style', kind: 'object', ceiling: false },
+        ],
+      },
+    ],
+  };
+  const checked = (view: HTMLElement) =>
+    [...dialog(view).querySelectorAll<HTMLInputElement>('#openai-endpoints input[name="endpoint"]:checked')].map((i) => i.value);
+  const entry = (view: HTMLElement, id: string) =>
+    dialog(view).querySelector<HTMLInputElement>(`#openai-endpoints input[value="${id}"]`)!.closest('label')!;
+
+  test('the endpoints are those it tells, by group, saying which a new resource has and which change what the service keeps', async () => {
+    const { view } = await page({ catalog: { status: 200, body: another } });
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+
+    expect([...dialog(view).querySelectorAll('#openai-endpoints .group-name')].map((g) => g.textContent!.trim())).toEqual(['alpha', 'beta']);
+    expect(checked(view)).toEqual(['a.read']);
+    expect(entry(view, 'a.read').querySelector('.default')!.textContent).toContain('new resource');
+    expect(entry(view, 'a.read').querySelector('.stateful')).toBeNull();
+    expect(entry(view, 'a.drop').querySelector('.stateful')!.textContent).toContain('keeps');
+    expect(entry(view, 'a.drop').querySelector('.default')).toBeNull();
+    expect(entry(view, 'b.make').textContent).toContain('POST /b');
+    expect([...dialog(view).querySelectorAll('#openai-parameters tbody tr')].map((row) => row.querySelector('td')!.textContent!.trim())).toEqual([
+      'top_q',
+      'style',
+    ]);
+    expect(field(view, 'openai-max-top_q')).not.toBeNull();
+    expect(field(view, 'openai-max-style')).toBeNull();
+
+    type(field(view, 'openai-base-url'), 'http://llm/v1');
+    entry(view, 'b.make').querySelector('input')!.click();
+    type(field(view, 'openai-parameter-style'), '{"tone":"dry"}');
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(sent('POST')).toBeDefined());
+    expect(sent('POST').settings).toMatchObject({ endpoints: ['a.read', 'b.make'], defaults: { style: { tone: 'dry' } } });
+  });
+
+  test('a group of endpoints is enabled at once, and then disabled at once', async () => {
+    const { view } = await page({ catalog: { status: 200, body: another } });
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    const alpha = () => dialog(view).querySelector<HTMLElement>('#openai-endpoints .group[data-group="alpha"]')!;
+
+    button(alpha(), 'Enable all').click();
+    await tick();
+    expect(checked(view)).toEqual(['a.read', 'a.drop']);
+
+    button(alpha(), 'Disable all').click();
+    await tick();
+    expect(checked(view)).toEqual([]);
+  });
+
+  test('the kinds of database are those it tells, and so are the properties each allows', async () => {
+    const { view } = await page({ catalog: { status: 200, body: another } });
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'db');
+    const kinds = dialog(view).querySelector<HTMLSelectElement>('#jdbc-kind')!;
+
+    expect([...kinds.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([
+      ['otherdb', 'otherdb'],
+      ['postgresql', 'postgresql'],
+    ]);
+    expect(dialog(view).querySelector('#jdbc-properties .allowed')!.textContent).toContain('Flavor (mild, hot)');
+    choose(kinds, 'postgresql');
+    await tick();
+    expect(dialog(view).querySelector('#jdbc-properties .allowed')!.textContent).toContain('ApplicationName (64 characters at most)');
+    expect(dialog(view).querySelector('#jdbc-properties .allowed')!.textContent).not.toContain('Flavor');
+  });
+
+  test('are read once, when the page is opened, and not each time the page reads the resources again', async () => {
+    const { view, clock } = await page({ seed: (b) => b.defineResource('printer', true, 1) });
+    await loaded(view);
+    const asked = (path: string) => app.engine.received.filter((r) => r.method === 'GET' && r.path === path).length;
+    const lists = asked('/api/v1/resources');
+
+    clock.advance(3000);
+    await vi.waitFor(() => expect(asked('/api/v1/resources')).toBeGreaterThan(lists));
+    clock.advance(3000);
+    await vi.waitFor(() => expect(asked('/api/v1/resources')).toBeGreaterThan(lists + 1));
+
+    expect(asked('/api/v1/resource-types')).toBe(1);
+  });
+
+  const failing = { status: 500, body: { error: 'internal_error', message: 'x', errorId: 'e-55' } };
+  const llm = (backend: TestApp['engine']['backend']) =>
+    backend.resources.define('llm', {
+      type: 'openai-compatible',
+      capacity: 1,
+      settings: { baseUrl: 'http://llm/v1', endpoints: ['chat.completions'] },
+    });
+
+  test('when they cannot be read, the page says so in words, and offers no database pool or service to define', async () => {
+    const { view } = await page({ catalog: failing });
+    await loaded(view);
+
+    const notice = view.querySelector('.catalog-failed')!;
+    expect(notice.textContent).toContain('resource types');
+    expect(notice.textContent).toContain('e-55');
+    button(view, 'Define a resource').click();
+    await tick();
+    const options = [...dialog(view).querySelectorAll<HTMLOptionElement>('#resource-type option')];
+    expect(options.filter((o) => o.disabled).map((o) => o.value)).toEqual(['jdbc-pool', 'openai-compatible']);
+    expect(options.find((o) => o.value === 'openai-compatible')!.textContent).toContain('not available');
+  });
+
+  test('when they cannot be read, a counter and a file are defined as ever', async () => {
+    const { view } = await page({ catalog: failing });
+    await loaded(view);
+    await defineForm(view, 'file', 'report');
+    type(field(view, 'resource-path'), 'out.txt');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST')).toEqual({ name: 'report', type: 'file', capacity: 1, settings: { path: 'out.txt' } });
+  });
+
+  test('when they cannot be read, a service or a database pool cannot be changed, and the dialog says why', async () => {
+    const { view } = await page({ catalog: failing, seed: llm });
+    await loaded(view);
+    button(card(view, 'llm'), 'Change').click();
+    await tick();
+
+    expect(dialog(view).querySelector('.catalog-unavailable')!.textContent).toContain('resource types');
+    expect(field(view, 'openai-base-url')).toBeNull();
+    expect(button(dialog(view), 'Save').disabled).toBe(true);
+  });
+
+  test('in zh-TW', async () => {
+    const { view } = await page({ languages: ['zh-TW'], catalog: { status: 200, body: another } });
+    await loaded(view);
+    button(view, '定義資源').click();
+    await tick();
+    choose(dialog(view).querySelector('#resource-type')!, 'openai-compatible');
+    await tick();
+
+    expect(entry(view, 'a.drop').querySelector('.stateful')!.textContent).toContain('服務端');
+    expect(entry(view, 'a.read').querySelector('.default')!.textContent).toContain('新資源');
+    expect(button(dialog(view).querySelector('.group[data-group="alpha"]')!, '全部啟用')).toBeDefined();
   });
 });

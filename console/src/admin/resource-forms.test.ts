@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'vitest';
+import { RESOURCE_TYPES_ANSWER } from '../../test-support/fake-resource-types';
+import { parseResourceTypes, type ResourceTypeCatalog } from '../api/admin-model';
 import { formOf } from './resource-forms';
 
+/** The catalog of the Fake Engine, which the contract holds to the Engine's. */
+const CATALOG = parseResourceTypes(RESOURCE_TYPES_ANSWER);
+
 describe('the form of a file', () => {
-  const form = formOf('file')!;
+  const form = formOf('file', CATALOG)!;
 
   test('is empty for a new one, and has the path of one that exists', () => {
     expect(form.empty()).toEqual({ path: '' });
@@ -29,7 +34,7 @@ describe('the form of a file', () => {
 });
 
 describe('the form of a jdbc-pool', () => {
-  const form = formOf('jdbc-pool')!;
+  const form = formOf('jdbc-pool', CATALOG)!;
   const stored = {
     kind: 'postgresql',
     host: 'db.internal',
@@ -122,7 +127,7 @@ describe('the form of a jdbc-pool', () => {
 });
 
 describe('the form of an openai-compatible service', () => {
-  const form = formOf('openai-compatible')!;
+  const form = formOf('openai-compatible', CATALOG)!;
   const noParameters = () => form.empty().parameters;
 
   test('a new one has the endpoints the Engine enables by default, every parameter free, and leaves the rest to be filled or to the defaults', () => {
@@ -290,8 +295,8 @@ describe('the form of an openai-compatible service', () => {
 
 describe('the forms there are', () => {
   test('a counter has no fields of its own, and a type the Console does not know has no form', () => {
-    expect(formOf('counter')!.toSettings(formOf('counter')!.empty(), {})).toEqual({ settings: undefined });
-    expect(formOf('quantum')).toBeUndefined();
+    expect(formOf('counter', CATALOG)!.toSettings(formOf('counter', CATALOG)!.empty(), {})).toEqual({ settings: undefined });
+    expect(formOf('quantum', CATALOG)).toBeUndefined();
   });
 });
 
@@ -300,7 +305,7 @@ describe('the certificates of the types that connect over TLS (WI-52)', () => {
     ['jdbc-pool', { kind: 'postgresql', host: 'db', database: 'orders', username: 'reader' }],
     ['openai-compatible', { baseUrl: 'https://llm.internal/v1', endpoints: ['chat.completions'] }],
   ] as const) {
-    const form = formOf(type)!;
+    const form = formOf(type, CATALOG)!;
 
     test(`${type}: a new one names none, so the connection is as without them`, () => {
       expect(form.empty()).toMatchObject({ trustAliases: [], clientCertAlias: '' });
@@ -330,4 +335,57 @@ describe('the certificates of the types that connect over TLS (WI-52)', () => {
       expect(form.fieldOf('alias_wrong_type')).toBe('resource-certificates');
     });
   }
+});
+
+describe('the forms and the catalog of the Engine (WI-55)', () => {
+  test('without the catalog there is no form for jdbc-pool or openai-compatible; counter and file have theirs', () => {
+    expect(formOf('jdbc-pool', null)).toBeUndefined();
+    expect(formOf('openai-compatible', null)).toBeUndefined();
+    expect(formOf('counter', null)).toBeDefined();
+    expect(formOf('file', null)!.toSettings({ path: 'a.txt' }, {})).toEqual({ settings: { path: 'a.txt' } });
+  });
+
+  // Another Engine, with a catalog this Console was never built with.
+  const other: ResourceTypeCatalog = {
+    types: ['counter', 'file', 'jdbc-pool', 'openai-compatible'],
+    openAi: {
+      endpoints: [
+        { id: 'b.two', group: 'b', method: 'GET', path: '/b', request: 'none', response: 'json', streams: false, defaultEnabled: false, stateful: false },
+        { id: 'a.one', group: 'a', method: 'POST', path: '/a', request: 'json', response: 'json', streams: true, defaultEnabled: true, stateful: false },
+      ],
+      requestParameters: [
+        { name: 'top_q', kind: 'number', ceiling: true },
+        { name: 'style', kind: 'object', ceiling: false },
+        { name: 'words', kind: 'textOrList', ceiling: false },
+      ],
+    },
+    jdbc: { databases: [{ kind: 'otherdb', properties: [] }, { kind: 'postgresql', properties: [] }] },
+  };
+
+  test('a new resource starts from what the catalog says: its default entries, its parameters, its first database kind', () => {
+    expect(formOf('openai-compatible', other)!.empty()).toMatchObject({ endpoints: ['a.one'] });
+    expect(Object.keys(formOf('openai-compatible', other)!.empty().parameters)).toEqual(['top_q', 'style', 'words']);
+    expect(formOf('jdbc-pool', other)!.empty().kind).toBe('otherdb');
+  });
+
+  test('the settings follow the catalog: entries in its order, each default read as the kind it says', () => {
+    const form = formOf('openai-compatible', other)!;
+    const parameters = {
+      top_q: { value: '0.5', locked: false, max: '0.9' },
+      style: { value: '{"x":1}', locked: true, max: '' },
+      words: { value: '["a","b"]', locked: false, max: '' },
+    };
+
+    const made = form.toSettings({ ...form.empty(), baseUrl: 'http://llm/v1', endpoints: ['a.one', 'b.two'], parameters }, {});
+
+    expect(made).toEqual({
+      settings: {
+        baseUrl: 'http://llm/v1',
+        endpoints: ['b.two', 'a.one'],
+        defaults: { top_q: 0.5, style: { x: 1 }, words: ['a', 'b'] },
+        lockedParameters: ['style'],
+        maxValues: { top_q: 0.9 },
+      },
+    });
+  });
 });

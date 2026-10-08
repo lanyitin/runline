@@ -1,26 +1,43 @@
 <script lang="ts">
+  import type { CatalogDatabase, CatalogProperty } from '../api/admin-model';
   import { useApp } from '../app/context';
-  import { DATABASE_KINDS, type JdbcFields } from './resource-forms';
+  import type { JdbcFields } from './resource-forms';
   import PairsField from './PairsField.svelte';
   import TextField from './TextField.svelte';
 
-  // The fields of a `jdbc-pool` resource (08-api.md: `jdbc-pool`): the kind of database (the first
-  // version has PostgreSQL only), where it is, the account (its password is the alias chosen below
-  // the type's fields, never typed), extra connection properties, the connections each run may use
-  // and the timeouts. It says what the pool comes to: the capacity times the connections per run.
+  // The fields of a `jdbc-pool` resource (08-api.md: `jdbc-pool`): the kind of database, among
+  // those the Engine tells ([databases], ADR-021), where it is, the account (its password is the
+  // alias chosen below the type's fields, never typed), extra connection properties (those the
+  // kind allows are said, with their rules, as the Engine tells them), the connections each run may
+  // use and the timeouts. It says what the pool comes to: the capacity times the connections per run.
   interface Props {
     fields: JdbcFields;
+    databases: CatalogDatabase[];
     errors: Record<string, string>;
     /** The capacity as typed, for the size of the pool. */
     capacity: string;
     /** A field changed: the errors said at these ids are no longer so. */
     onchange: (...ids: string[]) => void;
   }
-  let { fields = $bindable(), errors, capacity, onchange }: Props = $props();
+  let { fields = $bindable(), databases, errors, capacity, onchange }: Props = $props();
 
   const { i18n } = useApp();
   const whole = (text: string, empty: number | null) =>
     text.trim() === '' ? empty : /^\d+$/.test(text.trim()) ? Number(text.trim()) : null;
+  /** A property the kind allows, with its rule in words. */
+  const described = (property: CatalogProperty) =>
+    property.rule === 'text' && property.maxLength !== undefined
+      ? i18n.t('resources.form.jdbc.property.text', { name: property.name, maxLength: property.maxLength })
+      : property.rule === 'oneOf' && property.values !== undefined
+        ? i18n.t('resources.form.jdbc.property.oneOf', { name: property.name, values: property.values.join(', ') })
+        : property.name;
+  const allowed = $derived.by(() => {
+    const properties = databases.find((database) => database.kind === fields.kind)?.properties;
+    if (properties === undefined) return undefined;
+    return properties.length === 0
+      ? i18n.t('resources.form.jdbc.properties.none')
+      : i18n.t('resources.form.jdbc.properties.allowed', { properties: properties.map(described).join('; ') });
+  });
   const pool = $derived.by(() => {
     const held = whole(capacity, null);
     const perRun = whole(fields.connectionsPerRun, 1);
@@ -41,8 +58,8 @@
     bind:value={fields.kind}
     onchange={() => onchange('jdbc-kind')}
   >
-    {#each DATABASE_KINDS as kind (kind)}
-      <option value={kind}>{i18n.translate(`resources.databaseKind.${kind}`)}</option>
+    {#each databases as database (database.kind)}
+      <option value={database.kind}>{database.kind}</option>
     {/each}
   </select>
   {#if errors['jdbc-kind']}<span class="rl-field-error">{errors['jdbc-kind']}</span>{/if}
@@ -89,6 +106,7 @@
   id="jdbc-properties"
   legend={i18n.t('resources.form.jdbc.properties')}
   help={i18n.t('resources.form.jdbc.properties.help')}
+  {allowed}
   add={i18n.t('resources.form.jdbc.properties.add')}
   error={errors['jdbc-properties']}
   bind:pairs={fields.properties}

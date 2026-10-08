@@ -451,6 +451,41 @@ describe('typed resources, checks, deleting and secrets', () => {
     expect((refused as ApiFailure).body).toMatchObject({ error: 'invalid_resource', problem: 'invalid_base_url' });
   });
 
+  test('the resource types are read as the Engine tells them: each entry, parameter and database kind with what it says', async () => {
+    const api = await start();
+
+    const catalog = await api.resourceTypes();
+
+    expect(catalog.types).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible']);
+    expect(catalog.openAi?.endpoints.find((e) => e.id === 'files.delete')).toEqual({
+      id: 'files.delete',
+      group: 'files',
+      method: 'DELETE',
+      path: '/files/{id}',
+      request: 'none',
+      response: 'json',
+      streams: false,
+      defaultEnabled: false,
+      stateful: true,
+    });
+    expect(catalog.openAi?.requestParameters.find((p) => p.name === 'stop')).toEqual({ name: 'stop', kind: 'textOrList', ceiling: false });
+    expect(catalog.jdbc?.databases.map((d) => d.kind)).toEqual(['postgresql']);
+    expect(catalog.jdbc?.databases[0].properties.find((p) => p.name === 'tcpKeepAlive')).toEqual({
+      name: 'tcpKeepAlive',
+      rule: 'oneOf',
+      values: ['true', 'false'],
+    });
+  });
+
+  test('resource types that are not as 08-api says are a failure, not a catalog', async () => {
+    const api = await start();
+    app.engine.faults.push({ match: /resource-types/, status: 200, body: { types: [{ type: 'openai-compatible', endpoints: [{ id: 5 }] }] }, times: 1 });
+
+    const failed = await api.resourceTypes().catch((e) => e);
+
+    expect(failed).toBeInstanceOf(ApiFailure);
+  });
+
   test('a check gives its result, which is the last check of the resource from then on', async () => {
     const api = await start();
     app.engine.backend.resources.define('share', { type: 'file', settings: { path: 'out.txt' }, entityFailure: 'root_unavailable' });

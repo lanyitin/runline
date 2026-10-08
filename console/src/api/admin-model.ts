@@ -517,3 +517,113 @@ export function parseUnsafeSetting(json: unknown): UnsafeSetting {
     setAt: str(r.setAt, 'setAt'),
   };
 }
+
+/** An entry of the endpoint catalog of `openai-compatible`, with what the Engine fixes about it. */
+export interface CatalogEndpoint {
+  id: string;
+  /** The group of the catalog it is in (`chat`, `files`, ...), as the Engine names it. */
+  group: string;
+  method: string;
+  /** Under the base address; `{model}` and `{id}` are the parameters of the path. */
+  path: string;
+  /** `none`, `json`, `multipart`. */
+  request: string;
+  /** `json`, `binary`. */
+  response: string;
+  streams: boolean;
+  /** Enabled for a new resource that does not say. */
+  defaultEnabled: boolean;
+  /** Makes, cancels or deletes what the service keeps. */
+  stateful: boolean;
+}
+
+/** A request parameter an `openai-compatible` resource may default, lock or cap. */
+export interface CatalogParameter {
+  name: string;
+  /** `number`, `text`, `textOrList`, `object`, or what a newer Engine names. */
+  kind: string;
+  /** Whether it may have a ceiling. */
+  ceiling: boolean;
+}
+
+/** An extra connection property a database allows, with the rule of its value. */
+export interface CatalogProperty {
+  name: string;
+  /** `text` (with `maxLength`), `oneOf` (with `values`), `pattern` (with `pattern`), or newer. */
+  rule: string;
+  maxLength?: number;
+  values?: string[];
+  pattern?: string;
+}
+
+export interface CatalogDatabase {
+  kind: string;
+  properties: CatalogProperty[];
+}
+
+/**
+ * What the Engine tells of its resource types (`GET /api/v1/resource-types`, ADR-021): the closed
+ * set, and for the types whose forms need them the choices it fixes. The Console keeps no copy of
+ * any of it.
+ */
+export interface ResourceTypeCatalog {
+  types: string[];
+  /** Null when the Engine tells nothing of `openai-compatible`. */
+  openAi: { endpoints: CatalogEndpoint[]; requestParameters: CatalogParameter[] } | null;
+  /** Null when the Engine tells nothing of `jdbc-pool`. */
+  jdbc: { databases: CatalogDatabase[] } | null;
+}
+
+export function parseResourceTypes(json: unknown): ResourceTypeCatalog {
+  const types = list(obj(json, 'the resource types').types, 'resource types', (v) => obj(v, 'a resource type'));
+  const of = (name: string) => types.find((t) => t.type === name);
+  const openAi = of('openai-compatible');
+  const jdbc = of('jdbc-pool');
+  return {
+    types: types.map((t) => str(t.type, 'resource type name')),
+    openAi:
+      openAi === undefined
+        ? null
+        : {
+            endpoints: list(openAi.endpoints, 'catalog endpoints', (v) => {
+              const e = obj(v, 'a catalog endpoint');
+              return {
+                id: str(e.id, 'endpoint id'),
+                group: str(e.group, 'endpoint group'),
+                method: str(e.method, 'endpoint method'),
+                path: str(e.path, 'endpoint path'),
+                request: str(e.request, 'endpoint request'),
+                response: str(e.response, 'endpoint response'),
+                streams: bool(e.streams, 'endpoint streams'),
+                defaultEnabled: bool(e.defaultEnabled, 'endpoint defaultEnabled'),
+                stateful: bool(e.stateful, 'endpoint stateful'),
+              };
+            }),
+            requestParameters: list(openAi.requestParameters, 'catalog request parameters', (v) => {
+              const p = obj(v, 'a request parameter');
+              return { name: str(p.name, 'parameter name'), kind: str(p.kind, 'parameter kind'), ceiling: bool(p.ceiling, 'parameter ceiling') };
+            }),
+          },
+    jdbc:
+      jdbc === undefined
+        ? null
+        : {
+            databases: list(jdbc.databases, 'catalog databases', (v) => {
+              const d = obj(v, 'a database kind');
+              return {
+                kind: str(d.kind, 'database kind'),
+                properties: list(d.properties, 'database properties', (w) => {
+                  const p = obj(w, 'a database property');
+                  return {
+                    name: str(p.name, 'property name'),
+                    rule: str(p.rule, 'property rule'),
+                    ...(p.maxLength === undefined ? {} : { maxLength: num(p.maxLength, 'property maxLength') }),
+                    ...(p.values === undefined ? {} : { values: strings(p.values, 'property values') }),
+                    ...(p.pattern === undefined ? {} : { pattern: str(p.pattern, 'property pattern') }),
+                  };
+                }),
+              };
+            }),
+          },
+  };
+}

@@ -5,8 +5,11 @@
 // was typed; only what the Engine cannot be asked (a field left empty, a number that is not one) is
 // said here, the rest is the Engine's to refuse, and its `problem` is said at the field it is about.
 // Settings the form has no field for are kept as they are when a resource is changed (`kept`).
+// The choices of `jdbc-pool` and `openai-compatible` (database kinds, endpoint entries, request
+// parameters) are what the Engine tells (`GET /api/v1/resource-types`, ADR-021): without that
+// catalog those two types have no form, and the Console has no list of its own to fall back on.
 
-import { ENDPOINTS, PARAMETERS, type RequestParameter } from './openai-catalog';
+import type { CatalogDatabase, CatalogParameter, ResourceTypeCatalog } from '../api/admin-model';
 
 /**
  * What the fields make: the settings to send (none for a type without settings), or what is wrong
@@ -130,7 +133,7 @@ const present = <T>(values: Record<string, T | undefined>): Record<string, T> | 
 };
 
 export interface JdbcFields extends CertificateFields {
-  /** The kind of database; the first version has PostgreSQL only. */
+  /** The kind of database, one of those the Engine tells. */
   kind: string;
   host: string;
   port: string;
@@ -143,19 +146,17 @@ export interface JdbcFields extends CertificateFields {
   properties: Pair[];
 }
 
-/** The kinds of database the Engine has a profile for (08-api.md: `jdbc-pool`), in order. */
-export const DATABASE_KINDS = ['postgresql'];
-
 const JDBC_TIMEOUTS: Array<[keyof JdbcFields, string, string]> = [
   ['connectMs', 'connectMs', 'jdbc-connect-ms'],
   ['statementMs', 'statementMs', 'jdbc-statement-ms'],
   ['quotaWaitMs', 'quotaWaitMs', 'jdbc-quota-wait-ms'],
 ];
 
-const jdbcPool: TypeForm<JdbcFields> = {
+/** The form of `jdbc-pool`, whose kinds of database are [databases], as the Engine tells them. */
+const jdbcPool = (databases: CatalogDatabase[]): TypeForm<JdbcFields> => ({
   takesSecret: true,
   empty: () => ({
-    kind: DATABASE_KINDS[0],
+    kind: databases[0]?.kind ?? '',
     host: '',
     port: '',
     database: '',
@@ -222,7 +223,7 @@ const jdbcPool: TypeForm<JdbcFields> = {
       invalid_settings: 'jdbc-settings',
       alias_wrong_type: 'resource-certificates',
     })[problem],
-};
+});
 
 /** A request parameter of an `openai-compatible` resource: its default, lock and ceiling, as typed. */
 export interface ParameterFields {
@@ -266,21 +267,28 @@ const NUMBER = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
 const parameterText = (value: unknown): string =>
   value === undefined ? '' : typeof value === 'string' || typeof value === 'number' ? String(value) : JSON.stringify(value);
 
-/** The fields of the request parameters, every one of them, in order. */
-const parameterFields = (settings: Record<string, unknown> = {}): Record<string, ParameterFields> => {
+/** The fields of the request parameters, every one of [parameters], in order. */
+const parameterFields = (
+  parameters: CatalogParameter[],
+  settings: Record<string, unknown> = {},
+): Record<string, ParameterFields> => {
   const defaults = objectOf(settings.defaults);
   const maxValues = objectOf(settings.maxValues);
   const locked = Array.isArray(settings.lockedParameters) ? settings.lockedParameters : [];
   return Object.fromEntries(
-    PARAMETERS.map(({ name }) => [
+    parameters.map(({ name }) => [
       name,
       { value: parameterText(defaults[name]), locked: locked.includes(name), max: text(maxValues[name]) },
     ]),
   );
 };
 
-/** Reads the text of a default as the kind of value of [parameter]; writes the error if it is not. */
-function parameterValue(out: Collected, parameter: RequestParameter, typed: string): unknown {
+/**
+ * Reads the text of a default as the kind of value of [parameter], as the Engine tells it; writes
+ * the error if it is not. Text, or a list of them, is a word or a list in JSON; an object is JSON. A
+ * kind a newer Engine names is sent as the text, for the Engine to say.
+ */
+function parameterValue(out: Collected, parameter: CatalogParameter, typed: string): unknown {
   const id = `openai-parameter-${parameter.name}`;
   const trimmed = typed.trim();
   if (parameter.kind === 'number') {
@@ -288,8 +296,7 @@ function parameterValue(out: Collected, parameter: RequestParameter, typed: stri
     out.errors[id] = 'number';
     return undefined;
   }
-  // `stop` is a word, or a list of them in JSON; `response_format` is an object of JSON.
-  if (parameter.kind === 'json' && (parameter.name !== 'stop' || trimmed.startsWith('['))) {
+  if (parameter.kind === 'object' || (parameter.kind === 'textOrList' && trimmed.startsWith('['))) {
     try {
       return JSON.parse(trimmed);
     } catch {
@@ -300,14 +307,18 @@ function parameterValue(out: Collected, parameter: RequestParameter, typed: stri
   return trimmed;
 }
 
-const openAiCompatible: TypeForm<OpenAiFields> = {
+/** The form of `openai-compatible`, with the entries and request parameters the Engine tells. */
+const openAiCompatible = ({
+  endpoints: entries,
+  requestParameters: parameters,
+}: NonNullable<ResourceTypeCatalog['openAi']>): TypeForm<OpenAiFields> => ({
   takesSecret: true,
   empty: () => ({
     baseUrl: '',
     organization: '',
     project: '',
     headers: [],
-    endpoints: ENDPOINTS.filter((entry) => entry.byDefault).map((entry) => entry.id),
+    endpoints: entries.filter((entry) => entry.defaultEnabled).map((entry) => entry.id),
     connectMs: '',
     firstByteMs: '',
     idleMs: '',
@@ -315,7 +326,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
     quotaWaitMs: '',
     requestsPerRun: '',
     allowedModels: '',
-    parameters: parameterFields(),
+    parameters: parameterFields(parameters),
     trustAliases: [],
     clientCertAlias: '',
   }),
@@ -334,7 +345,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
       quotaWaitMs: text(timeouts.quotaWaitMs),
       requestsPerRun: text(settings.requestsPerRun),
       allowedModels: Array.isArray(settings.allowedModels) ? settings.allowedModels.join(', ') : '',
-      parameters: parameterFields(settings),
+      parameters: parameterFields(parameters, settings),
       ...certificatesOf(settings),
     };
   },
@@ -361,8 +372,8 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
     if (fields.endpoints.length === 0) out.errors['openai-endpoints'] = 'endpoints';
     // In the order of the catalog; one the catalog does not have stays, last, for the Engine to say.
     out.settings.endpoints = [
-      ...ENDPOINTS.map((entry) => entry.id).filter((id) => fields.endpoints.includes(id)),
-      ...fields.endpoints.filter((id) => !ENDPOINTS.some((entry) => entry.id === id)),
+      ...entries.map((entry) => entry.id).filter((id) => fields.endpoints.includes(id)),
+      ...fields.endpoints.filter((id) => !entries.some((entry) => entry.id === id)),
     ];
     const timeouts = present(
       Object.fromEntries(OPENAI_TIMEOUTS.map(([field, id]) => [field, out.wholeNumber(id, fields[field] as string)])),
@@ -374,7 +385,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
     const defaults: Record<string, unknown> = {};
     const locked: string[] = [];
     const maxValues: Record<string, number> = {};
-    for (const parameter of PARAMETERS) {
+    for (const parameter of parameters) {
       const typed = fields.parameters[parameter.name] ?? { value: '', locked: false, max: '' };
       if (typed.value.trim() !== '') {
         const value = parameterValue(out, parameter, typed.value);
@@ -408,14 +419,24 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
       invalid_settings: 'openai-settings',
       alias_wrong_type: 'resource-certificates',
     })[problem],
-};
+});
 
-const FORMS: Record<string, TypeForm<any>> = {
-  counter,
-  file,
-  'jdbc-pool': jdbcPool,
-  'openai-compatible': openAiCompatible,
-};
-
-/** The form of [type]; undefined for a type the Console has no form for. */
-export const formOf = (type: string): TypeForm<any> | undefined => FORMS[type];
+/**
+ * The form of [type], with the choices [catalog] tells; undefined for a type the Console has no
+ * form for, and for `jdbc-pool` and `openai-compatible` when there is no catalog (it could not be
+ * read) or it tells nothing of them.
+ */
+export function formOf(type: string, catalog: ResourceTypeCatalog | null): TypeForm<any> | undefined {
+  switch (type) {
+    case 'counter':
+      return counter;
+    case 'file':
+      return file;
+    case 'jdbc-pool':
+      return catalog?.jdbc ? jdbcPool(catalog.jdbc.databases) : undefined;
+    case 'openai-compatible':
+      return catalog?.openAi ? openAiCompatible(catalog.openAi) : undefined;
+    default:
+      return undefined;
+  }
+}

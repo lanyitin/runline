@@ -15,6 +15,7 @@ import {
   parseResource,
   parseRemovalPreview,
   parseResources,
+  parseResourceTypes,
   parseSecretReload,
   parseSecrets,
   parseTrigger,
@@ -30,6 +31,7 @@ import {
   type Release,
   type RemovalPreview,
   type Resource,
+  type ResourceTypeCatalog,
   type Secret,
   type SecretReload,
   type Trigger,
@@ -168,6 +170,10 @@ export function createAdminApi(transport: Transport) {
     },
 
     // ---- shared resources --------------------------------------------------------------------
+    /** What the Engine tells of its resource types: the one source of the forms' choices. */
+    async resourceTypes(): Promise<ResourceTypeCatalog> {
+      return parseResourceTypes(await succeed(await json('/api/v1/resource-types')));
+    },
     async resources(): Promise<Resource[]> {
       return parseResources(await succeed(await json('/api/v1/resources')));
     },

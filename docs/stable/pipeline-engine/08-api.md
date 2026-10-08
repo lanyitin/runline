@@ -211,7 +211,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。封閉集合內的型別都可建立：`counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）、`jdbc-pool`（一個資料庫的連線池，首版為 PostgreSQL，見下方「`jdbc-pool` 型別」）與 `openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
 
-資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用；永遠不含機密值，金鑰庫重載後隨之變化）、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數（`openai-compatible`）或每 run 連線數（`jdbc-pool`，也就是連線池的大小），其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；`jdbc-pool` 為 `{"activeConnections": n}`，run 目前持有的連線數（run 在結束前持有它用到的連線，閒置也計入），含所有世代；其他型別為 `null`，型別沒有的成員不出現）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`uploader`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
+資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用、`wrong_type` 別名存在但不是機密項目（例如在建立後的重載中被換成憑證）；永遠不含機密值，金鑰庫重載後隨之變化）、`trustStatus`（`openai-compatible` 與 `jdbc-pool` 的 `settings.trustAliases` 每個別名對金鑰庫的狀態，依設定順序，每項 `{alias, status}`；`status` 為 `found`、`missing`、`wrong_type`（不是受信任憑證項目）；沒有信任別名時為 `[]`，[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）、`clientCertStatus`（`settings.clientCertAlias` 的狀態：`not_set`、`found`、`missing`、`wrong_type`（不是私鑰項目）、`invalid_key`（私鑰項目不能以金鑰庫密碼開啟，見「機密（管理員）」））、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數（`openai-compatible`）或每 run 連線數（`jdbc-pool`，也就是連線池的大小），其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；`jdbc-pool` 為 `{"activeConnections": n}`，run 目前持有的連線數（run 在結束前持有它用到的連線，閒置也計入），含所有世代；其他型別為 `null`，型別沒有的成員不出現）、`lastCheck`（最近一次實體檢查的結果，見下；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：宣告了這個資源的 pipeline 定義，`count`（定義數）、`triggers`（綁在這些定義上的 trigger 數）、`definitions[]`（每項 `contentHash`、`uploader`、`pipeline`、`declaredType`（該定義宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
 `invalid_resource`（422）的本文多一個 `problem`，說明原因類別：
 
@@ -233,7 +233,8 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `invalid_limit` | `requestsPerRun`、`maxRequestBytes`、`maxResponseBytes` 或 `maxDownloadBytes`（`openai-compatible`），`connectionsPerRun`、`maxRows` 或 `maxResponseBytes`（`jdbc-pool`）超出允許範圍 |
 | `path_outside_root` | `file` 的路徑不在資源根目錄內：絕對路徑、`..` 跳出根目錄，或路徑上的符號連結解析後跳出根目錄 |
 | `path_unusable` | `file` 的路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫 |
-| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file` 沒有），或別名不合規（格式同資源名稱：1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭） |
+| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file` 沒有），或別名不合規（格式同資源名稱：1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭）；`settings.trustAliases` 與 `settings.clientCertAlias` 的別名同此規則 |
+| `alias_wrong_type` | 別名存在於金鑰庫，但項目類型與欄位不符（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）：`secretAlias` 只接受機密項目、`trustAliases` 只接受受信任憑證項目、`clientCertAlias` 只接受私鑰項目。建立與修改時檢查；金鑰庫沒有的別名不是錯誤（狀態為 `missing`） |
 | `immutable_name` | 修改嘗試帶了 `name`；名稱不可修改 |
 | `immutable_type` | 修改嘗試帶了 `type`；型別不可修改，值相同也一樣被拒絕 |
 
@@ -245,7 +246,9 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 | 欄位 | 意義 | 預設 |
 |---|---|---|
-| `baseUrl` | 必填。根位址，含根路徑（例如 `http://localhost:8000/api/v1`）；只允許 `http` 與 `https`；尾端的 `/` 被去掉；用 `https` 時使用 JVM 預設信任，沒有關閉主機名稱或憑證驗證的途徑 | 無 |
+| `baseUrl` | 必填。根位址，含根路徑（例如 `http://localhost:8000/api/v1`）；只允許 `http` 與 `https`；尾端的 `/` 被去掉；用 `https` 時沒有 `trustAliases` 就使用 JVM 預設信任；沒有關閉主機名稱或憑證驗證的途徑 | 無 |
+| `trustAliases` | 選填，只對 `https` 有效（`http` 帶它為 `invalid_settings`）。金鑰庫中受信任憑證項目的別名清單（最多 16 個，不得重複，寫入時為小寫）：設定了就**只信任這些憑證**，不再信任 JVM 預設信任的任何憑證；信任只作用於這個資源的連線（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)） | 不設：JVM 預設信任 |
+| `clientCertAlias` | 選填，只對 `https` 有效。金鑰庫中私鑰項目的別名：服務要求用戶端憑證（mTLS）時出示它；私鑰只在 Engine 內使用 | 不出示 |
 | `organization`、`project` | 選填，作為 `OpenAI-Organization`、`OpenAI-Project` 標頭送出（非機密） | 不送 |
 | `headers` | 選填，額外標頭（名稱到值，非機密，最多 32 個）；名稱不得含 `auth`、`key`、`token`、`secret`、`cookie`，不得是 Engine 管理的標頭（`invalid_header`）；機密不放這裡 | 無 |
 | `endpoints` | 啟用的端點條目名稱（見下方目錄）；只能是目錄內且這個版本已提供的條目，至少一個；以條目為單位，不依群組 | `chat.completions`、`completions`、`embeddings`、`models.list`、`models.retrieve` |
@@ -257,7 +260,9 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `lockedParameters` | 鎖定的參數（同上清單）：pipeline 提供它（無論值為何）就被拒絕 | 無 |
 | `maxValues` | 數值參數的上限（例如 `{"max_tokens": 4096}`）：pipeline 提供的值超過就被拒絕 | 無 |
 
-寫入的是正規化形式：省略的項目以有效的預設值寫出，`endpoints` 依目錄順序明列。因此新版 Engine 新增的條目與改變的預設值不影響既有資源；新增的條目對既有資源預設不啟用。
+寫入的是正規化形式：省略的項目以有效的預設值寫出，`endpoints` 依目錄順序明列（`trustAliases` 與 `clientCertAlias` 沒有設定時不寫出）。因此新版 Engine 新增的條目與改變的預設值不影響既有資源；新增的條目對既有資源預設不啟用。
+
+**TLS（`https`，[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）**：每個 run 的存取端有自己的安全上下文，由取得資源當下的金鑰庫內容建立（信任 `trustAliases` 的憑證，沒有時為 JVM 預設信任；有 `clientCertAlias` 時出示該私鑰項目的憑證鏈），不修改 JVM 全域預設、不與其他資源共用。主機名稱一律驗證：連線沒有要求驗證主機名稱時（例如 JDK HTTP 用戶端的主機名稱驗證被系統屬性關閉）連線被拒絕，沒有任何設定可以關閉。別名在金鑰庫缺失、類型不符或私鑰不能使用時，run 仍能取得資源，但呼叫以 `SECRET_UNAVAILABLE` 失敗且不送出請求，不會改用 JVM 預設信任。TLS 失敗對 pipeline 是 `CONNECTION_FAILED`，類別（見下方檢查的 `failure`）記錄在 Engine 的 log（資源名稱與類別）與 metric `runline.resources.tls.failures`（標籤只有 `resource`、`type`、`kind`；`jdbc-pool` 相同）。金鑰庫重載後，憑證有變的資源之後被取得的 run 使用新的信任與用戶端憑證，已持有者繼續用取得當下的。
 
 **端點目錄**（條目名稱、方法與路徑、預設是否啟用；路徑在根位址之下）：`chat.completions`（`POST /chat/completions`，預設啟用）、`completions`（`POST /completions`，預設啟用）、`embeddings`（`POST /embeddings`，預設啟用）、`models.list`（`GET /models`，預設啟用）、`models.retrieve`（`GET /models/{model}`，預設啟用）、`responses.create`（`POST /responses`）、`responses.retrieve`（`GET /responses/{id}`）、`responses.delete`（`DELETE /responses/{id}`）、`responses.cancel`（`POST /responses/{id}/cancel`）、`responses.input_items`（`GET /responses/{id}/input_items`）、`moderations`（`POST /moderations`）、`rerank`（`POST /rerank`）、`reranking`（`POST /reranking`；兩者各為一個條目，哪個有效以對目標服務的實測決定）、`images.generations`（`POST /images/generations`）、`files.list`（`GET /files`）、`files.retrieve`（`GET /files/{id}`）、`files.delete`（`DELETE /files/{id}`）、`batches.create`（`POST /batches`）、`batches.list`（`GET /batches`）、`batches.retrieve`（`GET /batches/{id}`）、`batches.cancel`（`POST /batches/{id}/cancel`）。未標預設啟用者（尤其有狀態的刪除與取消條目）由管理員逐條啟用。另有多部分上傳與二進位回應的條目（WI-53），同樣由管理員逐條啟用：`images.edits`（`POST /images/edits`）、`images.variations`（`POST /images/variations`）、`audio.speech`（`POST /audio/speech`，二進位回應）、`audio.transcriptions`（`POST /audio/transcriptions`）、`audio.translations`（`POST /audio/translations`）、`files.create`（`POST /files`）、`files.content`（`GET /files/{id}/content`，二進位回應）；事件串流（`chat.completions`、`completions`、`responses.create`）由存取端的 `stream(request)` 提供（見下方「串流」），`audio.speech` 的音訊由 `streamBytes(request)` 以位元組塊拉取；`call` 請求 `stream` 仍被拒絕。路徑參數（`{model}`、`{id}`）只接受 `A-Za-z0-9._:-`、1 至 256 個字元，且不是 `.` 或 `..`（因此含 `/` 的模型識別碼不能用 `models.retrieve`）；查詢參數只接受條目列出者。
 
@@ -291,9 +296,13 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `connectionsPerRun` | 每個 run 同時可用的連線數（1 至 64）；連線池大小是容量乘以它，不能獨立設定 | 1 |
 | `timeouts` | `connectMs`（建立連線）、`statementMs`（單一語句的上限，超過即在資料庫端取消，得到 `TOTAL_TIMEOUT`）、`quotaWaitMs`（等待 run 自己的連線額度的上限，得到 `QUOTA_WAIT_TIMEOUT`） | 10000、300000、60000 |
 | `maxRows`、`maxResponseBytes` | 一次查詢最多回傳的列數、答案（文字與位元組）的大小上限；超過整個答案被拒絕（`RESPONSE_TOO_LARGE`），不回傳一部分 | 10000、8 MiB |
-| `properties` | 額外連線屬性（名稱到文字值，最多 16 個）；只接受資料庫設定檔的允許清單：PostgreSQL 為 `ApplicationName`（最長 64 字元）、`currentSchema`（以逗號分隔的結構名稱）、`tcpKeepAlive`（`true` 或 `false`）；其他名稱為 `property_not_allowed`。沒有任何屬性可以關閉主機名稱或憑證驗證；TLS 信任與 mTLS 由 [WI-52](work-items/WI-52-tls-trust-and-mtls.md) 加入。`readOnly` 不在清單內：語句可以自己改回，唯一的保護是資料庫帳號的權限 | 無 |
+| `properties` | 額外連線屬性（名稱到文字值，最多 16 個）；只接受資料庫設定檔的允許清單：PostgreSQL 為 `ApplicationName`（最長 64 字元）、`currentSchema`（以逗號分隔的結構名稱）、`tcpKeepAlive`（`true` 或 `false`）；其他名稱為 `property_not_allowed`。沒有任何屬性與 TLS 有關（`sslmode`、`sslfactory`、`sslrootcert`、`sslcert`、`sslkey`、`sslNegotiation` 等都不接受），也沒有任何屬性可以關閉主機名稱或憑證驗證；TLS 由下兩列設定。`readOnly` 不在清單內：語句可以自己改回，唯一的保護是資料庫帳號的權限 | 無 |
+| `trustAliases` | 選填。金鑰庫中受信任憑證項目的別名清單（規則同 `openai-compatible`）：設定了就只信任這些憑證 | 見下 |
+| `clientCertAlias` | 選填。金鑰庫中私鑰項目的別名：資料庫要求用戶端憑證時出示它 | 見下 |
 
 連線位址由資料庫設定檔依結構化欄位組成，`user`、`password` 與逾時等由 Engine 設定。寫入的是正規化形式（省略的項目以有效的預設值寫出）。
+
+**TLS（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）**：設定了 `trustAliases` 或 `clientCertAlias` 時，連線一律以資料庫設定檔固定的最嚴格模式使用 TLS（PostgreSQL：`sslmode=verify-full`，驗證憑證鏈與主機名稱，握手中由 JDK 驗證一次、握手後由驅動再驗證一次），信任 `trustAliases` 的憑證（只有 `clientCertAlias` 時為 JVM 預設信任），伺服器要求時出示 `clientCertAlias` 的憑證鏈；安全上下文屬於該連線池世代，由 Engine 內建的 socket 工廠交給驅動，不寫入任何檔案（不使用驅動的憑證與金鑰檔案屬性），也不修改 JVM 全域預設。兩者都沒有設定時連線方式與 WI-52 之前相同（驅動預設的 `sslmode=prefer`：伺服器提供 TLS 時使用但不驗證憑證，伺服器拒絕時改用不加密連線），資料庫應位於受信任的網路。金鑰庫重載後憑證有變時，之後取得的 run 使用新的連線池世代，已持有者繼續用舊世代，舊世代在持有者全部結束後關閉（含其安全上下文）。別名不可用時與密碼不可用相同：取得資源成功，操作以 `SECRET_UNAVAILABLE` 失敗且不連線。
 
 **存取端**（pipeline 以 `context.accessors.jdbcPool(名稱)` 取得，需宣告型別 `jdbc-pool`；不影響 safe 或 unsafe 的判定）：`query(sql[, parameters])` 回傳 `JdbcRows`（`columns` 與 `rows`，每列依欄位順序；`maps()` 把每列轉成欄位名稱到值）、`update(sql[, parameters])` 回傳影響筆數、`begin()`、`commit()`、`rollback()`。SQL 文字原樣交給資料庫，Engine 不解析或限制，JDBC 的跳脫語法（`{d ...}`、`{fn ...}`）也不處理；沒有參數時用單純語句，文字內的 `?` 就是 `?`，有參數時 `?` 是參數位置（PostgreSQL 的 `?` 運算子要寫成 `??`）。權限由帳號決定：pipeline 能做的就是該帳號能做的。參數與結果只用 JDK 內建型別：參數為 `null`、文字、布林、整數（以 `Long` 傳遞）、浮點數（`Double`）、`BigDecimal`、`byte[]`，其他一律 `INVALID_ARGUMENT`；文字參數以「未指定型別」交給資料庫，所以可以填入 UUID、時間、數字等欄位。**型別對應（PostgreSQL 設定檔）**：`boolean` 為 `Boolean`；`smallint`、`integer`、`bigint` 為 `Long`；`real`、`double precision` 為 `Double`；`numeric` 為 `BigDecimal`；文字類為 `String`；`bytea` 為 `byte[]`；`money` 與其他一切（日期與時間、UUID、JSON、陣列、區間……）為資料庫給的文字形式（連線的時區固定為 UTC，所以時間不隨 Engine 主機的時區而變）。
 
@@ -351,7 +360,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 主動檢查資源的實體是否可用，不取得容量，不影響進行中的 run、持有者與等待者；停用的資源也可檢查。檢查內容由型別決定：`counter` 沒有實體，一律通過；`file` 驗證根目錄可用、路徑沒有跳出根目錄、檔案所在的目錄存在或可建立、既有的檔案可讀寫（會真的開啟它，不建立也不截斷任何東西）。檢查有整體時間上限（`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，預設 10 秒），逾時是一種失敗類別。同一資源同時被檢查時共用同一次檢查與同一個答案；逾時而仍卡住的檢查未結束前，再次檢查立即回 `timeout`，不會再開新的檢查。
 
-200 回傳 `{ok, failure, checkedAt}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`connection_failed`（`openai-compatible`：服務連不上）、`rejected`（服務拒絕了金鑰，401 或 403）、`server_error`（服務回 5xx）、`unexpected_response`（服務有回應，但不是檢查要的：模型列表回了 2xx 以外的狀態，或回應過大）、`redirect_blocked`（服務把檢查導向根位址之外）、`alias_missing`（資源的金鑰別名不在金鑰庫，或 Engine 沒有組態金鑰庫；此時不送出任何請求，與 `secretStatus` 為 `missing` 一致）、`alias_invalid`（別名在金鑰庫，但機密不可使用，即 `secretStatus` 為 `invalid_secret`）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。`jdbc-pool` 的檢查以資源的帳號與密碼另開一條連線（不經連線池，不佔容量與任何 run 的連線額度）執行資料庫設定檔的健康查詢（PostgreSQL 為 `SELECT 1`）後關閉；失敗類別：`connection_failed`（連不上，含連線數已滿與伺服器關閉中）、`rejected`（帳號或密碼不被接受，也包括需要密碼而資源沒有設密碼別名）、`timeout`（連線逾時，或超過上述檢查整體上限）、`unexpected_response`（連上了但健康查詢被資料庫拒絕）、`alias_missing`／`alias_invalid`（別名問題，此時不連線）；回應不含位址、帳號或驅動訊息。`openai-compatible` 的檢查只做連線與一個輕量讀取：啟用了模型列表（`models.list`）時讀取它，否則只對根位址發一個 GET，任何不是拒絕或失敗的回應都算通過；它用自己的短逾時（上述 `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，連線、首位元組與閒置都以它為限），不用資源自己的逾時，不取得容量與每 run 的請求額度，也不產生任何內容。服務正在生成而來不及回應時結果是 `timeout`，不一定代表服務故障（目標服務並行為 1 時尤其如此）。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，同上）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
+200 回傳 `{ok, failure, checkedAt, certificates, warnings}`：`ok` 為是否通過，`failure` 只在失敗時有值（通過時為 `null`），不含原因說明、路徑、位址或機密；原因與例外寫在 Engine 的 log。`failure` 的值：`root_unavailable`（資源根目錄不存在或不可讀寫）、`parent_not_creatable`（檔案所在的目錄不存在也無法建立）、`not_readable_writable`（檔案不可讀寫）、`path_outside_root`（路徑解析後不在根目錄內，例如目錄被換成指向根目錄外的符號連結）、`connection_failed`（`openai-compatible`：服務連不上）、`rejected`（服務拒絕了金鑰，401 或 403）、`server_error`（服務回 5xx）、`unexpected_response`（服務有回應，但不是檢查要的：模型列表回了 2xx 以外的狀態，或回應過大）、`redirect_blocked`（服務把檢查導向根位址之外）、`alias_missing`（資源的金鑰別名不在金鑰庫，或 Engine 沒有組態金鑰庫；此時不送出任何請求，與 `secretStatus` 為 `missing` 一致）、`alias_invalid`（別名在金鑰庫，但機密不可使用，即 `secretStatus` 為 `invalid_secret`；或私鑰不能使用，即 `clientCertStatus` 為 `invalid_key`）、`alias_wrong_type`（別名的項目類型不符，例如重載後被換成另一種項目；此時不連線）、`certificate_expired`（資源所用的憑證已過期，此時不連線；或服務的憑證已過期）、`trust_failed`（服務的憑證不能連到資源信任的憑證）、`hostname_mismatch`（服務的憑證不是給所連主機的）、`client_cert_rejected`（服務要求用戶端憑證並拒絕了連線：沒有出示或出示的不被接受）、`handshake_failed`（其他 TLS 握手失敗）、`timeout`（逾時）、`error`（檢查本身出錯，細節在 log）。TLS 類別都以真實握手判定（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)，類別的辨識方式見該文件的實作結果）。`jdbc-pool` 的檢查以資源的帳號與密碼另開一條連線（不經連線池，不佔容量與任何 run 的連線額度）執行資料庫設定檔的健康查詢（PostgreSQL 為 `SELECT 1`）後關閉；失敗類別：`connection_failed`（連不上，含連線數已滿與伺服器關閉中）、`rejected`（帳號或密碼不被接受，也包括需要密碼而資源沒有設密碼別名）、`timeout`（連線逾時，或超過上述檢查整體上限）、`unexpected_response`（連上了但健康查詢被資料庫拒絕）、`alias_missing`／`alias_invalid`（別名問題，此時不連線）；回應不含位址、帳號或驅動訊息。`openai-compatible` 的檢查只做連線與一個輕量讀取：啟用了模型列表（`models.list`）時讀取它，否則只對根位址發一個 GET，任何不是拒絕或失敗的回應都算通過；它用自己的短逾時（上述 `RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`，連線、首位元組與閒置都以它為限），不用資源自己的逾時，不取得容量與每 run 的請求額度，也不產生任何內容。服務正在生成而來不及回應時結果是 `timeout`，不一定代表服務故障（目標服務並行為 1 時尤其如此）。`certificates` 是資源所用的每個憑證（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)；先 `trustAliases` 依序，再 `clientCertAlias` 的憑證鏈，自己的憑證在前；金鑰庫給不出的別名不列），每項 `{alias, subject, notAfter, daysLeft, fingerprint}`：`daysLeft` 為到 `notAfter` 的整天數（已過期為負數），`fingerprint` 為 SHA-256 指紋（與 `keytool -list` 印出的形式相同，以 `:` 分隔的大寫十六進位）；`warnings` 是剩餘天數低於警告門檻（`RUNLINE_CERTIFICATE_WARNING_DAYS`，預設 30）而未過期的憑證，每項 `{warning: "certificate_expiring", alias, daysLeft}`，警告不使檢查失敗；沒有憑證的資源兩者皆為 `[]`。兩者不含任何私鑰或其衍生資料，也不保存。結果與時間保存為資源的 `lastCheck`（`{ok, failure, checkedAt}`，不含 `certificates` 與 `warnings`）；資源的設定被修改時清除，其他修改不影響它。404 `resource_not_found`；開發人員得到 403，沒有 token 得到 401。檢查記錄管理員名稱與結果類別於 log，並計入 metric（標籤只有資源名稱與型別）。
 
 ### `POST /api/v1/resources/{name}/holders/{runId}/release`
 
@@ -369,20 +378,21 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 |---|---|
 | `found` | 別名存在且可使用 |
 | `invalid_secret` | 機密項目的值含非可列印 ASCII 字元（已損毀，或違反機密字元集），Engine 拒絕使用它且不輸出值；請維運刪除後重新匯入 |
+| `invalid_key` | 私鑰項目不能以金鑰庫密碼開啟（以 JDK 的 API 或其他工具為私鑰另設了保護密碼；`keytool` 寫入 PKCS12 時一律用金鑰庫密碼，見 [WI-52](work-items/WI-52-tls-trust-and-mtls.md)），Engine 不使用它；請維運以 `keytool -importkeystore` 重新匯入 |
 
-項目類型（`type`）：`secret`（機密）、`trusted_certificate`（受信任憑證）、`private_key`（私鑰與憑證鏈）。後兩種的資源使用由 [WI-52](work-items/WI-52-tls-trust-and-mtls.md) 驗證。其他類型的項目被忽略（記錄於 log），不出現在清單。
+項目類型（`type`）：`secret`（機密）、`trusted_certificate`（受信任憑證）、`private_key`（私鑰與憑證鏈）。後兩種由資源的 `trustAliases` 與 `clientCertAlias` 使用（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）。其他類型的項目被忽略（記錄於 log），不出現在清單。
 
 ### `GET /api/v1/secrets`
 
 認證：Bearer（admin）
 
-列出金鑰庫的別名。200 本文 `{"secrets": [...]}`，每項 `{alias, type, status, usedBy}`：`usedBy` 為引用該別名的資源名稱（排序；沒有時為 `[]`）。409 `secret_store_not_configured`：Engine 沒有組態金鑰庫。開發人員得到 403，沒有 token 得到 401。
+列出金鑰庫的別名。200 本文 `{"secrets": [...]}`，每項 `{alias, type, status, usedBy}`：`usedBy` 為引用該別名的資源名稱（以 `secretAlias`、`trustAliases` 或 `clientCertAlias` 引用皆算；排序；沒有時為 `[]`）。憑證項目（`trusted_certificate`、`private_key`）另有 `certificates`（機密項目沒有這個成員）：受信任憑證為一張，私鑰項目為其憑證鏈（自己的在前），每張 `{subject, notAfter, daysLeft, fingerprint, expiry}`，`expiry` 為 `valid`、`expiring`（剩餘天數低於 `RUNLINE_CERTIFICATE_WARNING_DAYS`）或 `expired`。永遠不含私鑰、私鑰的衍生資料、機密值與金鑰庫密碼。metric `runline.secrets.certificate.days_left`（標籤只有 `alias`）為每個憑證別名最早到期憑證的剩餘整天數。409 `secret_store_not_configured`：Engine 沒有組態金鑰庫。開發人員得到 403，沒有 token 得到 401。
 
 ### `POST /api/v1/secrets/reload`
 
 認證：Bearer（admin）
 
-整體重新讀取金鑰庫檔案（不在檔案變動時自動重載，生效時點由管理員決定）。200 本文 `{"aliases": 3, "changed": [{"alias": "...", "usedBy": [...]}]}`：`aliases` 為重載後的別名數；`changed` 為新增、移除或內容有變更的別名（依別名排序）與引用它們的資源，內容是否有變更以內部指紋判斷，不輸出任何值。重載後，內容有變的別名其引用資源之後被取得的 run 使用新機密，進行中的 run 不受影響。
+整體重新讀取金鑰庫檔案（不在檔案變動時自動重載，生效時點由管理員決定）。200 本文 `{"aliases": 3, "changed": [{"alias": "...", "usedBy": [...]}]}`：`aliases` 為重載後的別名數；`changed` 為新增、移除或內容有變更的別名（依別名排序；憑證項目以憑證判斷，私鑰項目以憑證鏈判斷）與引用它們的資源（含以憑證引用者），內容是否有變更以內部指紋判斷，不輸出任何值。重載後，內容有變的別名其引用資源之後被取得的 run 使用新機密，進行中的 run 不受影響。
 
 | 狀態 | 意義 |
 |---|---|

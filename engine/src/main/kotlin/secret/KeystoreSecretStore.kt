@@ -1,8 +1,10 @@
 package dev.lawlan.runline.engine.secret
 
+import dev.lawlan.runline.accessors.tls.ClientCertificate
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
+import java.security.cert.X509Certificate
 import java.util.concurrent.atomic.AtomicReference
 import org.slf4j.LoggerFactory
 
@@ -13,6 +15,11 @@ object NoSecretStore : SecretStore {
   override fun entries(): List<SecretEntryInfo> = emptyList()
 
   override fun lookup(alias: String): SecretLookup = SecretLookup.Missing
+
+  override fun trustedCertificate(alias: String): EntryLookup<X509Certificate> = EntryLookup.Missing
+
+  override fun clientCertificate(alias: String): EntryLookup<ClientCertificate> =
+      EntryLookup.Missing
 
   override fun reload(): ReloadResult = ReloadResult.NotConfigured
 }
@@ -40,6 +47,12 @@ private constructor(
   override fun entries(): List<SecretEntryInfo> = current.get().entries()
 
   override fun lookup(alias: String): SecretLookup = current.get().lookup(alias)
+
+  override fun trustedCertificate(alias: String): EntryLookup<X509Certificate> =
+      current.get().trustedCertificate(alias)
+
+  override fun clientCertificate(alias: String): EntryLookup<ClientCertificate> =
+      current.get().clientCertificate(alias)
 
   @Synchronized
   override fun reload(): ReloadResult {

@@ -86,6 +86,8 @@ data class ResourceSettings(
     val checkTimeout: Duration,
     /** The most one read of a file may return; a bigger file fails as too large. */
     val maxReadBytes: Long,
+    /** A certificate with fewer days left than this is warned about (WI-52). */
+    val certificateWarningDays: Int = 30,
 )
 
 /**
@@ -165,6 +167,7 @@ data class EngineConfig(
     const val DEFAULT_SHUTDOWN_GRACE_SECONDS = 30L
     private const val DEFAULT_RESOURCE_WAIT_SECONDS = 3600L
     private const val DEFAULT_CHECK_TIMEOUT_SECONDS = 10L
+    private const val DEFAULT_CERTIFICATE_WARNING_DAYS = 30L
     private const val DEFAULT_MAX_READ_BYTES =
         dev.lawlan.runline.accessors.FileEntity.DEFAULT_MAX_READ_BYTES
 
@@ -284,6 +287,11 @@ data class EngineConfig(
               optionalNumber("resources.checkTimeoutSeconds", min = 1)
                   ?: DEFAULT_CHECK_TIMEOUT_SECONDS
           )
+      val certificateWarningDays =
+          (optionalNumber("resources.certificateWarningDays", min = 1)
+                  ?: DEFAULT_CERTIFICATE_WARNING_DAYS)
+              .coerceAtMost(Int.MAX_VALUE.toLong())
+              .toInt()
       val secrets = secretSettings(::text, problems)
       val runtimeDir = required("runs.runtimeDir")
       val runs =
@@ -337,7 +345,12 @@ data class EngineConfig(
           runs,
           retention,
           TelemetryConfig(text("telemetry.serviceName") ?: DEFAULT_SERVICE_NAME),
-          ResourceSettings(Path.of(resourceRoot), checkTimeout, maxReadBytes),
+          ResourceSettings(
+              Path.of(resourceRoot),
+              checkTimeout,
+              maxReadBytes,
+              certificateWarningDays,
+          ),
           secrets,
       )
     }

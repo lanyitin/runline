@@ -1,5 +1,8 @@
 package dev.lawlan.runline.engine.secret
 
+import dev.lawlan.runline.accessors.tls.ClientCertificate
+import java.security.cert.X509Certificate
+import java.time.Instant
 import java.util.Locale
 
 /** What an entry of the keystore is (ADR-019 decision 12); only secret entries hold a value. */
@@ -15,10 +18,46 @@ enum class AliasStatus(val wire: String) {
 
   /** A secret whose value is not printable ASCII (ADR-019 decision 6): never used, never shown. */
   INVALID_SECRET("invalid_secret"),
+
+  /**
+   * A private key the keystore's password does not open (another tool protected it with a password
+   * of its own; ADR-019 decision 12 says it is the keystore's): never used (WI-52).
+   */
+  INVALID_KEY("invalid_key"),
 }
 
-/** One alias as it is listed: what it is and whether it can be used, never what it holds. */
-data class SecretEntryInfo(val alias: String, val kind: EntryKind, val status: AliasStatus)
+/**
+ * A certificate of an entry, as it may be shown (WI-52): its subject, the end of its validity and
+ * its SHA-256 fingerprint in the form `keytool -list` prints. Never anything of a key.
+ */
+data class CertificateInfo(val subject: String, val notAfter: Instant, val fingerprint: String)
+
+/**
+ * One alias as it is listed: what it is and whether it can be used, never what it holds; for a
+ * certificate entry its certificate, for a private key entry the certificates of its chain.
+ */
+data class SecretEntryInfo(
+    val alias: String,
+    val kind: EntryKind,
+    val status: AliasStatus,
+    val certificates: List<CertificateInfo> = emptyList(),
+)
+
+/** What looking up a certificate or a client key finds (WI-52). */
+sealed interface EntryLookup<out T> {
+  class Found<T>(val value: T) : EntryLookup<T> {
+    override fun toString() = "Found"
+  }
+
+  /** No entry under the alias (also: no keystore at all). */
+  data object Missing : EntryLookup<Nothing>
+
+  /** An entry of another kind under the alias. */
+  data object WrongType : EntryLookup<Nothing>
+
+  /** The entry is of the kind but cannot be used. */
+  data object Invalid : EntryLookup<Nothing>
+}
 
 /**
  * The value of a secret. It has no accessor but [reveal], and no text form that shows it, so that a
@@ -41,6 +80,9 @@ sealed interface SecretLookup {
 
   /** An entry whose value is not printable ASCII; it is refused. */
   data object Invalid : SecretLookup
+
+  /** An entry of another kind than a secret under the alias (WI-52). */
+  data object WrongType : SecretLookup
 }
 
 /** The way a keystore could not be opened, as a category and nothing more (WI-41). */
@@ -79,6 +121,12 @@ interface SecretStore {
   fun entries(): List<SecretEntryInfo>
 
   fun lookup(alias: String): SecretLookup
+
+  /** The trusted certificate under [alias] (WI-52). */
+  fun trustedCertificate(alias: String): EntryLookup<X509Certificate>
+
+  /** The private key and chain under [alias], for a resource's client certificate (WI-52). */
+  fun clientCertificate(alias: String): EntryLookup<ClientCertificate>
 
   /** Reads the keystore again as a whole; on failure what is in memory stays. */
   fun reload(): ReloadResult

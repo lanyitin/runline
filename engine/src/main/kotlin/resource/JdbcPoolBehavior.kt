@@ -87,6 +87,7 @@ internal class JdbcPoolBehavior(
     return when (val found = secrets.lookup(alias)) {
       is SecretLookup.Found -> JdbcCredential.Password(found.value.reveal())
       SecretLookup.Missing,
+      SecretLookup.WrongType,
       SecretLookup.Invalid -> JdbcCredential.Unavailable
     }
   }

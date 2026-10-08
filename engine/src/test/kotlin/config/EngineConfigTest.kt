@@ -331,6 +331,22 @@ class EngineConfigTest {
   }
 
   @Test
+  fun `certificates are warned about 30 days before they expire unless configured otherwise`() {
+    assertEquals(30, parse().resources.certificateWarningDays)
+    assertEquals(
+        7,
+        parse("resources.certificateWarningDays" to "7").resources.certificateWarningDays,
+    )
+    for (value in listOf("0", "-1", "soon")) {
+      val e =
+          assertFailsWith<ConfigurationException> {
+            parse("resources.certificateWarningDays" to value)
+          }
+      assertTrue(e.message!!.contains("resources.certificateWarningDays"), e.message)
+    }
+  }
+
+  @Test
   fun `one read of a file resource has a default size limit and the limit is configurable`() {
     assertEquals(10L * 1024 * 1024, parse().resources.maxReadBytes)
     assertEquals(

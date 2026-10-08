@@ -23,11 +23,11 @@ class KeystoreLoaderTest {
 
     assertEquals(
         listOf(
-            SecretEntryInfo("client-key", EntryKind.PRIVATE_KEY, AliasStatus.FOUND),
-            SecretEntryInfo("db.password", EntryKind.SECRET, AliasStatus.FOUND),
-            SecretEntryInfo("internal-ca", EntryKind.TRUSTED_CERTIFICATE, AliasStatus.FOUND),
+            Triple("client-key", EntryKind.PRIVATE_KEY, AliasStatus.FOUND),
+            Triple("db.password", EntryKind.SECRET, AliasStatus.FOUND),
+            Triple("internal-ca", EntryKind.TRUSTED_CERTIFICATE, AliasStatus.FOUND),
         ),
-        snapshot.entries(),
+        snapshot.entries().map { Triple(it.alias, it.kind, it.status) },
     )
   }
 

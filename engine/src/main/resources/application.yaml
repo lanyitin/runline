@@ -130,10 +130,13 @@ retention:
 # entity (POST /api/v1/resources/{name}/check) may take; after it the check fails as a timeout.
 # RUNLINE_RESOURCE_MAX_READ_BYTES (optional, default 10485760): the most one read through a file
 # resource may return; a larger file fails the read as too large.
+# RUNLINE_CERTIFICATE_WARNING_DAYS (optional, default 30): a certificate a resource uses (WI-52) with
+# fewer days left than this is warned about by the check and the secrets list, without failing.
 resources:
   root: "$RUNLINE_RESOURCE_ROOT:"
   checkTimeoutSeconds: "$RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS:"
   maxReadBytes: "$RUNLINE_RESOURCE_MAX_READ_BYTES:"
+  certificateWarningDays: "$RUNLINE_CERTIFICATE_WARNING_DAYS:"
 
 # Secrets (WI-41, ADR-019): the keystore the Engine opens read-only. RUNLINE_KEYSTORE_PATH is the
 # PKCS12 file; its password is given by RUNLINE_KEYSTORE_PASSWORD_FILE (the path of a file whose

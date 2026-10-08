@@ -86,6 +86,7 @@ internal class OpenAiCompatibleBehavior(
     return when (val found = secrets.lookup(alias)) {
       is SecretLookup.Found -> OpenAiCredential.Key(found.value.reveal())
       SecretLookup.Missing,
+      SecretLookup.WrongType,
       SecretLookup.Invalid -> OpenAiCredential.Unavailable
     }
   }

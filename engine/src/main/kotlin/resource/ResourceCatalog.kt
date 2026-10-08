@@ -96,7 +96,8 @@ class ResourceCatalog(
     val alias = resource.secretAlias ?: return AliasState.NOT_SET
     return when (secrets.lookup(alias)) {
       is SecretLookup.Found -> AliasState.FOUND
-      SecretLookup.Missing -> AliasState.MISSING
+      SecretLookup.Missing,
+      SecretLookup.WrongType -> AliasState.MISSING
       SecretLookup.Invalid -> AliasState.INVALID_SECRET
     }
   }

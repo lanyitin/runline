@@ -14,6 +14,32 @@ export interface TypeRules {
   settings(given: unknown): SettingsAnswer;
 }
 
+const ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/**
+ * The certificate aliases of a type that has TLS (WI-52), written in lower case after the rest:
+ * a list of at most 16 distinct aliases and one alias; a member of the wrong shape is
+ * `invalid_settings` and an alias that is not written like one is `invalid_secret_alias`.
+ */
+function tlsOf(settings: Record<string, unknown>): Record<string, unknown> | { problem: string } {
+  const written: Record<string, unknown> = {};
+  const trust = settings.trustAliases;
+  if (trust !== undefined) {
+    if (!Array.isArray(trust) || trust.some((alias) => typeof alias !== 'string')) return { problem: 'invalid_settings' };
+    if ((trust as string[]).some((alias) => !ALIAS.test(alias))) return { problem: 'invalid_secret_alias' };
+    const lower = (trust as string[]).map((alias) => alias.toLowerCase());
+    if (lower.length > 16 || new Set(lower).size !== lower.length) return { problem: 'invalid_settings' };
+    if (lower.length > 0) written.trustAliases = lower;
+  }
+  const client = settings.clientCertAlias;
+  if (client !== undefined) {
+    if (typeof client !== 'string') return { problem: 'invalid_settings' };
+    if (!ALIAS.test(client)) return { problem: 'invalid_secret_alias' };
+    written.clientCertAlias = client.toLowerCase();
+  }
+  return written;
+}
+
 const objectOf = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
@@ -59,7 +85,7 @@ const bounded = (value: unknown, min: number, max: number, fallback: number): nu
 
 const DAY_MS = 24 * 3600 * 1000;
 
-const JDBC_MEMBERS = ['kind', 'host', 'port', 'database', 'username', 'connectionsPerRun', 'timeouts', 'maxRows', 'maxResponseBytes', 'properties'];
+const JDBC_MEMBERS = ['kind', 'host', 'port', 'database', 'username', 'connectionsPerRun', 'timeouts', 'maxRows', 'maxResponseBytes', 'properties', 'trustAliases', 'clientCertAlias'];
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])$/;
 const DATABASE = /^[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}$/;
 const IDENTIFIERS = /^[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}$/;
@@ -142,7 +168,9 @@ const jdbcPool: TypeRules = {
       maxResponseBytes,
     };
     if (Object.keys(properties).length > 0) written.properties = properties;
-    return { settings: written };
+    const tls = tlsOf(settings);
+    if ('problem' in tls) return tls as { problem: string };
+    return { settings: { ...written, ...tls } };
   },
 };
 
@@ -194,6 +222,8 @@ const OPENAI_MEMBERS = [
   'allowedModels',
   'lockedParameters',
   'maxValues',
+  'trustAliases',
+  'clientCertAlias',
 ];
 const NUMERIC = [
   'temperature',
@@ -338,7 +368,11 @@ const openAiCompatible: TypeRules = {
     if (allowedModels.length > 0) written.allowedModels = [...new Set(allowedModels)];
     if (locked.length > 0) written.lockedParameters = [...new Set(locked)];
     if (Object.keys(maxValues).length > 0) written.maxValues = maxValues;
-    return { settings: written };
+    const tls = tlsOf(settings);
+    if ('problem' in tls) return tls as { problem: string };
+    // Certificates are for TLS: a plain http service has no handshake to use them in.
+    if (Object.keys(tls).length > 0 && !baseUrl.startsWith('https://')) return { problem: 'invalid_settings' };
+    return { settings: { ...written, ...tls } };
   },
 };
 

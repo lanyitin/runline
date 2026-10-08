@@ -76,9 +76,13 @@ export interface ResourceDeclarations {
   declarersOf(name: string): DeclaringDefinition[];
 }
 
-/** What the resources ask of the keystore: the status of an alias, undefined when it has none. */
+/** What the resources ask of the keystore of an alias: undefined when it has none. */
 export interface ResourceSecrets {
   statusOf(alias: string): string | undefined;
+  /** `secret`, `trusted_certificate` or `private_key`. */
+  typeOf(alias: string): string | undefined;
+  /** What may be shown of the certificates of a certificate or private key entry (WI-52). */
+  certificatesOf(alias: string): Array<{ subject: string; notAfter: string; daysLeft: number; fingerprint: string; expiry: string }>;
 }
 
 /** The closed set of types (ADR-019). */
@@ -98,6 +102,22 @@ const PER_RUN: Record<string, string> = {
   'jdbc-pool': 'connectionsPerRun',
   'openai-compatible': 'requestsPerRun',
 };
+
+/** The check's failure for an alias in a status, for the statuses that fail it. */
+const ALIAS_FAILURES: Record<string, string> = {
+  missing: 'alias_missing',
+  invalid_secret: 'alias_invalid',
+  invalid_key: 'alias_invalid',
+  wrong_type: 'alias_wrong_type',
+};
+
+/** The trusted certificate aliases of a resource's settings (WI-52). */
+const trustOf = (resource: { settings: Record<string, unknown> }): string[] =>
+  (resource.settings.trustAliases as string[] | undefined) ?? [];
+
+/** The client certificate alias of a resource's settings (WI-52). */
+const clientOf = (resource: { settings: Record<string, unknown> }): string | null =>
+  (resource.settings.clientCertAlias as string | undefined) ?? null;
 
 const seconds = (since: string) => Math.max(0, Date.now() - Date.parse(since)) / 1000;
 
@@ -155,10 +175,10 @@ export class FakeResources {
     });
   }
 
-  /** The resources that refer to [alias], by name, in order. */
+  /** The resources that refer to [alias], as their secret or a certificate (WI-52), by name, in order. */
   usersOf(alias: string): string[] {
     return [...this.resources.values()]
-      .filter((r) => r.secretAlias === alias)
+      .filter((r) => r.secretAlias === alias || trustOf(r).includes(alias) || clientOf(r) === alias)
       .map((r) => r.name)
       .sort();
   }
@@ -295,7 +315,25 @@ export class FakeResources {
 
   private secretStatusOf(resource: FakeResource): string {
     if (resource.secretAlias === null) return 'not_set';
-    return this.secrets.statusOf(resource.secretAlias) ?? 'missing';
+    return this.statusOfAlias(resource.secretAlias, 'secret');
+  }
+
+  /** What [alias] comes to for a member that wants an entry of [type] (WI-52). */
+  private statusOfAlias(alias: string, type: string): string {
+    const kind = this.secrets.typeOf(alias);
+    if (kind === undefined) return 'missing';
+    if (kind !== type) return 'wrong_type';
+    return this.secrets.statusOf(alias) ?? 'missing';
+  }
+
+  /** Whether any alias of [settings] or [secretAlias] names an entry of another kind. */
+  private wrongType(settings: Record<string, unknown>, secretAlias: string | null): boolean {
+    const kinds: Array<[string, string]> = [
+      ...(secretAlias === null ? [] : [[secretAlias.toLowerCase(), 'secret'] as [string, string]]),
+      ...((settings.trustAliases as string[] | undefined) ?? []).map((a) => [a, 'trusted_certificate'] as [string, string]),
+      ...(typeof settings.clientCertAlias === 'string' ? [[settings.clientCertAlias, 'private_key'] as [string, string]] : []),
+    ];
+    return kinds.some(([alias, type]) => this.statusOfAlias(alias, type) === 'wrong_type');
   }
 
   private doc(resource: FakeResource) {
@@ -303,6 +341,8 @@ export class FakeResources {
     return {
       ...shown,
       secretStatus: this.secretStatusOf(resource),
+      trustStatus: trustOf(resource).map((alias) => ({ alias, status: this.statusOfAlias(alias, 'trusted_certificate') })),
+      clientCertStatus: clientOf(resource) === null ? 'not_set' : this.statusOfAlias(clientOf(resource)!, 'private_key'),
       concurrencyLimit: this.concurrencyLimitOf(resource),
       declaredBy: this.declaredBy(resource.name),
       holders: (this.holders.get(resource.name) ?? []).map((h) => ({
@@ -371,6 +411,9 @@ export class FakeResources {
     if (alias !== undefined && (!rules.takesSecret || typeof alias !== 'string' || !NAME.test(alias))) {
       return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
     }
+    if (this.wrongType(settings.settings, (alias as string | undefined) ?? null)) {
+      return this.invalid('An alias names an entry of another kind.', 'alias_wrong_type');
+    }
     if (this.resources.has(request.name)) {
       return failure(409, 'resource_exists', `The resource ${request.name} exists.`);
     }
@@ -427,6 +470,12 @@ export class FakeResources {
     if (written !== undefined && 'problem' in written) return this.invalid('The settings are not valid.', written.problem);
     if (secretAlias !== undefined && (rules?.takesSecret !== true || !NAME.test(secretAlias as string))) {
       return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
+    }
+    if (
+      (written !== undefined || secretAlias !== undefined) &&
+      this.wrongType(written?.settings ?? resource.settings, (secretAlias as string | undefined) ?? resource.secretAlias)
+    ) {
+      return this.invalid('An alias names an entry of another kind.', 'alias_wrong_type');
     }
     if (written !== undefined) resource.settings = written.settings;
     if (secretAlias !== undefined) resource.secretAlias = (secretAlias as string).toLowerCase();
@@ -485,11 +534,29 @@ export class FakeResources {
   private check(name: string): ApiAnswer {
     const resource = this.resources.get(name);
     if (!resource) return this.notFound();
-    const status = this.secretStatusOf(resource);
+    const statuses = [
+      this.secretStatusOf(resource),
+      ...trustOf(resource).map((alias) => this.statusOfAlias(alias, 'trusted_certificate')),
+      ...(clientOf(resource) === null ? [] : [this.statusOfAlias(clientOf(resource)!, 'private_key')]),
+    ];
+    // The certificates it uses, by alias, as the keystore has them (WI-52): the trusted ones, then
+    // the client's chain.
+    const certificates = [...trustOf(resource), ...(clientOf(resource) === null ? [] : [clientOf(resource)!])].flatMap(
+      (alias) =>
+        this.secrets.certificatesOf(alias).map(({ expiry: _expiry, ...shown }) => ({ alias, ...shown })),
+    );
     const failed =
-      status === 'missing' ? 'alias_missing' : status === 'invalid_secret' ? 'alias_invalid' : resource.entityFailure;
+      statuses.find((s) => ALIAS_FAILURES[s] !== undefined) !== undefined
+        ? ALIAS_FAILURES[statuses.find((s) => ALIAS_FAILURES[s] !== undefined)!]
+        : certificates.some((c) => c.daysLeft < 0)
+          ? 'certificate_expired'
+          : resource.entityFailure;
     resource.lastCheck = { ok: failed === null, failure: failed, checkedAt: new Date().toISOString() };
-    return answer(200, resource.lastCheck);
+    const warnings = certificates
+      .filter((c) => c.daysLeft >= 0 && c.daysLeft < 30)
+      .filter((c, i, all) => all.findIndex((other) => other.alias === c.alias) === i)
+      .map((c) => ({ warning: 'certificate_expiring', alias: c.alias, daysLeft: c.daysLeft }));
+    return answer(200, { ...resource.lastCheck, certificates, warnings });
   }
 
   private forceRelease(name: string, runId: string): ApiAnswer {

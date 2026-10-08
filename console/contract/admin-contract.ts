@@ -881,6 +881,8 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
         settings: {},
         secretAlias: null,
         secretStatus: 'not_set',
+        trustStatus: [],
+        clientCertStatus: 'not_set',
         concurrencyLimit: null,
         usage: null,
         lastCheck: null,
@@ -952,7 +954,8 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       await create({ name: resourceName, capacity: 1 });
       const checked = await call(root(), 'POST', `${resourcePath(resourceName)}/check`);
       expect(checked.status).toBe(200);
-      expect(checked.body).toMatchObject({ ok: true, failure: null });
+      // A check also says what it found of the certificates the resource uses (WI-52): none here.
+      expect(checked.body).toMatchObject({ ok: true, failure: null, certificates: [], warnings: [] });
       expect(checked.body.checkedAt).toMatch(ISO);
       // The Engine answers the time of the check to the nanosecond and keeps it to the microsecond:
       // the same check, at the same instant as far as a millisecond can tell.
@@ -1468,17 +1471,87 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       const aliases = secrets.map((secret) => secret.alias);
       expect(aliases).toEqual([...aliases].sort());
       for (const secret of secrets) {
-        expect(Object.keys(secret).sort()).toEqual(['alias', 'status', 'type', 'usedBy']);
+        // A certificate entry also has what may be shown of its certificates (WI-52); a secret not.
+        expect(Object.keys(secret).sort()).toEqual(
+          secret.type === 'secret'
+            ? ['alias', 'status', 'type', 'usedBy']
+            : ['alias', 'certificates', 'status', 'type', 'usedBy'],
+        );
         expect(secret.alias).toBe(secret.alias.toLowerCase());
         expect(['secret', 'trusted_certificate', 'private_key']).toContain(secret.type);
-        expect(['found', 'invalid_secret']).toContain(secret.status);
+        expect(['found', 'invalid_secret', 'invalid_key']).toContain(secret.status);
         expect(secret.usedBy).toEqual([...secret.usedBy].sort());
+        for (const certificate of secret.certificates ?? []) {
+          expect(Object.keys(certificate).sort()).toEqual(['daysLeft', 'expiry', 'fingerprint', 'notAfter', 'subject']);
+          expect(certificate.notAfter).toMatch(ISO);
+          expect(certificate.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+          expect(['valid', 'expiring', 'expired']).toContain(certificate.expiry);
+          expect(Number.isInteger(certificate.daysLeft)).toBe(true);
+        }
+        if (secret.type === 'trusted_certificate') expect(secret.certificates).toHaveLength(1);
       }
 
       await call(root(), 'POST', '/api/v1/secrets/reload');
       const reload = await call(root(), 'POST', '/api/v1/secrets/reload');
       expect(reload.status).toBe(200);
       expect(reload.body).toEqual({ aliases: secrets.length, changed: [] });
+    });
+
+    test('a resource names certificates by aliases of their kind, written in lower case with the status of each; another kind is alias_wrong_type; a plain http service cannot name any', async () => {
+      const listed = await call(root(), 'GET', '/api/v1/secrets');
+      const secrets = (listed.status === 200 ? listed.body.secrets : []) as any[];
+      const trusted = secrets.find((secret) => secret.type === 'trusted_certificate' && secret.status === 'found');
+      const secret = secrets.find((entry) => entry.type === 'secret');
+      const missing = fresh('Not-There');
+      const resourceName = fresh('res');
+      const trust = [...(trusted ? [trusted.alias.toUpperCase()] : []), missing];
+      const made = await call(root(), 'POST', '/api/v1/resources', {
+        name: resourceName,
+        capacity: 1,
+        type: 'openai-compatible',
+        settings: { baseUrl: 'https://127.0.0.1:9/v1', trustAliases: trust, clientCertAlias: missing },
+      });
+      try {
+        expect(made.status).toBe(201);
+        expect(made.body.settings.trustAliases).toEqual(trust.map((alias) => alias.toLowerCase()));
+        expect(made.body.settings.clientCertAlias).toBe(missing.toLowerCase());
+        expect(made.body.trustStatus).toEqual([
+          ...(trusted ? [{ alias: trusted.alias, status: 'found' }] : []),
+          { alias: missing.toLowerCase(), status: 'missing' },
+        ]);
+        expect(made.body.clientCertStatus).toBe('missing');
+        const checked = await call(root(), 'POST', `/api/v1/resources/${resourceName}/check`);
+        expect(checked.body).toMatchObject({ ok: false, failure: 'alias_missing', warnings: [] });
+      } finally {
+        await call(root(), 'DELETE', `/api/v1/resources/${resourceName}`);
+      }
+
+      const plain = await call(root(), 'POST', '/api/v1/resources', {
+        name: fresh('res'),
+        capacity: 1,
+        type: 'openai-compatible',
+        settings: { baseUrl: 'http://127.0.0.1:9/v1', trustAliases: [missing] },
+      });
+      expect([plain.status, plain.body.problem]).toEqual([422, 'invalid_settings']);
+      if (secret) {
+        const wrong = await call(root(), 'POST', '/api/v1/resources', {
+          name: fresh('res'),
+          capacity: 1,
+          type: 'jdbc-pool',
+          settings: { kind: 'postgresql', host: 'db.internal', database: 'app', username: 'app', trustAliases: [secret.alias] },
+        });
+        expect([wrong.status, wrong.body.problem]).toEqual([422, 'alias_wrong_type']);
+      }
+      if (trusted) {
+        const wrong = await call(root(), 'POST', '/api/v1/resources', {
+          name: fresh('res'),
+          capacity: 1,
+          type: 'openai-compatible',
+          settings: { baseUrl: 'http://127.0.0.1:9/v1' },
+          secretAlias: trusted.alias,
+        });
+        expect([wrong.status, wrong.body.problem]).toEqual([422, 'alias_wrong_type']);
+      }
     });
 
     test('a resource that refers to an alias the keystore does not have keeps the alias in lower case, says it is missing, and its check fails as alias_missing without asking the service', async () => {

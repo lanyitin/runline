@@ -146,7 +146,11 @@ export class FakeBackend {
   /** The shared resources that are defined, who holds them and who waits. */
   readonly resources: FakeResources = new FakeResources(
     { declarersOf: (name) => this.declarersOf(name) },
-    { statusOf: (alias) => this.secrets.statusOf(alias) },
+    {
+      statusOf: (alias) => this.secrets.statusOf(alias),
+      typeOf: (alias) => this.secrets.typeOf(alias),
+      certificatesOf: (alias) => this.secrets.certificatesOf(alias),
+    },
   );
   /** The keystore: none until a test configures one, as an Engine without RUNLINE_KEYSTORE_PATH. */
   readonly secrets: FakeSecrets = new FakeSecrets({ usersOf: (alias) => this.resources.usersOf(alias) });

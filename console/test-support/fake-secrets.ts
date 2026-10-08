@@ -7,14 +7,27 @@
 
 import { answer, failure, type ApiAnswer, type FakeRoute } from './fake-api';
 
+/** What may be shown of a certificate of an entry (WI-52): never anything of a key. */
+export interface FakeCertificate {
+  subject: string;
+  notAfter: string;
+  daysLeft: number;
+  /** SHA-256, as `keytool -list` prints it. */
+  fingerprint: string;
+  /** `valid`, `expiring` or `expired`. */
+  expiry: string;
+}
+
 export interface FakeKeystoreEntry {
   alias: string;
   /** `secret`, `trusted_certificate` or `private_key`. */
   type: string;
-  /** `found`, or `invalid_secret` for a value that is not printable ASCII. */
+  /** `found`, `invalid_secret` for a value that is not printable ASCII, `invalid_key` for a key the keystore's password does not open. */
   status: string;
   /** Stands for the content of the entry: another fingerprint is another content. */
   fingerprint: string;
+  /** The certificate of a certificate entry, the chain of a private key entry; made up when not given. */
+  certificates?: FakeCertificate[];
 }
 
 /** What the keystore file holds now: its entries, or why it cannot be read. */
@@ -23,6 +36,20 @@ export type FakeKeystoreFile = { entries: FakeKeystoreEntry[] } | { problem: str
 /** What the secrets ask of the rest of the Fake Engine: which resources refer to an alias. */
 export interface SecretUsers {
   usersOf(alias: string): string[];
+}
+
+/** A certificate for an entry a test gave none: a year left, its fingerprint from the entry's. */
+function madeUp(entry: FakeKeystoreEntry): FakeCertificate {
+  const hex = [...`${entry.fingerprint}${'0'.repeat(64)}`.slice(0, 64)]
+    .map((c) => (/[0-9a-f]/i.test(c) ? c.toUpperCase() : '0'))
+    .join('');
+  return {
+    subject: `CN=${entry.alias}`,
+    notAfter: new Date(Date.now() + 365 * 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z'),
+    daysLeft: 364,
+    fingerprint: hex.match(/../g)!.join(':'),
+    expiry: 'valid',
+  };
 }
 
 const byAlias = (a: { alias: string }, b: { alias: string }) => (a.alias < b.alias ? -1 : a.alias > b.alias ? 1 : 0);
@@ -51,13 +78,32 @@ export class FakeSecrets {
     return this.loaded.get(alias)?.status;
   }
 
+  /** The kind of entry of [alias] as loaded: undefined when the keystore does not have it. */
+  typeOf(alias: string): string | undefined {
+    return this.loaded.get(alias)?.type;
+  }
+
+  /** The certificates of the entry of [alias] as loaded; none for a secret or no entry. */
+  certificatesOf(alias: string): FakeCertificate[] {
+    return this.loaded.get(alias)?.certificates ?? [];
+  }
+
   readonly routes: FakeRoute[] = [
     { method: 'GET', pattern: /^\/api\/v1\/secrets$/, admin: true, handle: () => this.list() },
     { method: 'POST', pattern: /^\/api\/v1\/secrets\/reload$/, admin: true, handle: () => this.reload() },
   ];
 
   private read(entries: FakeKeystoreEntry[]) {
-    return new Map(entries.map((e) => [e.alias.toLowerCase(), { ...e, alias: e.alias.toLowerCase() }]));
+    return new Map(
+      entries.map((e) => [
+        e.alias.toLowerCase(),
+        {
+          ...e,
+          alias: e.alias.toLowerCase(),
+          certificates: e.type === 'secret' ? undefined : (e.certificates ?? [madeUp(e)]),
+        },
+      ]),
+    );
   }
 
   private notConfigured = () =>
@@ -71,6 +117,7 @@ export class FakeSecrets {
         type: e.type,
         status: e.status,
         usedBy: this.users.usersOf(e.alias),
+        ...(e.certificates === undefined ? {} : { certificates: e.certificates }),
       })),
     });
   }

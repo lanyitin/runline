@@ -25,6 +25,11 @@ import org.junit.jupiter.api.io.TempDir
  * what the form is made of, what a pipeline cannot put into it, and what stops it.
  */
 class OpenAiBindingMultipartTest {
+  init {
+    // What the Engine and the development entry do as they start (WI-60).
+    UploadSendBuffer.install()
+  }
+
   private val key = "sk-test-0123456789abcdef"
   private val server = FakeOpenAiServer()
   private val bindings = mutableListOf<OpenAiBinding>()
@@ -576,6 +581,49 @@ class OpenAiBindingMultipartTest {
         "it took longer than the idle limit",
     )
     assertEquals(12L * 1024 * 1024, server.storedFiles.values.single().bytes.size.toLong())
+  }
+
+  @Test
+  fun `a slow upload of bytes given in memory that keeps going is not idle either`() {
+    server.uploadChunkDelayMillis = 3
+    val b =
+        binding(
+            "\"endpoints\":[\"files.create\"],\"maxRequestBytes\":33554432,\"timeouts\":{\"idleMs\":300}"
+        )
+
+    val started = System.nanoTime()
+    val answer =
+        upload(b, files = listOf(bytesPart("file", "big.bin", ByteArray(12 * 1024 * 1024))))
+
+    assertEquals(200, answer["status"])
+    assertTrue(
+        (System.nanoTime() - started) / 1_000_000 > 300,
+        "it took longer than the idle limit",
+    )
+    assertEquals(12L * 1024 * 1024, server.storedFiles.values.single().bytes.size.toLong())
+  }
+
+  @Test
+  fun `an upload whose service stops reading part way is idle within the idle limit and the filling of the buffers`() {
+    bigFile("big.bin", 20 * 1024 * 1024)
+    server.uploadChunkDelayMillis = 3
+    val b =
+        binding(
+            "\"endpoints\":[\"files.create\"],\"maxRequestBytes\":33554432,\"timeouts\":{\"idleMs\":300}"
+        )
+    val outcome = inThread { upload(b, files = listOf(scopedPart("file", shared, "big.bin"))) }
+    await("the service to have read a part") { server.bytesReceived > 2 * 1024 * 1024 }
+
+    server.uploadChunkDelayMillis = 10_000
+    val stopped = System.nanoTime()
+    assertTrue(!outcome.isDone, "the upload was still going when the service stopped reading")
+    val failure = outcome.get(15, java.util.concurrent.TimeUnit.SECONDS)
+    val after = (System.nanoTime() - stopped) / 1_000_000
+    server.uploadChunkDelayMillis = 0
+
+    assertEquals(ResourceFailure.IDLE_TIMEOUT, (failure as ResourceOperationFailure).failure)
+    // On the loopback the buffers fill in milliseconds; the rest of the allowance is scheduling.
+    assertTrue(after < 300 + 500, "idle $after ms after the service stopped reading")
   }
 
   @Test

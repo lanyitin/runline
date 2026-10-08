@@ -3,6 +3,7 @@ package dev.lawlan.runline.engine.resource
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.openai.OpenAiBinding
 import dev.lawlan.runline.accessors.openai.OpenAiCredential
+import dev.lawlan.runline.accessors.openai.OpenAiEndpoints
 import dev.lawlan.runline.accessors.openai.OpenAiObserver
 import dev.lawlan.runline.accessors.openai.OpenAiProbe
 import dev.lawlan.runline.accessors.openai.OpenAiSettings
@@ -16,6 +17,10 @@ import dev.lawlan.runline.engine.secret.SecretStore
 import java.security.cert.X509Certificate
 import java.time.Duration
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * An OpenAI compatible service (ADR-019): the settings are the administrator's, the key is named by
@@ -47,6 +52,37 @@ internal class OpenAiCompatibleBehavior(
 
   override fun normalized(settings: JsonObject): JsonObject =
       (OpenAiSettings.parse(settings) as SettingsResult.Valid).normalized
+
+  /**
+   * The entries that can be enabled, each with what is fixed about it, and the request parameters a
+   * resource may default, lock or cap, with the kind of value each takes.
+   */
+  override fun description(): JsonObject = buildJsonObject {
+    putJsonArray("endpoints") {
+      for (entry in OpenAiEndpoints.enableable) {
+        addJsonObject {
+          put("id", entry.id)
+          put("group", entry.group)
+          put("method", entry.method)
+          put("path", entry.path)
+          put("request", entry.body.name.lowercase())
+          put("response", entry.response.name.lowercase())
+          put("streams", entry.streams || entry.streamsBytes)
+          put("defaultEnabled", entry.defaultEnabled)
+          put("stateful", entry.stateful)
+        }
+      }
+    }
+    putJsonArray("requestParameters") {
+      for (parameter in OpenAiSettings.REQUEST_PARAMETERS) {
+        addJsonObject {
+          put("name", parameter.name)
+          put("kind", parameter.kind.wire)
+          put("ceiling", parameter.ceiling)
+        }
+      }
+    }
+  }
 
   override fun concurrencyLimit(resource: SharedResource): Int? =
       settingsOf(resource)?.let { resource.capacity * it.requestsPerRun }

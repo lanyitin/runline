@@ -9,6 +9,7 @@ import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
 import dev.lawlan.runline.accessors.jdbc.JdbcSettings
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsProblem
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsResult
+import dev.lawlan.runline.accessors.jdbc.PropertyRule
 import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
@@ -17,6 +18,11 @@ import dev.lawlan.runline.engine.secret.SecretStore
 import java.security.cert.X509Certificate
 import java.time.Duration
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * A database behind a connection pool (ADR-019, WI-48): the settings are the administrator's, the
@@ -50,6 +56,38 @@ internal class JdbcPoolBehavior(
 
   override fun normalized(settings: JsonObject): JsonObject =
       (JdbcSettings.parse(settings, profiles) as JdbcSettingsResult.Valid).normalized
+
+  /** Each database kind the Engine carries, with the extra properties it allows and their rules. */
+  override fun description(): JsonObject = buildJsonObject {
+    putJsonArray("databases") {
+      for (profile in profiles.all) {
+        addJsonObject {
+          put("kind", profile.kind)
+          putJsonArray("properties") {
+            for ((name, rule) in profile.allowedProperties) {
+              addJsonObject {
+                put("name", name)
+                when (rule) {
+                  is PropertyRule.Text -> {
+                    put("rule", "text")
+                    put("maxLength", rule.maxLength)
+                  }
+                  is PropertyRule.OneOf -> {
+                    put("rule", "oneOf")
+                    putJsonArray("values") { rule.values.forEach { add(it) } }
+                  }
+                  is PropertyRule.Pattern -> {
+                    put("rule", "pattern")
+                    put("pattern", rule.pattern)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 
   /** The connections the pool has room for: what every run that may hold the resource can use. */
   override fun concurrencyLimit(resource: SharedResource): Int? =

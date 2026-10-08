@@ -43,8 +43,13 @@ fun Application.configureResourceRoutes() {
   val removal: ResourceRemoval by dependencies
   val checker: ResourceChecker by dependencies
   val clock: Clock by dependencies
+  val types: ResourceTypeCatalog by dependencies
 
   routing {
+    route("/api/v1/resource-types") {
+      authorized(Role.ADMIN) { get { call.respond(types.description) } }
+    }
+
     route("/api/v1/resources") {
       authorized(Role.ADMIN) {
         post {

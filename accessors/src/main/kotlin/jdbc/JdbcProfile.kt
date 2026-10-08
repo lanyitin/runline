@@ -143,6 +143,9 @@ interface JdbcValues {
 
 /** The profiles an Engine carries, by the database kind of a resource. */
 class JdbcProfiles(profiles: List<JdbcProfile>) {
+  /** The profiles, in the order they were given. */
+  val all: List<JdbcProfile> = profiles.toList()
+
   private val byKind = profiles.associateBy { it.kind }
 
   init {

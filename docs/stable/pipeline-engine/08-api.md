@@ -255,7 +255,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `timeouts` | 五種逾時，毫秒：`connectMs`（建立連線）、`firstByteMs`（送出請求到回應的第一個位元組；串流呼叫涵蓋到第一個事件（包含 prefill），非串流呼叫在生成結束前沒有任何資料，所以它實質上就是整體生成上限）、`idleMs`（串流中兩次讀取之間，第一個位元組之後；串流適用，非串流的讀取也受它約束）、`totalMs`（選填，單次呼叫的整體上限，`null` 或省略為不設）、`quotaWaitMs`（等待每 run 同時請求額度的上限，不計入生成時間） | 10000、900000（15 分鐘）、300000（5 分鐘）、不設、60000 |
 | `requestsPerRun` | 每個 run 同時進行的請求數上限；整體並行上限是容量乘以它 | 1 |
 | `maxRequestBytes`、`maxResponseBytes`、`maxDownloadBytes` | 請求（含多部分表單）的大小上限、記憶體內回應的大小上限、寫入檔案的二進位回應的總上限（最大 16 GiB）；pipeline 每次呼叫只能收緊 | 32 MiB、8 MiB、256 MiB |
-| `defaults` | 請求參數的預設，pipeline 呼叫時提供的同名值蓋過它；只能是 `model`、`temperature`、`top_p`、`top_k`、`min_p`、`max_tokens`、`max_completion_tokens`、`max_output_tokens`、`stop`、`seed`、`response_format`、`presence_penalty`、`frequency_penalty`、`repeat_penalty`、`n`、`reasoning_effort`；`model` 套用到有模型的條目，其餘只套用到對話、補全與 responses 的建立 | 無 |
+| `defaults` | 請求參數的預設，pipeline 呼叫時提供的同名值蓋過它；只能是 `model`、`temperature`、`top_p`、`top_k`、`min_p`、`max_tokens`、`max_completion_tokens`、`max_output_tokens`、`stop`、`seed`、`response_format`、`presence_penalty`、`frequency_penalty`、`repeat_penalty`、`n`、`reasoning_effort`（各參數的值種類見 `GET /api/v1/resource-types`）；`model` 套用到有模型的條目，其餘只套用到對話、補全與 responses 的建立 | 無 |
 | `allowedModels` | 允許的模型清單，空為不限；清單不空時，沒有模型（含預設）的請求也被拒絕 | 不限 |
 | `lockedParameters` | 鎖定的參數（同上清單）：pipeline 提供它（無論值為何）就被拒絕 | 無 |
 | `maxValues` | 數值參數的上限（例如 `{"max_tokens": 4096}`）：pipeline 提供的值超過就被拒絕 | 無 |
@@ -264,7 +264,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 **TLS（`https`，[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）**：每個 run 的存取端有自己的安全上下文，由取得資源當下的金鑰庫內容建立（信任 `trustAliases` 的憑證，沒有時為 JVM 預設信任；有 `clientCertAlias` 時出示該私鑰項目的憑證鏈），不修改 JVM 全域預設、不與其他資源共用。主機名稱一律驗證：連線沒有要求驗證主機名稱時（例如 JDK HTTP 用戶端的主機名稱驗證被系統屬性關閉）連線被拒絕，沒有任何設定可以關閉。別名在金鑰庫缺失、類型不符或私鑰不能使用時，run 仍能取得資源，但呼叫以 `SECRET_UNAVAILABLE` 失敗且不送出請求，不會改用 JVM 預設信任。TLS 失敗對 pipeline 是 `CONNECTION_FAILED`，類別（見下方檢查的 `failure`）記錄在 Engine 的 log（資源名稱與類別）與 metric `runline.resources.tls.failures`（標籤只有 `resource`、`type`、`kind`；`jdbc-pool` 相同）。金鑰庫重載後，憑證有變的資源之後被取得的 run 使用新的信任與用戶端憑證，已持有者繼續用取得當下的。
 
-**端點目錄**（條目名稱、方法與路徑、預設是否啟用；路徑在根位址之下）：`chat.completions`（`POST /chat/completions`，預設啟用）、`completions`（`POST /completions`，預設啟用）、`embeddings`（`POST /embeddings`，預設啟用）、`models.list`（`GET /models`，預設啟用）、`models.retrieve`（`GET /models/{model}`，預設啟用）、`responses.create`（`POST /responses`）、`responses.retrieve`（`GET /responses/{id}`）、`responses.delete`（`DELETE /responses/{id}`）、`responses.cancel`（`POST /responses/{id}/cancel`）、`responses.input_items`（`GET /responses/{id}/input_items`）、`moderations`（`POST /moderations`）、`rerank`（`POST /rerank`）、`reranking`（`POST /reranking`；兩者各為一個條目，哪個有效以對目標服務的實測決定）、`images.generations`（`POST /images/generations`）、`files.list`（`GET /files`）、`files.retrieve`（`GET /files/{id}`）、`files.delete`（`DELETE /files/{id}`）、`batches.create`（`POST /batches`）、`batches.list`（`GET /batches`）、`batches.retrieve`（`GET /batches/{id}`）、`batches.cancel`（`POST /batches/{id}/cancel`）。未標預設啟用者（尤其有狀態的刪除與取消條目）由管理員逐條啟用。另有多部分上傳與二進位回應的條目（WI-53），同樣由管理員逐條啟用：`images.edits`（`POST /images/edits`）、`images.variations`（`POST /images/variations`）、`audio.speech`（`POST /audio/speech`，二進位回應）、`audio.transcriptions`（`POST /audio/transcriptions`）、`audio.translations`（`POST /audio/translations`）、`files.create`（`POST /files`）、`files.content`（`GET /files/{id}/content`，二進位回應）；事件串流（`chat.completions`、`completions`、`responses.create`）由存取端的 `stream(request)` 提供（見下方「串流」），`audio.speech` 的音訊由 `streamBytes(request)` 以位元組塊拉取；`call` 請求 `stream` 仍被拒絕。路徑參數（`{model}`、`{id}`）只接受 `A-Za-z0-9._:-`、1 至 256 個字元，且不是 `.` 或 `..`（因此含 `/` 的模型識別碼不能用 `models.retrieve`）；查詢參數只接受條目列出者。
+**端點目錄**（條目名稱、方法與路徑、預設是否啟用；路徑在根位址之下；執行中 Engine 的目錄以 `GET /api/v1/resource-types` 為準，以下為說明）：`chat.completions`（`POST /chat/completions`，預設啟用）、`completions`（`POST /completions`，預設啟用）、`embeddings`（`POST /embeddings`，預設啟用）、`models.list`（`GET /models`，預設啟用）、`models.retrieve`（`GET /models/{model}`，預設啟用）、`responses.create`（`POST /responses`）、`responses.retrieve`（`GET /responses/{id}`）、`responses.delete`（`DELETE /responses/{id}`）、`responses.cancel`（`POST /responses/{id}/cancel`）、`responses.input_items`（`GET /responses/{id}/input_items`）、`moderations`（`POST /moderations`）、`rerank`（`POST /rerank`）、`reranking`（`POST /reranking`；兩者各為一個條目，哪個有效以對目標服務的實測決定）、`images.generations`（`POST /images/generations`）、`files.list`（`GET /files`）、`files.retrieve`（`GET /files/{id}`）、`files.delete`（`DELETE /files/{id}`）、`batches.create`（`POST /batches`）、`batches.list`（`GET /batches`）、`batches.retrieve`（`GET /batches/{id}`）、`batches.cancel`（`POST /batches/{id}/cancel`）。未標預設啟用者（尤其有狀態的刪除與取消條目）由管理員逐條啟用。另有多部分上傳與二進位回應的條目（WI-53），同樣由管理員逐條啟用：`images.edits`（`POST /images/edits`）、`images.variations`（`POST /images/variations`）、`audio.speech`（`POST /audio/speech`，二進位回應）、`audio.transcriptions`（`POST /audio/transcriptions`）、`audio.translations`（`POST /audio/translations`）、`files.create`（`POST /files`）、`files.content`（`GET /files/{id}/content`，二進位回應）；事件串流（`chat.completions`、`completions`、`responses.create`）由存取端的 `stream(request)` 提供（見下方「串流」），`audio.speech` 的音訊由 `streamBytes(request)` 以位元組塊拉取；`call` 請求 `stream` 仍被拒絕。路徑參數（`{model}`、`{id}`）只接受 `A-Za-z0-9._:-`、1 至 256 個字元，且不是 `.` 或 `..`（因此含 `/` 的模型識別碼不能用 `models.retrieve`）；查詢參數只接受條目列出者。
 
 **請求規則與錯誤類別**（pipeline 看到的，只有類別與 HTTP 狀態碼，沒有服務回的本文或訊息）：資源的 `defaults` 在先，pipeline 的值蓋過同名項目，其餘本文由 pipeline 完全提供；被鎖定的參數（`PARAMETER_LOCKED`）、不在允許清單的模型（`MODEL_NOT_ALLOWED`）、超過上限的數值（`VALUE_ABOVE_LIMIT`）、`call` 的本文帶 `stream` 或 `stream_options`，或對不能串流的條目呼叫 `stream`（`STREAM_NOT_SUPPORTED`）、過大的請求（`REQUEST_TOO_LARGE`）被拒絕且不送出請求；未啟用的條目（`ENDPOINT_NOT_ENABLED`）、目錄沒有的名稱（`UNKNOWN_ENDPOINT`）、不合規的路徑參數、查詢參數與本文（`INVALID_ARGUMENT`）同樣不送出。送出後：401 與 403 為 `DENIED`、429 為 `RATE_LIMITED`、5xx 為 `SERVER_ERROR`、其他非 2xx 為 `REQUEST_REJECTED`（都附狀態碼）、連不上為 `CONNECTION_FAILED`、離開根位址的重新導向為 `REDIRECT_BLOCKED`（不跟隨；根位址之內的重新導向會被跟隨，最多 5 次）、回應過大為 `RESPONSE_TOO_LARGE`、被取消為 `CANCELLED`、金鑰庫給不出金鑰為 `SECRET_UNAVAILABLE`；逾時各有專屬類別：`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT`、`QUOTA_WAIT_TIMEOUT`。Engine 不自動重試。pipeline 呼叫時可以縮短任何一種逾時，不能放寬。回傳給 pipeline 的回應標頭剝除名稱含 `auth`、`key`、`token`、`secret`、`cookie` 者（含 `Set-Cookie`、`WWW-Authenticate`、`Proxy-Authenticate`），其餘標頭值中出現金鑰處以 `***` 取代；回應本文 Engine 不處理（服務若把金鑰回射到成功的本文，pipeline 會拿到它，這是 ADR-019 接受的限度；Engine 自己不把本文寫進 log、trace 或錯誤，pipeline 若把它寫進 run 的 log 或讓 run 以它失敗，盡力而為的字串遮蔽會把金鑰換成 `***`）。
 
@@ -296,7 +296,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `connectionsPerRun` | 每個 run 同時可用的連線數（1 至 64）；連線池大小是容量乘以它，不能獨立設定 | 1 |
 | `timeouts` | `connectMs`（建立連線）、`statementMs`（單一語句的上限，超過即在資料庫端取消，得到 `TOTAL_TIMEOUT`）、`quotaWaitMs`（等待 run 自己的連線額度的上限，得到 `QUOTA_WAIT_TIMEOUT`） | 10000、300000、60000 |
 | `maxRows`、`maxResponseBytes` | 一次查詢最多回傳的列數、答案（文字與位元組）的大小上限；超過整個答案被拒絕（`RESPONSE_TOO_LARGE`），不回傳一部分 | 10000、8 MiB |
-| `properties` | 額外連線屬性（名稱到文字值，最多 16 個）；只接受資料庫設定檔的允許清單：PostgreSQL 為 `ApplicationName`（最長 64 字元）、`currentSchema`（以逗號分隔的結構名稱）、`tcpKeepAlive`（`true` 或 `false`）；其他名稱為 `property_not_allowed`。沒有任何屬性與 TLS 有關（`sslmode`、`sslfactory`、`sslrootcert`、`sslcert`、`sslkey`、`sslNegotiation` 等都不接受），也沒有任何屬性可以關閉主機名稱或憑證驗證；TLS 由下兩列設定。`readOnly` 不在清單內：語句可以自己改回，唯一的保護是資料庫帳號的權限 | 無 |
+| `properties` | 額外連線屬性（名稱到文字值，最多 16 個）；只接受資料庫設定檔的允許清單（執行中 Engine 的清單與值規則見 `GET /api/v1/resource-types`）：PostgreSQL 為 `ApplicationName`（最長 64 字元）、`currentSchema`（以逗號分隔的結構名稱）、`tcpKeepAlive`（`true` 或 `false`）；其他名稱為 `property_not_allowed`。沒有任何屬性與 TLS 有關（`sslmode`、`sslfactory`、`sslrootcert`、`sslcert`、`sslkey`、`sslNegotiation` 等都不接受），也沒有任何屬性可以關閉主機名稱或憑證驗證；TLS 由下兩列設定。`readOnly` 不在清單內：語句可以自己改回，唯一的保護是資料庫帳號的權限 | 無 |
 | `trustAliases` | 選填。金鑰庫中受信任憑證項目的別名清單（規則同 `openai-compatible`）：設定了就只信任這些憑證 | 見下 |
 | `clientCertAlias` | 選填。金鑰庫中私鑰項目的別名：資料庫要求用戶端憑證時出示它 | 見下 |
 
@@ -367,6 +367,43 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 認證：Bearer（admin）
 
 強制某個持有者放開這個資源（記錄於 log，含管理員名稱）；run 本身不會被停止。對有存取端的型別（`file`、`jdbc-pool`、`openai-compatible`），該持有者的存取端在容量釋放之前同時失效：之後的操作失敗並註明原因為強制釋放，且不會對實體產生任何效果，所以下一位取得者不會與它同時使用同一個檔案；`openai-compatible` 進行中的請求同時被取消（連線關閉，請求額度歸還，該呼叫得到 `CANCELLED`），但服務端是否隨連線中斷而停止生成取決於服務；`jdbc-pool` 進行中的語句同時在資料庫端被取消並切斷其連線（該呼叫得到 `CANCELLED`），未提交的交易回滾，連線經清理才歸還連池（見「`jdbc-pool` 型別」）。200 回傳 `{resource, runId, pipeline, heldSince}`；404 `resource_not_found` 或 `not_a_holder`。
+
+### `GET /api/v1/resource-types`
+
+認證：Bearer（admin）
+
+執行中 Engine 內建的資源型別描述（[ADR-021](adr/ADR-021-resource-type-catalog-endpoint.md)、[WI-55](work-items/WI-55-resource-type-catalog-endpoint.md)）：封閉的型別集合，以及各型別由 Engine 固定的選項。Console 的資源表單以它為唯一來源。唯讀、無副作用，可安全重試；回應在同一個 Engine 行程內不變，不另設目錄版本號（Engine 的版本見 `GET /api/v1/info`）。回應與建立、修改資源時的驗證取自 Engine 內部同一份描述：回應列出的端點條目都能放進 `endpoints`，不在其中的名稱一律為 `invalid_endpoint`；標示 `defaultEnabled` 的條目就是省略 `endpoints` 時寫出的條目；資料庫種類與 `unsupported_database`、允許的屬性與 `property_not_allowed` 的判定同理。上方各型別一節對目錄、參數與屬性的文字列舉為說明，以本端點的回應為準。
+
+回應不含任何資源的設定、使用量、機密別名或機密值，也不含 Engine 的組態值（例如資源根目錄）與設定的預設值（留空時的實際值見各型別一節的「預設」欄）。
+
+200，本文 `{"types": [...]}`，依 Engine 的固定順序（`counter`、`file`、`jdbc-pool`、`openai-compatible`），每項有 `type`，另有該型別的成員（沒有的型別不出現；`counter` 與 `file` 只有 `type`）：
+
+- `openai-compatible`：
+  - `endpoints[]`：可啟用的端點條目，依目錄順序。每項 `id`（條目名稱，即 `settings.endpoints` 所用）、`group`（ADR-019 目錄表的群組：`chat`、`completions`、`embeddings`、`models`、`responses`、`moderations`、`rerank`、`images`、`audio`、`files`、`batches`）、`method`、`path`（根位址之下的路徑樣板，`{model}`、`{id}` 為路徑參數）、`request`（請求本文：`none`、`json`、`multipart`）、`response`（`json`、`binary`）、`streams`（是否可串流：`json` 回應為事件串流，`binary` 回應為位元組塊）、`defaultEnabled`（新資源省略 `endpoints` 時是否啟用）、`stateful`（是否建立、取消或刪除服務端保存的東西，例如檔案、批次、保存的回應；這些條目都不預設啟用）。
+  - `requestParameters[]`：可設預設、鎖定或上限的請求參數，依上表順序。每項 `name`、`kind`（值的種類：`number`、`text`（非空文字）、`textOrList`（文字或文字清單，即 `stop`）、`object`（JSON 物件，即 `response_format`））、`ceiling`（是否可設上限，只有 `number`）。
+- `jdbc-pool`：`databases[]`，每個資料庫設定檔一項：`kind`（`settings.kind` 所用的種類）、`properties[]`（允許的額外連線屬性，每項 `name` 與值規則 `rule`：`text` 帶 `maxLength`，任何不含控制字元、最長 `maxLength` 個字元的文字；`oneOf` 帶 `values`，只能是其中之一；`pattern` 帶 `pattern`，整個值須符合這個正規表示式，寫法在 Java 與 JavaScript 意義相同）。值不符規則為 `invalid_settings`，名稱不在清單為 `property_not_allowed`。
+
+範例（節錄）：
+
+```json
+{"types": [
+  {"type": "counter"},
+  {"type": "file"},
+  {"type": "jdbc-pool", "databases": [{"kind": "postgresql", "properties": [
+    {"name": "ApplicationName", "rule": "text", "maxLength": 64},
+    {"name": "tcpKeepAlive", "rule": "oneOf", "values": ["true", "false"]}]}]},
+  {"type": "openai-compatible",
+   "endpoints": [{"id": "chat.completions", "group": "chat", "method": "POST", "path": "/chat/completions",
+     "request": "json", "response": "json", "streams": true, "defaultEnabled": true, "stateful": false}],
+   "requestParameters": [{"name": "temperature", "kind": "number", "ceiling": true}]}
+]}
+```
+
+| 狀態 | 意義 |
+|---|---|
+| 200 | 型別描述 |
+| 401 | 沒有 token 或 token 無效（見「通則」） |
+| 403 `forbidden` | 開發人員（只有管理員可讀，與 `/api/v1/resources` 一致） |
 
 ## 機密（管理員）
 

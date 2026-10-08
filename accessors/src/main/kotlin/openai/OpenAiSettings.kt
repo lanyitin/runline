@@ -37,18 +37,18 @@ sealed interface SettingsResult {
   class Invalid(val problem: OpenAiSettingsProblem) : SettingsResult
 }
 
-/** The kind of value a request parameter takes. */
-enum class ParameterKind {
-  NUMBER,
+/** The kind of value a request parameter takes; [wire] names it in the API. */
+enum class ParameterKind(val wire: String) {
+  NUMBER("number"),
 
   /** Text that is not empty. */
-  TEXT,
+  TEXT("text"),
 
   /** Text, or a list of texts (`stop`). */
-  TEXT_OR_LIST,
+  TEXT_OR_LIST("textOrList"),
 
   /** A JSON object (`response_format`). */
-  OBJECT,
+  OBJECT("object"),
 }
 
 /**

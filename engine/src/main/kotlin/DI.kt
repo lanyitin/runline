@@ -227,6 +227,7 @@ fun Application.configureDependencyInjection() {
           resolve<JdbcPools>(),
       )
     }
+    provide<ResourceTypeCatalog> { ResourceTypeCatalog(resolve<ResourceBehaviors>()) }
     provide<ResourceRemoval> {
       ResourceRemoval(
           resolve<ResourceStore>(),

@@ -41,6 +41,13 @@ interface ResourceBehavior {
     else null
   }
 
+  /**
+   * What the type tells of the choices the Engine fixes for its settings (WI-55): members added to
+   * the type's entry of `GET /api/v1/resource-types`, made from what [problemWith] checks against,
+   * never from a list of their own. Nothing of a resource, a secret or the Engine's configuration.
+   */
+  fun description(): JsonObject = JsonObject(emptyMap())
+
   /** The settings as they are stored, every effective value written out; given valid [settings]. */
   fun normalized(settings: JsonObject): JsonObject = settings
 

@@ -99,6 +99,7 @@ internal class OpenAiCompatibleBehavior(
         OpenAiSettingsProblem.INVALID_REQUEST_DEFAULTS -> InvalidResource.INVALID_REQUEST_DEFAULTS
         OpenAiSettingsProblem.INVALID_TIMEOUT -> InvalidResource.INVALID_TIMEOUT
         OpenAiSettingsProblem.INVALID_LIMIT -> InvalidResource.INVALID_LIMIT
+        OpenAiSettingsProblem.INVALID_ALIAS -> InvalidResource.INVALID_SECRET_ALIAS
       }
 
   private companion object {

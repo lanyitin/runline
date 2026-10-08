@@ -217,7 +217,10 @@ describe('the form of a jdbc-pool', () => {
     try {
       const { page, problems } = await signedIn(context, root, '/resources', leaks);
       await defineForm(page, 'Database pool (JDBC)', name);
-      expect(await dialog(page).locator('#jdbc-kind option').allInnerTexts()).toEqual(['PostgreSQL']);
+      // The kinds the Engine tells (WI-55), each as it names it.
+      const kinds = (await json(await api(root, '/api/v1/resource-types'))).types.find((t: any) => t.type === 'jdbc-pool').databases.map((d: any) => d.kind);
+      expect(kinds).toContain('postgresql');
+      expect(await dialog(page).locator('#jdbc-kind option').allInnerTexts()).toEqual(kinds);
       await dialog(page).locator('#jdbc-host').fill(dbHost);
       await dialog(page).locator('#jdbc-port').fill(dbPort);
       await dialog(page).locator('#jdbc-database').fill('orders');

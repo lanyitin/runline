@@ -27,7 +27,7 @@ WI-49 提供型別感知的資源頁與 `counter` 表單。本項在後端型別
 
 ## 實作結果（2026-10-07）
 
-**結構。** 只用 08-api 已記載的端點與欄位（資源的建立與修改的 `settings`、`secretAlias`，資源的 `concurrencyLimit`、`usage`，`invalid_resource` 的 `problem`，`GET /api/v1/secrets`），沒有新增或修改端點，也沒有改 Engine 的程式碼。Console：`admin/resource-forms.ts`（每個型別一個表單：新資源的欄位、由既有設定得到的欄位、欄位組成的設定、`problem` 對應的欄位；`formOf(type)` 選表單，對話框只問它）、`admin/openai-catalog.ts`（端點目錄與可設定的請求參數，依 08-api 的順序）、各型別的欄位元件 `FileFields`、`JdbcPoolFields`、`OpenAiFields`（共用 `TextField`、`PairsField`）、`SecretAliasField`（機密別名的選單）；`resource-types.ts` 加入型別的使用量（`usageLines`）；`ResourceFormDialog.svelte` 組合它們，`ResourceCard.svelte` 顯示使用量。
+**結構。** 只用 08-api 已記載的端點與欄位（資源的建立與修改的 `settings`、`secretAlias`，資源的 `concurrencyLimit`、`usage`，`invalid_resource` 的 `problem`，`GET /api/v1/secrets`），沒有新增或修改端點，也沒有改 Engine 的程式碼。Console：`admin/resource-forms.ts`（每個型別一個表單：新資源的欄位、由既有設定得到的欄位、欄位組成的設定、`problem` 對應的欄位；`formOf(type)` 選表單，對話框只問它）、`admin/openai-catalog.ts`（端點目錄與可設定的請求參數，依 08-api 的順序；已由 WI-55 移除，見下）、各型別的欄位元件 `FileFields`、`JdbcPoolFields`、`OpenAiFields`（共用 `TextField`、`PairsField`）、`SecretAliasField`（機密別名的選單）；`resource-types.ts` 加入型別的使用量（`usageLines`）；`ResourceFormDialog.svelte` 組合它們，`ResourceCard.svelte` 顯示使用量。
 
 **實作時的決定（超出條文之處，供審閱）。**
 
@@ -36,7 +36,7 @@ WI-49 提供型別感知的資源頁與 `counter` 表單。本項在後端型別
 - 修改只送有變更的部分：設定與保存的不同（不論成員順序）時整份送出（因此清除 `lastCheck`），別名換了才送 `secretAlias`；沒有任何變更時說明「沒有要變更的內容」，不呼叫 API。
 - 機密別名是選單，只列金鑰庫中類型為機密的項目（憑證與私鑰不列），不可用的機密標示原因；新資源可選「不設機密」，已有別名的資源不提供（API 沒有清除別名的修改）；目前的別名不在金鑰庫時仍列出並標示。金鑰庫未組態或沒有機密時說明原因；說明新增或更換機密由維運以 keytool 操作後在本頁重載。
 - `jdbc-pool` 的「連線池大小 = 容量 × 每 run 連線數」與 `openai-compatible` 的「同時請求上限 = 容量 × 每 run 請求數」依輸入即時計算；請求參數以表格呈現（預設、鎖定、上限；上限只對數值參數），表格上方說明鎖定與上限的意義。`stop` 可為文字或 JSON 清單，`response_format` 為 JSON 物件。
-- 端點目錄在 Console 內有一份（`openai-catalog.ts`），因為 API 沒有提供目錄；Console 由同一個 Engine 提供（ADR-015），Engine 仍以 `invalid_endpoint` 拒絕目錄沒有的條目。新版 Engine 的目錄變動時須同步這份清單。
+- （WI-55 改寫）本項實作時，端點目錄、請求參數清單與資料庫種類在 Console 內各有一份複本（`openai-catalog.ts`、`resource-forms.ts` 的 `DATABASE_KINDS`、翻譯中的屬性名稱），因為當時 API 沒有提供目錄。[WI-55](WI-55-resource-type-catalog-endpoint.md)（[ADR-021](../adr/ADR-021-resource-type-catalog-endpoint.md)）新增 `GET /api/v1/resource-types` 並移除這些複本：表單的端點選項、請求參數欄位、資料庫種類選單與允許的屬性說明全部取自執行中 Engine 的回應，讀取失敗時不退回任何內建清單，`jdbc-pool` 與 `openai-compatible` 的建立與修改停用。
 - 卡片的使用量顯示為「使用中的連線：n / 上限」與「進行中的請求：n / 上限」（上限為 `concurrencyLimit`），隨資源列表的 3 秒輪詢更新，不觸發檢查。卡片未增加端點、逾時與上限的型別專屬顯示（條文未要求）。
 - Fake Engine：`test-support/fake-resource-settings.ts` 依型別實作 Engine 的設定規則（接受什麼、拒絕的 `problem`、寫回的正規化形式），`fake-resources.ts` 經 API 建立與修改所有型別並給出 `concurrencyLimit`、`usage`（使用量由測試設定）；`fake-engine.ts` 另記錄每個請求的方法與本文（`received`），供元件測試確認送出的內容。`contract/admin-contract.ts` 新增 8 個測試（各型別寫回的設定與上限、各型別拒絕的 `problem`、修改設定與別名清除 `lastCheck`、不合規的修改不改變任何東西），同一組在 Fake 與真實 Engine 上通過。
 - 真實瀏覽器腳本需要 OpenAI 相容服務：沿用 Engine 測試的 `FakeOpenAiServer`（已有 `OpenAiServerContract` 契約測試），新增 `FakeOpenAiServerMain` 與手動任務 `./gradlew :accessors:fakeOpenAiServer`（不納入 `check`）。新增示範 pipeline `demo-usage.jar`（`demo-pool-usage` 持有 `demo-db` 的連線、`demo-llm-usage` 對 `demo-llm` 送出一次 chat completion），讓腳本以真實 run 驗證使用量。

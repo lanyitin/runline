@@ -47,7 +47,7 @@
 
 `./gradlew check`：Console 的型別檢查、測試與翻譯檢查（`consoleCheck`）與 `packagedTest` 通過；`:accessors:test` 3 個與 `:engine:test` 5 個失敗，在未含本項變更的 HEAD 上以同樣的環境執行，失敗完全相同（與本項無關）：以 root 執行使檔案權限不生效（`FileProbeTest` 兩個、`ResourceCheckerTest` 一個）、呼叫者名稱 `root` 與系統使用者名稱相同（`InfoRoutesTest`）、下述的時間精度（`ResourceCheckApiTest`、`ResourceCheckerTest` 各一個）、負載下的計時（`OpenAiBindingMultipartTest`、`TriggerStartupTest`）。
 
-**發現（不阻擋，交由後端項判斷）。** `POST /api/v1/resources/{name}/check` 回應的 `checkedAt` 精確到奈秒（例如 `...50.918100732Z`），之後 `GET` 的 `lastCheck.checkedAt` 是資料庫保存的微秒（四捨五入為 `...50.918101Z`），兩者字串不同（在時鐘有奈秒精度的 Linux 上，Engine 自己的 `ResourceCheckApiTest` 與 `ResourceCheckerTest` 也因此失敗）。契約測試以「同一毫秒內」比較；Console 只顯示保存的值，不受影響。
+**發現（不阻擋，交由後端項判斷）。** `POST /api/v1/resources/{name}/check` 回應的 `checkedAt` 精確到奈秒（例如 `...50.918100732Z`），之後 `GET` 的 `lastCheck.checkedAt` 是資料庫保存的微秒（四捨五入為 `...50.918101Z`），兩者字串不同（在時鐘有奈秒精度的 Linux 上，Engine 自己的 `ResourceCheckApiTest` 與 `ResourceCheckerTest` 也因此失敗）。契約測試以「同一毫秒內」比較；Console 只顯示保存的值，不受影響。已由 [WI-56](WI-56-check-time-precision.md) 處理：檢查回應的時間改為保存的微秒，契約測試改回字串相等。
 
 **未驗證或未做。**
 

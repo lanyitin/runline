@@ -350,6 +350,72 @@ class OpenAiSettingsTest {
   }
 
   @Test
+  fun `each request parameter is described with the kind of value it takes`() {
+    assertEquals(
+        listOf(
+            "model" to ParameterKind.TEXT,
+            "temperature" to ParameterKind.NUMBER,
+            "top_p" to ParameterKind.NUMBER,
+            "top_k" to ParameterKind.NUMBER,
+            "min_p" to ParameterKind.NUMBER,
+            "max_tokens" to ParameterKind.NUMBER,
+            "max_completion_tokens" to ParameterKind.NUMBER,
+            "max_output_tokens" to ParameterKind.NUMBER,
+            "stop" to ParameterKind.TEXT_OR_LIST,
+            "seed" to ParameterKind.NUMBER,
+            "response_format" to ParameterKind.OBJECT,
+            "presence_penalty" to ParameterKind.NUMBER,
+            "frequency_penalty" to ParameterKind.NUMBER,
+            "repeat_penalty" to ParameterKind.NUMBER,
+            "n" to ParameterKind.NUMBER,
+            "reasoning_effort" to ParameterKind.TEXT,
+        ),
+        OpenAiSettings.REQUEST_PARAMETERS.map { it.name to it.kind },
+    )
+    assertEquals(
+        OpenAiSettings.REQUEST_PARAMETERS.filter { it.kind == ParameterKind.NUMBER },
+        OpenAiSettings.REQUEST_PARAMETERS.filter { it.ceiling },
+    )
+  }
+
+  @Test
+  fun `what the settings accept of a parameter is what its description says`() {
+    val samples =
+        mapOf(
+            ParameterKind.NUMBER to "0.5",
+            ParameterKind.TEXT to "\"x\"",
+            ParameterKind.TEXT_OR_LIST to "[\"x\",\"y\"]",
+            ParameterKind.OBJECT to """{"type":"text"}""",
+        )
+    for (parameter in OpenAiSettings.REQUEST_PARAMETERS) {
+      val name = parameter.name
+      for ((kind, value) in samples) {
+        val fits =
+            kind == parameter.kind ||
+                parameter.kind == ParameterKind.TEXT_OR_LIST && kind == ParameterKind.TEXT
+        val result = parse("""{"baseUrl":"http://h","defaults":{"$name":$value}}""")
+        assertEquals(fits, result is SettingsResult.Valid, "$name with $value")
+      }
+      assertIs<SettingsResult.Valid>(
+          parse("""{"baseUrl":"http://h","lockedParameters":["$name"]}"""),
+          name,
+      )
+      assertEquals(
+          parameter.ceiling,
+          parse("""{"baseUrl":"http://h","maxValues":{"$name":5}}""") is SettingsResult.Valid,
+          name,
+      )
+    }
+    // Nothing that is not described can be defaulted, locked or capped.
+    for (member in listOf("defaults\":{\"messages\":1}", "lockedParameters\":[\"messages\"]")) {
+      assertEquals(
+          OpenAiSettingsProblem.INVALID_REQUEST_DEFAULTS,
+          problem("""{"baseUrl":"http://h","$member}"""),
+      )
+    }
+  }
+
+  @Test
   fun `a setting of the wrong shape is refused`() {
     assertEquals(
         OpenAiSettingsProblem.INVALID_SETTINGS,

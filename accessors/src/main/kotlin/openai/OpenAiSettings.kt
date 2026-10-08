@@ -37,6 +37,45 @@ sealed interface SettingsResult {
   class Invalid(val problem: OpenAiSettingsProblem) : SettingsResult
 }
 
+/** The kind of value a request parameter takes. */
+enum class ParameterKind {
+  NUMBER,
+
+  /** Text that is not empty. */
+  TEXT,
+
+  /** Text, or a list of texts (`stop`). */
+  TEXT_OR_LIST,
+
+  /** A JSON object (`response_format`). */
+  OBJECT,
+}
+
+/**
+ * A request parameter a resource may default, lock or put a ceiling on, with the kind of value it
+ * takes. The settings are checked against these and the Engine tells of them (WI-55): one list.
+ */
+class RequestParameter(val name: String, val kind: ParameterKind) {
+  /** Whether a ceiling may be set: for numbers only. */
+  val ceiling: Boolean
+    get() = kind == ParameterKind.NUMBER
+
+  /** Whether [value] is the kind of value this parameter takes. */
+  internal fun fits(value: JsonElement): Boolean =
+      when (kind) {
+        ParameterKind.NUMBER ->
+            value is JsonPrimitive && !value.isString && value.doubleOrNull != null
+        ParameterKind.TEXT -> value.isText()
+        // As it always was: any text, or a list of texts that are not empty.
+        ParameterKind.TEXT_OR_LIST ->
+            value is JsonPrimitive && value.isString ||
+                value is JsonArray && value.all { it.isText() }
+        ParameterKind.OBJECT -> value is JsonObject
+      }
+
+  private fun JsonElement.isText() = this is JsonPrimitive && isString && content.isNotEmpty()
+}
+
 /** The five limits of ADR-019 decision 14 that an administrator sets, in milliseconds. */
 data class OpenAiLimits(
     val connectMillis: Long,
@@ -116,30 +155,35 @@ internal constructor(
     private const val MOST_RESPONSE_BYTES = 256L * 1024 * 1024
     private const val MOST_DOWNLOAD_BYTES = 16L * 1024 * 1024 * 1024
 
-    /** Parameters whose value is a number. */
-    private val NUMERIC =
-        setOf(
-            "temperature",
-            "top_p",
-            "top_k",
-            "min_p",
-            "max_tokens",
-            "max_completion_tokens",
-            "max_output_tokens",
-            "seed",
-            "presence_penalty",
-            "frequency_penalty",
-            "repeat_penalty",
-            "n",
-        )
-
     /**
      * The only parameters a resource may default, lock or put a ceiling on: the model and the
-     * sampling and length parameters. Messages, tools and the rest are the pipeline's alone, and
-     * `stream` is the resource's own business.
+     * sampling and length parameters, in the order of 08-api. Messages, tools and the rest are the
+     * pipeline's alone, and `stream` is the resource's own business.
      */
-    val DEFAULTABLE: Set<String> =
-        NUMERIC + setOf("model", "stop", "response_format", "reasoning_effort")
+    val REQUEST_PARAMETERS: List<RequestParameter> =
+        listOf(
+            RequestParameter("model", ParameterKind.TEXT),
+            RequestParameter("temperature", ParameterKind.NUMBER),
+            RequestParameter("top_p", ParameterKind.NUMBER),
+            RequestParameter("top_k", ParameterKind.NUMBER),
+            RequestParameter("min_p", ParameterKind.NUMBER),
+            RequestParameter("max_tokens", ParameterKind.NUMBER),
+            RequestParameter("max_completion_tokens", ParameterKind.NUMBER),
+            RequestParameter("max_output_tokens", ParameterKind.NUMBER),
+            RequestParameter("stop", ParameterKind.TEXT_OR_LIST),
+            RequestParameter("seed", ParameterKind.NUMBER),
+            RequestParameter("response_format", ParameterKind.OBJECT),
+            RequestParameter("presence_penalty", ParameterKind.NUMBER),
+            RequestParameter("frequency_penalty", ParameterKind.NUMBER),
+            RequestParameter("repeat_penalty", ParameterKind.NUMBER),
+            RequestParameter("n", ParameterKind.NUMBER),
+            RequestParameter("reasoning_effort", ParameterKind.TEXT),
+        )
+
+    private val BY_NAME = REQUEST_PARAMETERS.associateBy { it.name }
+
+    /** The names of [REQUEST_PARAMETERS]. */
+    private val DEFAULTABLE: Set<String> = BY_NAME.keys
 
     /** Checks [settings] and returns them with every effective value written out. */
     fun parse(settings: JsonObject): SettingsResult {
@@ -293,11 +337,10 @@ internal constructor(
       if (element == null) return LinkedHashSet(OpenAiEndpoints.defaultEnabled)
       val names = stringList(element) ?: return null
       if (names.isEmpty()) return null
-      for (name in names) {
-        if (OpenAiEndpoints.find(name)?.delivered != true) return null
-      }
+      val enableable = OpenAiEndpoints.enableable.map { it.id }
+      if (!enableable.containsAll(names)) return null
       // In catalog order, so that what is stored does not depend on how it was written.
-      return OpenAiEndpoints.all.map { it.id }.filterTo(LinkedHashSet()) { it in names }
+      return enableable.filterTo(LinkedHashSet()) { it in names }
     }
 
     private fun timeoutsOf(element: JsonElement?): OpenAiLimits? {
@@ -355,29 +398,16 @@ internal constructor(
       if (element == null) return JsonObject(emptyMap())
       val defaults = element as? JsonObject ?: return null
       if (!DEFAULTABLE.containsAll(defaults.keys)) return null
-      for ((name, value) in defaults) if (!fits(name, value)) return null
+      for ((name, value) in defaults) if (!BY_NAME.getValue(name).fits(value)) return null
       return defaults
     }
-
-    /** Whether [value] is the kind of value the parameter [name] takes. */
-    private fun fits(name: String, value: JsonElement): Boolean =
-        when (name) {
-          in NUMERIC -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
-          "stop" -> value.isString() || stringList(value) != null
-          "response_format" -> value is JsonObject
-          else ->
-              value.isString() &&
-                  (value as JsonPrimitive).content.isNotEmpty() // model, reasoning_effort
-        }
-
-    private fun JsonElement.isString() = this is JsonPrimitive && isString
 
     private fun maxValuesOf(element: JsonElement?): Map<String, Double>? {
       if (element == null) return emptyMap()
       val values = element as? JsonObject ?: return null
       val result = LinkedHashMap<String, Double>()
       for ((name, value) in values) {
-        if (name !in NUMERIC) return null
+        if (BY_NAME[name]?.ceiling != true) return null
         val number = (value as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: return null
         if (!(number > 0.0) || number.isInfinite()) return null
         result[name] = number

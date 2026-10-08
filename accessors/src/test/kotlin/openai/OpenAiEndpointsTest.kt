@@ -77,6 +77,66 @@ class OpenAiEndpointsTest {
   }
 
   @Test
+  fun `each entry is in its group of the ADR`() {
+    val groups =
+        mapOf(
+            "chat" to listOf("chat.completions"),
+            "completions" to listOf("completions"),
+            "embeddings" to listOf("embeddings"),
+            "models" to listOf("models.list", "models.retrieve"),
+            "responses" to
+                listOf(
+                    "responses.create",
+                    "responses.retrieve",
+                    "responses.delete",
+                    "responses.cancel",
+                    "responses.input_items",
+                ),
+            "moderations" to listOf("moderations"),
+            "rerank" to listOf("rerank", "reranking"),
+            "images" to listOf("images.generations", "images.edits", "images.variations"),
+            "audio" to listOf("audio.speech", "audio.transcriptions", "audio.translations"),
+            "files" to
+                listOf(
+                    "files.create",
+                    "files.list",
+                    "files.retrieve",
+                    "files.delete",
+                    "files.content",
+                ),
+            "batches" to
+                listOf("batches.create", "batches.list", "batches.retrieve", "batches.cancel"),
+        )
+
+    assertEquals(
+        groups,
+        OpenAiEndpoints.all.groupBy({ it.group }, { it.id }),
+    )
+  }
+
+  @Test
+  fun `the stateful entries are those that make, cancel or delete what the service keeps`() {
+    assertEquals(
+        setOf(
+            "responses.delete",
+            "responses.cancel",
+            "files.create",
+            "files.delete",
+            "batches.create",
+            "batches.cancel",
+        ),
+        OpenAiEndpoints.all.filter { it.stateful }.map { it.id }.toSet(),
+    )
+    // The default posture is "only generating": nothing stateful is enabled by default.
+    assertTrue(OpenAiEndpoints.all.none { it.stateful && it.defaultEnabled })
+  }
+
+  @Test
+  fun `the entries that can be enabled are the delivered ones, in catalog order`() {
+    assertEquals(OpenAiEndpoints.all.filter { it.delivered }, OpenAiEndpoints.enableable)
+  }
+
+  @Test
   fun `an unknown name is not an endpoint`() {
     assertNull(OpenAiEndpoints.find("chat/completions"))
     assertNull(OpenAiEndpoints.find("CHAT.COMPLETIONS"))

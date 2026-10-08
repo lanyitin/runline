@@ -27,9 +27,9 @@ object PostgresProfile : JdbcProfile {
    */
   override val allowedProperties: Map<String, PropertyRule> =
       mapOf(
-          "ApplicationName" to PropertyRule { it.length <= 64 && it.none(Char::isISOControl) },
-          "currentSchema" to PropertyRule { IDENTIFIERS.matches(it) },
-          "tcpKeepAlive" to PropertyRule { it == "true" || it == "false" },
+          "ApplicationName" to PropertyRule.Text(64),
+          "currentSchema" to PropertyRule.Pattern(IDENTIFIERS),
+          "tcpKeepAlive" to PropertyRule.OneOf(listOf("true", "false")),
       )
   override val healthQuery = "SELECT 1"
 
@@ -145,8 +145,9 @@ object PostgresProfile : JdbcProfile {
   private val HOST =
       Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]{2,45}]")
   private val DATABASE = Regex("[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}")
-  private val IDENTIFIERS =
-      Regex("[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}")
+  /** Up to eight schema names, separated by commas. */
+  private const val IDENTIFIERS =
+      "[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}"
   private const val CANCEL_SIGNAL_SECONDS = 2
   private const val DEFAULT_APPLICATION = "runline"
   private const val LOGIN_MARGIN_SECONDS = 5L

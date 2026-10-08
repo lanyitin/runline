@@ -7,9 +7,33 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.Properties
 
-/** What a database says is acceptable for one extra connection property. */
-fun interface PropertyRule {
+/**
+ * What a database says is acceptable for one extra connection property. A rule is data, so that
+ * what the settings accept and what the Engine tells of it (WI-55) are the same rule.
+ */
+sealed interface PropertyRule {
   fun accepts(value: String): Boolean
+
+  /** Any text of at most [maxLength] characters with no control character. */
+  class Text(val maxLength: Int) : PropertyRule {
+    override fun accepts(value: String) =
+        value.length <= maxLength && value.none(Char::isISOControl)
+  }
+
+  /** Exactly one of [values]. */
+  class OneOf(val values: List<String>) : PropertyRule {
+    override fun accepts(value: String) = value in values
+  }
+
+  /**
+   * The whole value matches the regular expression [pattern], written so that it means the same in
+   * Java and in JavaScript (no flags, no lookaround).
+   */
+  class Pattern(val pattern: String) : PropertyRule {
+    private val regex = Regex(pattern)
+
+    override fun accepts(value: String) = regex.matches(value)
+  }
 }
 
 /**

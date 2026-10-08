@@ -28,6 +28,8 @@ class FilePart(val field: String, val required: Boolean = true)
  */
 class OpenAiEndpoint(
     val id: String,
+    /** The group of ADR-019's table the entry is in, by which an administrator enables at once. */
+    val group: String,
     val method: String,
     /** The path below the resource's base address; `{name}` marks a path parameter. */
     val path: String,
@@ -42,6 +44,11 @@ class OpenAiEndpoint(
     val queryParameters: Set<String> = emptySet(),
     /** Whether an administrator has to enable the entry: false only for the default four groups. */
     val defaultEnabled: Boolean = false,
+    /**
+     * Whether the entry makes, cancels or deletes something the service keeps (a file, a batch, a
+     * stored response), as opposed to only generating or reading; never enabled by default.
+     */
+    val stateful: Boolean = false,
     /** Whether the body names a model, so that the resource's model rules apply to it. */
     val takesModel: Boolean = false,
     /** Whether the body takes sampling and length parameters, which the resource may default. */
@@ -57,6 +64,7 @@ class OpenAiEndpoint(
      */
     val delivered: Boolean = body != BodyKind.MULTIPART && response != ResponseKind.BINARY,
 ) {
+
   /** The names in braces in [path], in order. */
   val pathParameters: List<String> =
       Regex("\\{([a-z_]+)}").findAll(path).map { it.groupValues[1] }.toList()
@@ -112,6 +120,7 @@ class OpenAiEndpoint(
 object OpenAiEndpoints {
   private fun json(
       id: String,
+      group: String,
       method: String,
       path: String,
       streams: Boolean = false,
@@ -119,9 +128,11 @@ object OpenAiEndpoints {
       default: Boolean = false,
       model: Boolean = false,
       sampling: Boolean = false,
+      stateful: Boolean = false,
   ) =
       OpenAiEndpoint(
           id,
+          group,
           method,
           path,
           BodyKind.JSON,
@@ -129,42 +140,51 @@ object OpenAiEndpoints {
           streams = streams,
           queryParameters = query,
           defaultEnabled = default,
+          stateful = stateful,
           takesModel = model,
           takesSampling = sampling,
       )
 
   private fun plain(
       id: String,
+      group: String,
       method: String,
       path: String,
       query: Set<String> = emptySet(),
       default: Boolean = false,
+      stateful: Boolean = false,
   ) =
       OpenAiEndpoint(
           id,
+          group,
           method,
           path,
           BodyKind.NONE,
           ResponseKind.JSON,
           queryParameters = query,
           defaultEnabled = default,
+          stateful = stateful,
       )
 
   private fun upload(
       id: String,
+      group: String,
       path: String,
       fields: Set<String>,
       files: List<FilePart>,
       model: Boolean = false,
       delivered: Boolean = false,
+      stateful: Boolean = false,
   ) =
       OpenAiEndpoint(
           id,
+          group,
           "POST",
           path,
           BodyKind.MULTIPART,
           ResponseKind.JSON,
           takesModel = model,
+          stateful = stateful,
           fields = fields,
           fileParts = files,
           delivered = delivered,
@@ -174,6 +194,7 @@ object OpenAiEndpoints {
       listOf(
           json(
               "chat.completions",
+              "chat",
               "POST",
               "/chat/completions",
               true,
@@ -183,6 +204,7 @@ object OpenAiEndpoints {
           ),
           json(
               "completions",
+              "completions",
               "POST",
               "/completions",
               true,
@@ -190,25 +212,35 @@ object OpenAiEndpoints {
               model = true,
               sampling = true,
           ),
-          json("embeddings", "POST", "/embeddings", default = true, model = true),
-          plain("models.list", "GET", "/models", default = true),
-          plain("models.retrieve", "GET", "/models/{model}", default = true),
-          json("responses.create", "POST", "/responses", true, model = true, sampling = true),
-          plain("responses.retrieve", "GET", "/responses/{id}", setOf("include")),
-          plain("responses.delete", "DELETE", "/responses/{id}"),
-          plain("responses.cancel", "POST", "/responses/{id}/cancel"),
+          json("embeddings", "embeddings", "POST", "/embeddings", default = true, model = true),
+          plain("models.list", "models", "GET", "/models", default = true),
+          plain("models.retrieve", "models", "GET", "/models/{model}", default = true),
+          json(
+              "responses.create",
+              "responses",
+              "POST",
+              "/responses",
+              true,
+              model = true,
+              sampling = true,
+          ),
+          plain("responses.retrieve", "responses", "GET", "/responses/{id}", setOf("include")),
+          plain("responses.delete", "responses", "DELETE", "/responses/{id}", stateful = true),
+          plain("responses.cancel", "responses", "POST", "/responses/{id}/cancel", stateful = true),
           plain(
               "responses.input_items",
+              "responses",
               "GET",
               "/responses/{id}/input_items",
               setOf("after", "include", "limit", "order"),
           ),
-          json("moderations", "POST", "/moderations", model = true),
-          json("rerank", "POST", "/rerank", model = true),
-          json("reranking", "POST", "/reranking", model = true),
-          json("images.generations", "POST", "/images/generations", model = true),
+          json("moderations", "moderations", "POST", "/moderations", model = true),
+          json("rerank", "rerank", "POST", "/rerank", model = true),
+          json("reranking", "rerank", "POST", "/reranking", model = true),
+          json("images.generations", "images", "POST", "/images/generations", model = true),
           upload(
               "images.edits",
+              "images",
               "/images/edits",
               setOf(
                   "model",
@@ -226,6 +258,7 @@ object OpenAiEndpoints {
           ),
           upload(
               "images.variations",
+              "images",
               "/images/variations",
               setOf("model", "n", "size", "response_format", "user"),
               listOf(FilePart("image")),
@@ -234,6 +267,7 @@ object OpenAiEndpoints {
           ),
           OpenAiEndpoint(
               "audio.speech",
+              "audio",
               "POST",
               "/audio/speech",
               BodyKind.JSON,
@@ -244,6 +278,7 @@ object OpenAiEndpoints {
           ),
           upload(
               "audio.transcriptions",
+              "audio",
               "/audio/transcriptions",
               setOf("model", "language", "prompt", "response_format", "temperature"),
               listOf(FilePart("file")),
@@ -252,6 +287,7 @@ object OpenAiEndpoints {
           ),
           upload(
               "audio.translations",
+              "audio",
               "/audio/translations",
               setOf("model", "prompt", "response_format", "temperature"),
               listOf(FilePart("file")),
@@ -260,37 +296,53 @@ object OpenAiEndpoints {
           ),
           upload(
               "files.create",
+              "files",
               "/files",
               setOf("purpose"),
               listOf(FilePart("file")),
               delivered = true,
+              stateful = true,
           ),
-          plain("files.list", "GET", "/files", setOf("purpose", "limit", "after", "order")),
-          plain("files.retrieve", "GET", "/files/{id}"),
-          plain("files.delete", "DELETE", "/files/{id}"),
+          plain(
+              "files.list",
+              "files",
+              "GET",
+              "/files",
+              setOf("purpose", "limit", "after", "order"),
+          ),
+          plain("files.retrieve", "files", "GET", "/files/{id}"),
+          plain("files.delete", "files", "DELETE", "/files/{id}", stateful = true),
           OpenAiEndpoint(
               "files.content",
+              "files",
               "GET",
               "/files/{id}/content",
               BodyKind.NONE,
               ResponseKind.BINARY,
               delivered = true,
           ),
-          json("batches.create", "POST", "/batches"),
-          plain("batches.list", "GET", "/batches", setOf("after", "limit")),
-          plain("batches.retrieve", "GET", "/batches/{id}"),
-          plain("batches.cancel", "POST", "/batches/{id}/cancel"),
+          json("batches.create", "batches", "POST", "/batches", stateful = true),
+          plain("batches.list", "batches", "GET", "/batches", setOf("after", "limit")),
+          plain("batches.retrieve", "batches", "GET", "/batches/{id}"),
+          plain("batches.cancel", "batches", "POST", "/batches/{id}/cancel", stateful = true),
       )
 
   /**
    * The base address itself, which is not an entry of the catalog and cannot be called by a
    * pipeline: it is what a check looks at when the models are not enabled.
    */
-  internal val ROOT = OpenAiEndpoint("root", "GET", "", BodyKind.NONE, ResponseKind.JSON)
+  internal val ROOT = OpenAiEndpoint("root", "", "GET", "", BodyKind.NONE, ResponseKind.JSON)
 
   private val byId = all.associateBy { it.id }
 
   fun find(id: String): OpenAiEndpoint? = byId[id]
+
+  /**
+   * The entries an administrator may enable for a resource, in catalog order: those this version
+   * carries out. What the settings accept and what the Engine tells of its catalog (WI-55) are both
+   * this list.
+   */
+  val enableable: List<OpenAiEndpoint> = all.filter { it.delivered }
 
   /** The entries a new resource has enabled when its administrator does not choose. */
   val defaultEnabled: List<String> = all.filter { it.defaultEnabled }.map { it.id }

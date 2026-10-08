@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors.jdbc
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -163,6 +164,38 @@ class JdbcSettingsTest {
   }
 
   @Test
+  fun `the properties PostgreSQL allows say their rules`() {
+    val rules = PostgresProfile.allowedProperties
+
+    assertEquals(listOf("ApplicationName", "currentSchema", "tcpKeepAlive"), rules.keys.toList())
+    assertEquals(64, assertIs<PropertyRule.Text>(rules["ApplicationName"]).maxLength)
+    assertEquals(
+        "[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}",
+        assertIs<PropertyRule.Pattern>(rules["currentSchema"]).pattern,
+    )
+    assertEquals(
+        listOf("true", "false"),
+        assertIs<PropertyRule.OneOf>(rules["tcpKeepAlive"]).values,
+    )
+  }
+
+  @Test
+  fun `a rule accepts exactly what it says`() {
+    val text = PropertyRule.Text(3)
+    assertTrue(text.accepts("") && text.accepts("abc") && text.accepts("a b"))
+    assertFalse(text.accepts("abcd") || text.accepts("a\u0001") || text.accepts("a\u0085"))
+
+    val choice = PropertyRule.OneOf(listOf("on", "off"))
+    assertTrue(choice.accepts("on") && choice.accepts("off"))
+    assertFalse(choice.accepts("ON") || choice.accepts("") || choice.accepts("on "))
+
+    // The whole value, never a part of it.
+    val pattern = PropertyRule.Pattern("[a-z]+(?:,[a-z]+)?")
+    assertTrue(pattern.accepts("ab") && pattern.accepts("ab,cd"))
+    assertFalse(pattern.accepts("ab,cd,ef") || pattern.accepts("ab1") || pattern.accepts(""))
+  }
+
+  @Test
   fun `a property that loads a class, writes a file, is a secret or weakens the connection is not allowed`() {
     val forbidden =
         listOf(
@@ -255,7 +288,7 @@ class JdbcSettingsTest {
         object : JdbcProfile by PostgresProfile {
           override val kind = "otherdb"
           override val defaultPort = 1521
-          override val allowedProperties = mapOf("Flavor" to PropertyRule { it == "mild" })
+          override val allowedProperties = mapOf("Flavor" to PropertyRule.OneOf(listOf("mild")))
         }
     val both = JdbcProfiles(listOf(PostgresProfile, other))
     val json =

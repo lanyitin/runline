@@ -826,5 +826,11 @@
   "resources.form.certificates.unusableKey": "{alias}（不能使用：金鑰庫密碼無法開啟）",
   "resources.form.certificates.notConfigured": "Engine 沒有組態金鑰庫，所以沒有可選的憑證。",
   "resources.form.certificates.keytool": "憑證由維運以 keytool 在金鑰庫新增或更換，再在本頁重載。不會顯示私鑰的任何內容。",
-  "resources.problem.alias_wrong_type": "別名指向的金鑰庫項目類型不符：機密只用於機密別名，受信任憑證只用於信任，私鑰只用於用戶端憑證。"
+  "resources.problem.alias_wrong_type": "別名指向的金鑰庫項目類型不符：機密只用於機密別名，受信任憑證只用於信任，私鑰只用於用戶端憑證。",
+  "checkFailure.alias_wrong_type": "別名在金鑰庫中的項目類型不符（未送出任何內容）",
+  "checkFailure.certificate_expired": "憑證已過期",
+  "checkFailure.trust_failed": "服務的憑證不是資源信任的憑證",
+  "checkFailure.hostname_mismatch": "服務的憑證不是給這個主機的",
+  "checkFailure.client_cert_rejected": "服務要求用戶端憑證並拒絕了連線",
+  "checkFailure.handshake_failed": "TLS 握手失敗"
 }

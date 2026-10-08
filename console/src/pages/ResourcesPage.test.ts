@@ -1296,6 +1296,19 @@ describe('the certificates of a resource (WI-52)', () => {
     expect(errorAt(view, 'resource-certificates')).toContain('kind');
   });
 
+  test('say on the card in words why a check failed in TLS', async () => {
+    const { view } = await page({
+      seed: (backend) =>
+        backend.resources.define('llm', {
+          type: 'openai-compatible',
+          settings: { baseUrl: 'https://llm.internal/v1', trustAliases: ['corporate-ca'] },
+          lastCheck: { ok: false, failure: 'client_cert_rejected', checkedAt: '2026-10-08T00:00:00Z' },
+        }),
+    });
+    await loaded(view);
+    expect(card(view, 'llm').querySelector('.last-check')!.textContent).toContain('asked for a client certificate');
+  });
+
   test('of the secrets list: each certificate with its subject, end, days left and fingerprint, and a warning near the end', async () => {
     const { view } = await page({ seed: withCertificates });
     const section = () => view.querySelector<HTMLElement>('section.secrets')!;

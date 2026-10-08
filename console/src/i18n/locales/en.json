@@ -826,5 +826,11 @@
   "resources.form.certificates.unusableKey": "{alias} (not usable: the keystore's password does not open it)",
   "resources.form.certificates.notConfigured": "The Engine has no keystore, so there is no certificate to choose.",
   "resources.form.certificates.keytool": "Operators add and replace certificates in the keystore with keytool, then reload it on this page. Nothing of a private key is ever shown.",
-  "resources.problem.alias_wrong_type": "An alias names an entry of another kind: a secret only for the secret, trusted certificates only for trust, a private key only for the client certificate."
+  "resources.problem.alias_wrong_type": "An alias names an entry of another kind: a secret only for the secret, trusted certificates only for trust, a private key only for the client certificate.",
+  "checkFailure.alias_wrong_type": "an alias names an entry of another kind in the keystore (nothing was sent)",
+  "checkFailure.certificate_expired": "a certificate has expired",
+  "checkFailure.trust_failed": "the service's certificate is not one the resource trusts",
+  "checkFailure.hostname_mismatch": "the service's certificate is not for this host",
+  "checkFailure.client_cert_rejected": "the service asked for a client certificate and refused the connection",
+  "checkFailure.handshake_failed": "the TLS handshake failed"
 }

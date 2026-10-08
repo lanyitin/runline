@@ -115,6 +115,18 @@ export function describeResourceTypesContract(name: string, setup: PipelinesCont
         defaultEnabled: true,
         stateful: false,
       });
+      // The service keeps a response it makes unless told not to: making one changes what it keeps.
+      expect(endpoints.find((e: any) => e.id === 'responses.create')).toEqual({
+        id: 'responses.create',
+        group: 'responses',
+        method: 'POST',
+        path: '/responses',
+        request: 'json',
+        response: 'json',
+        streams: true,
+        defaultEnabled: false,
+        stateful: true,
+      });
     });
 
     test('each request parameter says the kind of its value, and only a number may have a ceiling', async () => {

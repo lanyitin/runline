@@ -118,6 +118,8 @@ class OpenAiEndpointsTest {
   fun `the stateful entries are those that make, cancel or delete what the service keeps`() {
     assertEquals(
         setOf(
+            // The service keeps a response it makes unless told not to.
+            "responses.create",
             "responses.delete",
             "responses.cancel",
             "files.create",

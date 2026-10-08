@@ -80,6 +80,15 @@ class ResourceTypeCatalogApiTest : ResourceApiSupport() {
             ),
             entry("files.create"),
         )
+        // The service keeps a response it makes unless told not to: making one changes what it
+        // keeps.
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"id":"responses.create","group":"responses","method":"POST","path":"/responses",
+                "request":"json","response":"json","streams":true,"defaultEnabled":false,"stateful":true}"""
+            ),
+            entry("responses.create"),
+        )
         assertEquals(
             listOf(
                 "chat.completions",

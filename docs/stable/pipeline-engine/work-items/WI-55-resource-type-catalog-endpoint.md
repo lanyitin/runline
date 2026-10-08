@@ -56,7 +56,7 @@ Console 的資源表單目前內含端點目錄、請求參數清單與資料庫
 
 - **回應結構**：`{"types": [{"type": ..., <型別的成員>}]}`；`openai-compatible` 為 `endpoints[]`（`id`、`group`、`method`、`path`、`request`：`none`／`json`／`multipart`、`response`：`json`／`binary`、`streams`、`defaultEnabled`、`stateful`）與 `requestParameters[]`（`name`、`kind`：`number`／`text`／`textOrList`／`object`、`ceiling`）；`jdbc-pool` 為 `databases[]`（`kind`、`properties[]`：`name`、`rule` 與其成員 `maxLength`／`values`／`pattern`）；`counter`、`file` 只有 `type`。細節見 08-api。
 - **群組識別**：沿用 ADR-019 目錄表的群組，以英文識別名稱表示（`chat`、`completions`、`embeddings`、`models`、`responses`、`moderations`、`rerank`（含 `rerank` 與 `reranking`）、`images`、`audio`、`files`、`batches`）。Console 原樣顯示群組名稱，不另設翻譯，以免成為群組清單的複本。
-- **「有狀態」的範圍**：標為 `stateful` 的是會建立、取消或刪除服務端保存之物的條目：`responses.delete`、`responses.cancel`、`files.create`、`files.delete`、`batches.create`、`batches.cancel`。`responses.create` 未標示（它主要是生成；OpenAI 預設會保存回應，這點可再決定）。這些條目原本就都不預設啟用，以測試保證「有狀態者不預設啟用」。
+- **「有狀態」的範圍**：標為 `stateful` 的是會建立、取消或刪除服務端保存之物的條目：`responses.create`、`responses.delete`、`responses.cancel`、`files.create`、`files.delete`、`batches.create`、`batches.cancel`。`responses.create` 起初未標示（它主要是生成），因 OpenAI 相容服務預設會保存建立的回應，由 [WI-58](WI-58-responses-create-stateful.md) 改標為有狀態。這些條目原本就都不預設啟用，以測試保證「有狀態者不預設啟用」。
 - **`streams`**：事件串流的條目（`chat.completions`、`completions`、`responses.create`）與以位元組塊拉取的 `audio.speech` 都為 `true`；回應種類 `binary` 可分辨後者。
 - **只列可啟用的條目**：目錄中標為未交付（`delivered = false`）的條目不列出，因為它們不能放進 `endpoints`；目前版本全部已交付，所以列出全部 28 個。
 - **不公開的內容**：依 ADR-021 待確認問題的決策，不含任何設定預設值（例如資料庫設定檔的預設埠、逾時、大小上限），也不含健康查詢、清理語句等設定檔內部細節。

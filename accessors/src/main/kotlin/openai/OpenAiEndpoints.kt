@@ -223,6 +223,7 @@ object OpenAiEndpoints {
               true,
               model = true,
               sampling = true,
+              stateful = true,
           ),
           plain("responses.retrieve", "responses", "GET", "/responses/{id}", setOf("include")),
           plain("responses.delete", "responses", "DELETE", "/responses/{id}", stateful = true),

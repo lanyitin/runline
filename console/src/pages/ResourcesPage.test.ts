@@ -1480,6 +1480,19 @@ describe('the choices of the forms are what the Engine tells (WI-55)', () => {
     expect(button(dialog(view), 'Save').disabled).toBe(true);
   });
 
+  test('making a response is told as changing what the service keeps, since the service keeps it (WI-58)', async () => {
+    const { view } = await page({ languages: ['zh-TW'] });
+    await loaded(view);
+    button(view, '定義資源').click();
+    await tick();
+    choose(dialog(view).querySelector('#resource-type')!, 'openai-compatible');
+    await tick();
+
+    expect(entry(view, 'responses.create').querySelector('.stateful')!.textContent).toContain('會變更服務端保存的資料');
+    expect(entry(view, 'responses.create').querySelector('.default')).toBeNull();
+    expect(checked(view)).not.toContain('responses.create');
+  });
+
   test('in zh-TW', async () => {
     const { view } = await page({ languages: ['zh-TW'], catalog: { status: 200, body: another } });
     await loaded(view);

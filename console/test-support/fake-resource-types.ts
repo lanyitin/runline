@@ -62,7 +62,7 @@ export const ENDPOINTS: EndpointEntry[] = [
   entry('embeddings', 'embeddings', 'POST', '/embeddings', 'json', { defaultEnabled: true }),
   entry('models.list', 'models', 'GET', '/models', 'none', { defaultEnabled: true }),
   entry('models.retrieve', 'models', 'GET', '/models/{model}', 'none', { defaultEnabled: true }),
-  entry('responses.create', 'responses', 'POST', '/responses', 'json', { streams: true }),
+  entry('responses.create', 'responses', 'POST', '/responses', 'json', { streams: true, stateful: true }),
   entry('responses.retrieve', 'responses', 'GET', '/responses/{id}', 'none'),
   entry('responses.delete', 'responses', 'DELETE', '/responses/{id}', 'none', { stateful: true }),
   entry('responses.cancel', 'responses', 'POST', '/responses/{id}/cancel', 'none', { stateful: true }),

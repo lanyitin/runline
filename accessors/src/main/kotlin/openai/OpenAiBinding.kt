@@ -2,6 +2,9 @@ package dev.lawlan.runline.accessors.openai
 
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceOperationFailure
+import dev.lawlan.runline.accessors.tls.ResourceTls
+import dev.lawlan.runline.accessors.tls.TlsContext
+import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
 import java.io.ByteArrayOutputStream
@@ -59,8 +62,24 @@ class OpenAiBinding(
     private val settings: OpenAiSettings,
     private val credential: OpenAiCredential = OpenAiCredential.None,
     private val observer: OpenAiObserver = OpenAiObserver.NONE,
+    /** The certificates of an `https` service; null: the JVM's default trust and no client one. */
+    private val tls: ResourceTls? = null,
 ) : ResourceBinding {
   override val type: String = ResourceTypes.OPENAI_COMPATIBLE
+
+  /**
+   * The TLS of an `https` service, the binding's own (WI-52): only the resource's trusted
+   * certificates when it names any (otherwise the JVM's default trust), its client certificate, and
+   * the host always checked. Nothing of it is shared with another binding or the JVM's defaults.
+   */
+  private val tlsContext: TlsContext? =
+      if (settings.baseUrl.scheme == "https") (tls ?: ResourceTls(emptyList(), null)).newContext()
+      else null
+
+  /** The category of a failure of TLS among the causes of [failure], when it is one. */
+  internal fun tlsFailureOf(failure: Throwable?): TlsFailure? = failure?.let {
+    tlsContext?.classify(it)
+  }
 
   /** One client per connect limit, which a client cannot vary by request; usually just one. */
   private val clients = ConcurrentHashMap<Long, HttpClient>()
@@ -71,6 +90,7 @@ class OpenAiBinding(
             .followRedirects(HttpClient.Redirect.NEVER)
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofMillis(connectMillis))
+            .apply { tlsContext?.let { sslContext(it.sslContext) } }
             .build()
       }
 
@@ -204,6 +224,7 @@ class OpenAiBinding(
             else -> ResourceFailure.FAILED
           }
       if (!report.handedOver) {
+        report.tlsFailure = tlsFailureOf(result)
         report.finish(endpoint, failure, (result as? ResourceOperationFailure)?.status)
       }
     }
@@ -218,6 +239,7 @@ class OpenAiBinding(
     var generationMillis: Long? = null
     var usage: OpenAiTokenUsage? = null
     var status: Int? = null
+    var tlsFailure: TlsFailure? = null
 
     /** For a stream: when its first byte came, and the longest wait for an event so far. */
     @Volatile var firstByteAt: Long? = null
@@ -243,6 +265,7 @@ class OpenAiBinding(
               generationMillis,
               usage,
               maxChunkGapMillis,
+              tlsFailure,
           )
       runCatching { observer.finished(resource, endpoint, outcome) }
       if (handedOver)
@@ -258,6 +281,7 @@ class OpenAiBinding(
       return run(plan, plan.endpoint.id, report)
     } catch (e: ResourceOperationFailure) {
       failure = e.failure
+      report.tlsFailure = tlsFailureOf(e)
       throw e
     } finally {
       report.finish(plan.endpoint.id, failure, null)

@@ -1,5 +1,6 @@
 package dev.lawlan.runline.accessors.openai
 
+import dev.lawlan.runline.accessors.tls.TlsAliases
 import java.net.URI
 import java.net.URISyntaxException
 import kotlinx.serialization.json.JsonArray
@@ -24,6 +25,9 @@ enum class OpenAiSettingsProblem(val wire: String) {
 
   /** Requests per run, or a size limit. */
   INVALID_LIMIT("invalid_limit"),
+
+  /** A keystore alias of a certificate that is not written like one (WI-52). */
+  INVALID_ALIAS("invalid_secret_alias"),
 }
 
 sealed interface SettingsResult {
@@ -75,6 +79,8 @@ internal constructor(
     val lockedParameters: Set<String>,
     /** Ceilings for numeric parameters, by name. */
     val maxValues: Map<String, Double>,
+    /** The certificates of the connections, for an `https` service (WI-52). */
+    val tls: TlsAliases = TlsAliases.NONE,
 ) {
   companion object {
     private val MEMBERS =
@@ -93,7 +99,7 @@ internal constructor(
             "allowedModels",
             "lockedParameters",
             "maxValues",
-        )
+        ) + TlsAliases.MEMBERS
     private val TIMEOUT_MEMBERS =
         setOf("connectMs", "firstByteMs", "idleMs", "totalMs", "quotaWaitMs")
 
@@ -197,6 +203,19 @@ internal constructor(
       if (!ownRulesHold(defaults, allowedModels, maxValues)) {
         return invalid(OpenAiSettingsProblem.INVALID_REQUEST_DEFAULTS)
       }
+      val tls =
+          when (val parsed = TlsAliases.parse(settings)) {
+            is TlsAliases.Parsed.Invalid ->
+                return invalid(
+                    if (parsed.shape) OpenAiSettingsProblem.INVALID_SETTINGS
+                    else OpenAiSettingsProblem.INVALID_ALIAS
+                )
+            is TlsAliases.Parsed.Valid -> parsed.aliases
+          }
+      // Certificates are for TLS: a plain http service has no handshake to use them in.
+      if (!tls.isEmpty && baseUrl.scheme != "https") {
+        return invalid(OpenAiSettingsProblem.INVALID_SETTINGS)
+      }
 
       val parsed =
           OpenAiSettings(
@@ -214,6 +233,7 @@ internal constructor(
               allowedModels,
               locked,
               maxValues,
+              tls,
           )
       return SettingsResult.Valid(parsed, parsed.normalized())
     }
@@ -402,6 +422,7 @@ internal constructor(
           allowedModels,
           lockedParameters,
           maxValues,
+          tls,
       )
 
   /** Every effective value, in a fixed order, so that equal settings are written equally. */
@@ -433,6 +454,7 @@ internal constructor(
     }
     if (maxValues.isNotEmpty())
         result["maxValues"] = JsonObject(maxValues.mapValues { JsonPrimitive(it.value) })
+    tls.writeTo(result)
     return JsonObject(result)
   }
 }

@@ -62,7 +62,7 @@ internal class OpenAiCompatibleBehavior(
       }
     }
     val failure = OpenAiProbe.check(settings, credential, checkTimeout.toMillis()) ?: return null
-    return when (failure) {
+    return when (failure.failure) {
       ResourceFailure.CONNECTION_FAILED -> CheckFailure.CONNECTION_FAILED
       ResourceFailure.CONNECT_TIMEOUT,
       ResourceFailure.FIRST_BYTE_TIMEOUT,

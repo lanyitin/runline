@@ -1,5 +1,6 @@
 package dev.lawlan.runline.accessors.openai
 
+import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 
 /** The tokens a service says a call used, when its answer says so; each part may be missing. */
@@ -26,6 +27,11 @@ data class OpenAiOutcome(
     val usage: OpenAiTokenUsage?,
     /** For a stream: the longest time spent waiting for the next event, the first one included. */
     val maxChunkGapMillis: Long? = null,
+    /**
+     * When the call failed in TLS: the category (WI-52); the pipeline only sees the connection
+     * fail.
+     */
+    val tlsFailure: TlsFailure? = null,
 )
 
 /** What the host (the Engine's metrics and traces) learns of the calls on a binding. */

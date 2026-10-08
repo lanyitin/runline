@@ -362,4 +362,74 @@ class OpenAiSettingsTest {
     assertEquals(JsonArray(listOf(JsonPrimitive("a"), JsonPrimitive("b"))), s.defaults["stop"])
     assertTrue(JsonObject(emptyMap()).isEmpty())
   }
+
+  @Test
+  fun `an https resource may name trusted certificates and a client certificate, stored in lower case`() {
+    val result =
+        assertIs<SettingsResult.Valid>(
+            parse(
+                """{"baseUrl":"https://llm.internal/v1","trustAliases":["Internal-CA","backup.ca"],"clientCertAlias":"Runline-Client"}"""
+            )
+        )
+
+    assertEquals(listOf("internal-ca", "backup.ca"), result.settings.tls.trustAliases)
+    assertEquals("runline-client", result.settings.tls.clientCertAlias)
+    assertEquals(
+        listOf("internal-ca", "backup.ca"),
+        result.normalized["trustAliases"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+    assertEquals("runline-client", result.normalized["clientCertAlias"]!!.jsonPrimitive.content)
+    assertEquals(
+        result.normalized,
+        assertIs<SettingsResult.Valid>(OpenAiSettings.parse(result.normalized)).normalized,
+    )
+  }
+
+  @Test
+  fun `without them nothing of TLS is written and the JVM's default trust is what is used`() {
+    val result = assertIs<SettingsResult.Valid>(parse("""{"baseUrl":"https://llm.internal/v1"}"""))
+
+    assertEquals(emptyList(), result.settings.tls.trustAliases)
+    assertNull(result.settings.tls.clientCertAlias)
+    assertTrue("trustAliases" !in result.normalized && "clientCertAlias" !in result.normalized)
+  }
+
+  @Test
+  fun `a plain http resource cannot name certificates`() {
+    assertEquals(
+        OpenAiSettingsProblem.INVALID_SETTINGS,
+        problem("""{"baseUrl":"http://llm.internal/v1","trustAliases":["internal-ca"]}"""),
+    )
+    assertEquals(
+        OpenAiSettingsProblem.INVALID_SETTINGS,
+        problem("""{"baseUrl":"http://llm.internal/v1","clientCertAlias":"client"}"""),
+    )
+  }
+
+  @Test
+  fun `a certificate alias is written like a resource name, and the members have their shape`() {
+    for (bad in listOf("", "-starts-with-dash", "has space", "x".repeat(101), "a/b")) {
+      assertEquals(
+          OpenAiSettingsProblem.INVALID_ALIAS,
+          problem("""{"baseUrl":"https://h","trustAliases":[${JsonPrimitive(bad)}]}"""),
+          bad,
+      )
+      assertEquals(
+          OpenAiSettingsProblem.INVALID_ALIAS,
+          problem("""{"baseUrl":"https://h","clientCertAlias":${JsonPrimitive(bad)}}"""),
+          bad,
+      )
+    }
+    for (shape in listOf("\"internal-ca\"", "[1]", "{}", "[\"a\",\"A\"]")) {
+      assertEquals(
+          OpenAiSettingsProblem.INVALID_SETTINGS,
+          problem("""{"baseUrl":"https://h","trustAliases":$shape}"""),
+          shape,
+      )
+    }
+    assertEquals(
+        OpenAiSettingsProblem.INVALID_SETTINGS,
+        problem("""{"baseUrl":"https://h","clientCertAlias":["client"]}"""),
+    )
+  }
 }

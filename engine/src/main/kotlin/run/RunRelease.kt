@@ -27,7 +27,8 @@ enum class ReleaseOutcome(val label: String) {
  * of its own, so that no release can hold up the scheduler, and says how it came out within [limit]
  * (ADR-007 "Run 終止時"). A release that fails, or that has not ended within the limit, is logged as
  * an error and counted, once; one that ends after the limit goes on to give back what it held then,
- * which wakes the runs that wait for it.
+ * which wakes the runs that wait for it. Once the Engine shuts down ([shuttingDown]) the limit no
+ * longer applies: a release is waited for as long as the shutdown allows (04 "優雅關閉").
  */
 class RunRelease(
     private val gate: ResourceGate,
@@ -37,6 +38,12 @@ class RunRelease(
   private val log = LoggerFactory.getLogger(RunRelease::class.java)
   private val releasers = Executors.newCachedThreadPool { task ->
     Thread.ofPlatform().name("run-release").daemon(true).unstarted(task)
+  }
+  @Volatile private var shutdown = false
+
+  /** The Engine shuts down: from now on the outcome of a release is only its end. */
+  fun shuttingDown() {
+    shutdown = true
   }
 
   /** Starts giving back what [runId] holds; [types] are the types of its typed resources. */
@@ -70,7 +77,7 @@ class RunRelease(
       }
     }
     CompletableFuture.delayedExecutor(limit.toMillis(), TimeUnit.MILLISECONDS).execute {
-      if (claimed.compareAndSet(false, true)) {
+      if (!shutdown && claimed.compareAndSet(false, true)) {
         log.error(
             "Run {} has not given its resources back within {}; it is recorded as ended and what " +
                 "it holds stays held until the release ends",

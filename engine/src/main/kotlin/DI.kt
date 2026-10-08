@@ -53,17 +53,27 @@ private val PROBE_DATABASE_CACHE = Duration.ofSeconds(2)
  */
 fun Application.configureDependencyInjection() {
   val applicationConfig = environment.config
-  // Read once; the closing of OpenTelemetry needs the grace time and is given no resolver.
+  // Read once; the closing of OpenTelemetry needs what is left of the grace time and is given no
+  // resolver.
   val engineConfig by lazy { EngineConfig.from(applicationConfig) }
+  val shutdown by lazy { ShutdownBudget(engineConfig.runs.shutdownGrace) }
+  install(DI) {
+    // Ktor closes every AutoCloseable dependency as the Engine stops, after its cleanup. Closing
+    // the OpenTelemetry SDK waits for its exporters for as long as they take, past what is left of
+    // the grace time; its cleanup below closes it within that instead (04 "優雅關閉").
+    onShutdown = { _, instance ->
+      if (instance is AutoCloseable && instance !is OpenTelemetrySdk) instance.close()
+    }
+  }
   dependencies {
     provide<EngineConfig> { engineConfig }
-    // Closed when the Engine stops, nearly last (it is declared first but one), so that what the
-    // rest records as it stops is sent with everything else not sent yet (07 "可觀測性"). Ktor then
-    // closes it once more, as it does every AutoCloseable dependency; that returns at once (the SDK
-    // notes the second call in one line).
+    provide<ShutdownBudget> { shutdown }
+    // Closed when the Engine stops, nearly last (it is declared among the first), so that what the
+    // rest records as it stops is sent with everything else not sent yet (07 "可觀測性"), in what is
+    // left of the grace time.
     provide<OpenTelemetry> {
       getOpenTelemetry(serviceName = resolve<EngineConfig>().telemetry.serviceName)
-    } cleanup { (it as OpenTelemetrySdk).shutdownWithin(engineConfig.runs.shutdownGrace) }
+    } cleanup { (it as OpenTelemetrySdk).shutdownWithin(shutdown.remaining()) }
     provide<BuildInfo> { BuildInfo.load() }
     // Secrets (WI-41): opened when first needed, which is at startup (see configureStartupChecks);
     // with no keystore configured the store finds nothing.
@@ -272,10 +282,10 @@ fun Application.configureDependencyInjection() {
           SchedulerConfig(
               runs.maxConcurrent,
               runs.timeout,
-              runs.shutdownGrace,
               Path.of(System.getProperty("java.io.tmpdir")),
               runs.releaseWait,
           ),
+          resolve<ShutdownBudget>(),
       )
     }
     provide<RunService> {

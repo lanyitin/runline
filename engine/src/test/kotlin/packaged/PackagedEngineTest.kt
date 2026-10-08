@@ -1,5 +1,7 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.fake.FreezableForward
+import dev.lawlan.runline.accessors.jdbc.RealPostgres
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.Keystores
 import dev.lawlan.runline.engine.support.ManagedProcess
@@ -578,13 +580,18 @@ class PackagedEngineTest {
     return HttpRequest.BodyPublishers.ofInputStream { stream }
   }
 
-  private fun uploadSlowly(bytes: ByteArray, totalMillis: Long, onFirstChunkSent: () -> Unit) =
+  private fun uploadSlowly(
+      bytes: ByteArray,
+      totalMillis: Long,
+      chunks: Int = 10,
+      onFirstChunkSent: () -> Unit,
+  ) =
       http.client.sendAsync(
           HttpRequest.newBuilder(URI("$base/api/v1/artifacts"))
               .header("Authorization", "Bearer $ALICE")
               .header("Content-Type", "application/octet-stream")
               .timeout(Duration.ofMillis(totalMillis) + TestTimeouts.httpRequest)
-              .POST(slowBody(bytes, chunks = 10, totalMillis = totalMillis, onFirstChunkSent))
+              .POST(slowBody(bytes, chunks, totalMillis, onFirstChunkSent))
               .build(),
           HttpResponse.BodyHandlers.ofString(),
       )
@@ -725,6 +732,154 @@ class PackagedEngineTest {
     engine.awaitExit(Duration.ofSeconds(15))
     val elapsed = Duration.ofNanos(System.nanoTime() - signalled)
     assertTrue(elapsed < Duration.ofSeconds(15), "stopping took $elapsed with a log stream open")
+  }
+
+  // ---- the grace time as one budget for the whole shutdown (WI-64) ----
+
+  @Test
+  fun `a request that never ends, a run whose release hangs and a collector that never answers stop the Engine within the grace time and the wrap-up time`() {
+    val grace = Duration.ofSeconds(5)
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    // The database of a `jdbc-pool` resource, behind a network that can stop answering (WI-62).
+    val target = RealPostgres.newDatabase()
+    val role = "shut_" + java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+    val password = "pw-" + java.util.UUID.randomUUID().toString().replace("-", "")
+    target.createRole(role, password, "GRANT ALL ON SCHEMA public TO $role")
+    val forward = FreezableForward(RealPostgres.host, RealPostgres.port)
+    // A collector that takes every export and never answers (WI-63).
+    val collector = StuckServer("")
+    val keystores = Keystores(Files.createTempDirectory(work, "keystore"))
+    val keystore = keystores.pkcs12("engine.p12", mapOf("db-pw" to password), "storepass-64")
+    val settings =
+        mapOf(
+            "RUNLINE_SHUTDOWN_GRACE_SECONDS" to "${grace.seconds}",
+            "RUNLINE_KEYSTORE_PATH" to keystore.toString(),
+            "RUNLINE_KEYSTORE_PASSWORD_FILE" to
+                keystores.passwordFile("storepass-64", "engine.pw").toString(),
+            "OTEL_TRACES_EXPORTER" to "otlp",
+            "OTEL_METRICS_EXPORTER" to "otlp",
+            "OTEL_LOGS_EXPORTER" to "otlp",
+            "OTEL_EXPORTER_OTLP_PROTOCOL" to "http/protobuf",
+            "OTEL_EXPORTER_OTLP_ENDPOINT" to collector.base,
+        )
+    try {
+      val engine = startEngine(database, runtime, settings)
+      val define =
+          send(
+              "POST",
+              "/api/v1/resources",
+              ROOT,
+              ("""{"name":"db","capacity":1,"type":"jdbc-pool","secretAlias":"db-pw",""" +
+                      """"settings":{"kind":"postgresql","host":"${forward.host}",""" +
+                      """"port":${forward.port},"database":"${target.name}",""" +
+                      """"username":"$role"}}""")
+                  .toByteArray(),
+              "application/json",
+          )
+      assertEquals(201, define.statusCode(), define.body())
+      val declaration =
+          "files = {@FileAccess(scope = FileScope.PIPELINE_SHARED, mode = FileMode.READ_WRITE)}, " +
+              "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+              "typedResources = {@TypedResource(name = \"db\", type = \"jdbc-pool\")}"
+      // A run that holds a connection in an open transaction and does not stop when asked to.
+      val deaf =
+          uploadAllowed(
+              "demo.Deaf",
+              "deaf",
+              declaration,
+              """
+              JdbcAccessor db = context.getAccessors().jdbcPool("db");
+              db.begin();
+              db.query("SELECT 1");
+              context.getFiles().writeText(FileScope.PIPELINE_SHARED, "in-transaction", "x");
+              while (true) {
+                try { Thread.sleep(10); } catch (InterruptedException e) { }
+              }
+              """
+                  .trimIndent(),
+          )
+      val runId = startRun(deaf, "deaf")
+      awaitState(runId, "RUNNING")
+      awaitCondition("the run to hold its transaction", diagnostics = { tail("engine.log") }) {
+        Files.exists(work.resolve("shared").resolve("deaf").resolve("in-transaction"))
+      }
+      // Giving the connection back cannot get an answer now.
+      forward.freeze()
+      // A request that does not end within the grace time.
+      val received = java.util.concurrent.CountDownLatch(1)
+      // Its body arrives a little at a time, so that it is under way when the Engine is told to
+      // stop.
+      uploadSlowly(jarBytes("never-done"), totalMillis = 120_000, chunks = 200) {
+        received.countDown()
+      }
+      received.awaitWithin("the upload to begin arriving at the Engine")
+      Thread.sleep(1_000) // the Engine shows no sign of having taken the request up
+
+      val signalled = System.nanoTime()
+      engine.terminate()
+      engine.awaitExit(grace + SHUTDOWN_WRAP_UP + Duration.ofSeconds(30))
+      val elapsed = Duration.ofNanos(System.nanoTime() - signalled)
+
+      // The worst case did happen: the request was still in flight when the grace time ran out.
+      assertTrue(output("engine.log").contains("still in flight"), tail("engine.log", 80))
+      assertTrue(
+          elapsed <= grace + SHUTDOWN_WRAP_UP,
+          "stopping took $elapsed, more than the grace time $grace and the wrap-up time " +
+              "$SHUTDOWN_WRAP_UP:\n${tail("engine.log", 80)}",
+      )
+      assertEquals(
+          "INTERRUPTED",
+          PostgresTestContainer.connect(database).use { c ->
+            c.prepareStatement("SELECT state FROM run WHERE id = ?::uuid").use { s ->
+              s.setString(1, runId)
+              s.executeQuery().use { rs ->
+                rs.next()
+                rs.getString(1)
+              }
+            }
+          },
+          tail("engine.log", 80),
+      )
+
+      // After a restart the run is interrupted, nothing holds `db` and another run can use it.
+      forward.thaw()
+      startEngine(
+          database,
+          runtime,
+          settings - "OTEL_TRACES_EXPORTER" - "OTEL_METRICS_EXPORTER" - "OTEL_LOGS_EXPORTER",
+      )
+      assertEquals("INTERRUPTED", awaitState(runId, "INTERRUPTED")["state"]!!.jsonPrimitive.content)
+      val view = json(get("/api/v1/resources/db", ROOT))
+      assertEquals(JsonArray(emptyList()), view["holders"], view.toString())
+      val user =
+          uploadAllowed(
+              "demo.User",
+              "user",
+              declaration,
+              """context.getAccessors().jdbcPool("db").query("SELECT 1");""",
+          )
+      val used = startRun(user, "user")
+      val outcome = awaitState(used, "SUCCEEDED", "FAILED")
+      assertEquals("SUCCEEDED", outcome["state"]!!.jsonPrimitive.content, outcome.toString())
+      // And the database keeps no transaction of the Engine that stopped.
+      awaitCondition(
+          "the transaction of the Engine that stopped to be gone",
+          diagnostics = { tail("engine.log") },
+      ) {
+        target
+            .scalar(
+                "SELECT count(*) FROM pg_stat_activity " +
+                    "WHERE usename = '$role' AND state = 'idle in transaction'"
+            )
+            ?.toInt() == 0
+      }
+    } finally {
+      forward.close()
+      collector.close()
+      target.close()
+    }
   }
 
   // ---- liveness and readiness probes (WI-29) ----
@@ -1099,5 +1254,8 @@ class PackagedEngineTest {
   private companion object {
     const val ALICE = "tok-alice-0123456789"
     const val ROOT = "tok-root-0123456789"
+
+    /** What a shutdown may take beyond the grace time (04 "優雅關閉"). */
+    val SHUTDOWN_WRAP_UP: Duration = Duration.ofSeconds(10)
   }
 }

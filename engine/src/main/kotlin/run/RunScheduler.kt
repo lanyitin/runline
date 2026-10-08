@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.engine.ShutdownBudget
 import dev.lawlan.runline.engine.artifact.DefinitionStore
 import dev.lawlan.runline.runner.RunHandle
 import dev.lawlan.runline.runner.RunRequest
@@ -36,8 +37,6 @@ data class SchedulerConfig(
     val maxConcurrentRuns: Int,
     /** Cooperative limit on a pipeline body; none when null. */
     val runTimeout: Duration?,
-    /** How long a shutdown waits for runs it asked to stop. */
-    val shutdownGrace: Duration,
     /** Where a run's jar is written for as long as it runs. */
     val jarDirectory: Path,
     /**
@@ -84,6 +83,8 @@ class RunScheduler(
     private val telemetry: RunTelemetry,
     private val clock: Clock,
     private val config: SchedulerConfig,
+    /** What a shutdown may still wait for runs it asked to stop and for what they give back. */
+    private val shutdown: ShutdownBudget,
 ) : AutoCloseable {
   private val log = LoggerFactory.getLogger(RunScheduler::class.java)
   private val executor = Executors.newSingleThreadExecutor { task ->
@@ -170,8 +171,9 @@ class RunScheduler(
 
   /**
    * Stops accepting work: runs that have not started are interrupted, running ones are asked to
-   * stop and given the configured grace to end. Whatever has not ended by then is recorded as
-   * interrupted; it is cut short by the process ending.
+   * stop and given what is left of the shutdown's grace time to end and give back what they hold.
+   * Whatever has not ended by then is recorded as interrupted; it is cut short by the process
+   * ending. Recording that is part of the wrap-up, which is not drawn from the grace time.
    */
   override fun close() {
     val drained = CompletableFuture<Unit>()
@@ -181,13 +183,16 @@ class RunScheduler(
       return // closed before
     }
     try {
-      drained.get(config.shutdownGrace.toMillis(), TimeUnit.MILLISECONDS)
+      drained.get(shutdown.remaining().toMillis(), TimeUnit.MILLISECONDS)
     } catch (e: java.util.concurrent.TimeoutException) {
-      log.warn("Some runs did not stop within {}", config.shutdownGrace)
+      log.warn("Some runs did not stop within the grace time of the shutdown")
     }
     executor.execute { guarded { abandonRemaining() } }
     executor.shutdown()
-    executor.awaitTermination(config.shutdownGrace.toMillis(), TimeUnit.MILLISECONDS)
+    executor.awaitTermination(
+        (shutdown.remaining() + ShutdownBudget.WRAP_UP).toMillis(),
+        TimeUnit.MILLISECONDS,
+    )
     releases.close()
   }
 
@@ -400,6 +405,7 @@ class RunScheduler(
 
   private fun beginShutdown(drained: CompletableFuture<Unit>) {
     closing = true
+    releases.shuttingDown()
     this.drained = drained
     for (queued in queue.toList()) {
       releaseUnstarted(queued.plan)
@@ -412,8 +418,8 @@ class RunScheduler(
 
   /**
    * The grace is over. Runs that are still giving back what they held are recorded as they ended;
-   * runs that have not stopped are given the release wait to give back what they hold, all at once,
-   * and are recorded as interrupted.
+   * runs that have not stopped are given what is left of the grace time, not the release wait, to
+   * give back what they hold, all at once, and are recorded as interrupted.
    */
   private fun abandonRemaining() {
     for ((id, run) in ending) {
@@ -428,7 +434,7 @@ class RunScheduler(
     active.clear()
     runCatching {
       CompletableFuture.allOf(*releasing.map { it.second }.toTypedArray())
-          .get(config.releaseWait.toMillis(), TimeUnit.MILLISECONDS)
+          .get(shutdown.remaining().toMillis(), TimeUnit.MILLISECONDS)
     }
     for ((id, _) in releasing) runCatching { progress.finish(id, RunState.INTERRUPTED) }
   }

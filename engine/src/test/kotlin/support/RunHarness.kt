@@ -3,6 +3,7 @@ package dev.lawlan.runline.engine.support
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.core.Pipeline
+import dev.lawlan.runline.engine.ShutdownBudget
 import dev.lawlan.runline.engine.artifact.*
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
@@ -140,7 +141,8 @@ class RunHarness(
           gateAround(gate ?: accessorGate ?: NoResources),
           telemetry,
           Clock.systemUTC(),
-          SchedulerConfig(maxConcurrent, runTimeout, shutdownGrace, jars, releaseWait),
+          SchedulerConfig(maxConcurrent, runTimeout, jars, releaseWait),
+          ShutdownBudget(shutdownGrace),
       )
   val service =
       RunService(

@@ -60,12 +60,17 @@ class RunReleaseLimitTest {
     database.close()
   }
 
-  private fun harness(maxConcurrent: Int, releaseWait: Duration) =
+  private fun harness(
+      maxConcurrent: Int,
+      releaseWait: Duration,
+      shutdownGrace: Duration = Duration.ofSeconds(5),
+  ) =
       RunHarness(
               maxConcurrent = maxConcurrent,
               resourceWaitTimeout = Duration.ofHours(1),
               secrets = secrets,
               releaseWait = releaseWait,
+              shutdownGrace = shutdownGrace,
               openTelemetry =
                   OpenTelemetrySdk.builder()
                       .setMeterProvider(
@@ -221,6 +226,76 @@ class RunReleaseLimitTest {
     assertEquals(RunState.SUCCEEDED, h.awaitEnd(waiter).state)
     Files.writeString(h.shared("holder", "end"), "x")
     assertEquals(RunState.SUCCEEDED, h.awaitEnd(holder).state)
+  }
+
+  /** Starts a run that holds `db` in an open transaction; [then] is what it does after that. */
+  private fun RunHarness.inTransaction(name: String, then: String): UUID {
+    val hash =
+        upload(
+            name,
+            """
+            JdbcAccessor db = context.getAccessors().jdbcPool("db");
+            db.begin();
+            db.query("SELECT 1");
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "in-transaction", "x");
+            $then
+            """
+                .trimIndent(),
+            declaration = usingTyped("db" to "jdbc-pool"),
+        )
+    val run = start(hash, name)
+    awaitFile(shared(name, "in-transaction"))
+    return run
+  }
+
+  @Test
+  fun `while the Engine shuts down, a release is waited for within the grace time, not the release wait`() {
+    val h = harness(maxConcurrent = 1, releaseWait = Duration.ofSeconds(1), Duration.ofSeconds(20))
+    val holder = h.inTransaction("holder", RunHarness.WAIT_FOR_STOP)
+    forward.freeze()
+
+    val began = System.nanoTime()
+    h.scheduler.close()
+    val millis = (System.nanoTime() - began) / 1_000_000
+
+    // The release ended, failed, within the limit of the type, before the shutdown went on.
+    assertFalse(h.holds(holder), "the shutdown went on after $millis ms, with db still held")
+    assertEquals(
+        mapOf<Pair<String?, String?>, Long>(("failed" to "jdbc-pool") to 1L),
+        releaseFailures(),
+    )
+    assertEquals(RunState.INTERRUPTED, h.awaitEnd(holder).state)
+    assertTrue(millis < 20_000, "the shutdown took $millis ms, past its grace time")
+  }
+
+  @Test
+  fun `a run that fails and whose release fails too ends with its own failure`() {
+    val h = harness(maxConcurrent = 1, releaseWait = Duration.ofSeconds(30))
+    val run =
+        h.inTransaction(
+            "failing",
+            """
+            try {
+              while (!context.getFiles().exists(FileScope.PIPELINE_SHARED, "end")) Thread.sleep(10);
+            } catch (InterruptedException e) { throw new RuntimeException(e); }
+            throw new IllegalStateException("the run's own failure");
+            """
+                .trimIndent(),
+        )
+    forward.freeze()
+    Files.writeString(h.shared("failing", "end"), "x")
+
+    val record = h.awaitEnd(run)
+
+    assertEquals(RunState.FAILED, record.state)
+    assertEquals(IllegalStateException::class.java.name, record.failure?.type)
+    assertEquals("the run's own failure", record.failure?.message)
+    // The failure of the release is said too, apart from the run's.
+    assertEquals(
+        mapOf<Pair<String?, String?>, Long>(("failed" to "jdbc-pool") to 1L),
+        releaseFailures(),
+    )
+    assertTrue(errorsAbout(run).isNotEmpty(), "no error was logged about $run")
   }
 
   private companion object {

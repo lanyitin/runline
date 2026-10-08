@@ -77,6 +77,10 @@ class RunHarness(
         dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
             listOf(dev.lawlan.runline.accessors.jdbc.PostgresProfile)
         ),
+    /**
+     * What the scheduler is given in place of the gate, made from it; the gate itself by default.
+     */
+    gateAround: (ResourceGate) -> ResourceGate = { it },
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -131,7 +135,7 @@ class RunHarness(
           definitions,
           progress,
           runStore,
-          gate ?: accessorGate ?: NoResources,
+          gateAround(gate ?: accessorGate ?: NoResources),
           telemetry,
           Clock.systemUTC(),
           SchedulerConfig(maxConcurrent, runTimeout, shutdownGrace, jars),

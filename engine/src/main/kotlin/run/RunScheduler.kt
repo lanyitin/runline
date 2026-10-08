@@ -289,12 +289,13 @@ class RunScheduler(
           else -> End(result!!.stateWhenClosing(), result.failureInfo(), result.residualThreads)
         }
     runCatching { run.recorder.close() }
+    // Given back before the end is recorded: whoever sees the run ended sees it holding nothing.
+    runCatching { gate.release(id) }
     try {
       progress.finish(id, ended.state, ended.failure, ended.residualThreads)
     } catch (t: Throwable) {
       log.error("Run {} ended {} but that could not be recorded", id, ended.state, t)
     }
-    runCatching { gate.release(id) }
     runCatching { Files.deleteIfExists(run.jar) }
     if (closing) {
       if (active.isEmpty()) drained?.complete(Unit)

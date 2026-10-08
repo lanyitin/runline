@@ -40,3 +40,43 @@
 - 不新增關閉主機名稱或憑證驗證的任何途徑；不修改 JVM 全域預設的安全上下文或信任庫。
 - 私鑰不落地（不寫入暫存檔或資料庫）。
 - 測試使用真實 TLS 服務端（含自簽或內部 CA 簽發、要求 mTLS、過期憑證、主機名稱不符各情境）、真實 PostgreSQL（Testcontainers，啟用 TLS）與真實 PKCS12 金鑰庫，不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。
+
+## 實作結果（2026-10-08）
+
+程式：TLS 的共用部分在 `accessors/src/main/kotlin/tls/`（`ResourceTls`：資源專屬的安全上下文；`TlsContext`：失敗類別；`TlsAliases`：設定中的別名；`TlsFailure`）；`openai-compatible` 在 `OpenAiSettings`、`OpenAiBinding`、`OpenAiProbe`；`jdbc-pool` 在 `JdbcSettings`、`PostgresProfile`（`tlsProperties`、`refusesClientCertificate`）、`PoolTls`（連線池世代的安全上下文與 `PostgresTlsSocketFactory`）、`JdbcPools`、`JdbcProbe`；Engine 在 `engine/src/main/kotlin/secret/`（憑證項目、`invalid_key`、機密清單的憑證、到期 metric）與 `resource/`（`ResourceAliases`、`ResourceChecker` 的憑證報告與警告、`TlsTelemetry`、兩個型別的 behavior）；組態 `resources.certificateWarningDays`（`RUNLINE_CERTIFICATE_WARNING_DAYS`）；開發入口 `devkit/.../LocalResources.kt`；Console `admin/CertificateAliasesField.svelte`、`SecretsPanel.svelte`、`resource-forms.ts`、`admin-model.ts`。測試的憑證一律由 `keytool` 產生（`accessors/src/testFixtures/kotlin/tls/TestPki.kt`），真實 TLS 服務端為 TLS 版的 Fake（`FakeOpenAiServer(tls = ..., requireClientCertificate = ...)`，同一份 `OpenAiServerContract` 在 TLS 加 mTLS 下 18 個通過）與啟用 TLS 的真實 PostgreSQL（`accessors/src/testFixtures/kotlin/jdbc/TlsPostgres.kt`，Testcontainers，`clientcert=verify-ca` 的帳號）。
+
+**待實測項目的結果**（ADR-019 決策 12 的「實測結果」為摘要）：
+
+- **HTTP 用戶端**：JDK HTTP 用戶端預設驗證主機名稱；`-Djdk.internal.httpclient.disableHostnameVerification=true` 實測會關閉它。Engine 不設定任何這類屬性。資源的信任管理器（`VerifyingTrustManager`）在連線的 SSL 參數沒有主機名稱驗證演算法時拒絕連線（類別 `hostname_mismatch`），所以這個屬性或任何未要求驗證的連線都只會失敗；以「沒有設定驗證演算法的 socket」測試，拿掉這道防護時握手成功（證明防護必要），有防護時被拒絕。
+- **`jdbc-pool` 的 socket 工廠**：驅動 42.7.13 以 `sslfactory` 類別名稱、驅動的 class loader 與 `(Properties)` 建構子，每條連線建立一次工廠；工廠以屬性 `runlineTlsContext`（每個連線池世代或每次檢查一個隨機識別）取得安全上下文，識別在世代或檢查結束時撤銷。`sslmode=verify-full`：驅動在握手後以自己的驗證器再驗主機名稱，工廠也讓 JDK 在握手中驗證；以 IP 連到只有 `dns:localhost` 的伺服器為 `08006`（原因 `CertificateException`）。不使用驅動的任何憑證或金鑰檔案屬性（`sslcert`、`sslkey`、`sslrootcert`、`sslpassword`），私鑰只在記憶體中的 `KeyStore`（每個上下文自己的隨機密碼）；憑證改變產生新的連線池世代（指紋為連線池鍵的一部分），以兩個世代並存與舊世代持有者結束後關閉驗證。可行，沒有需要停下來的情況。
+- **私鑰保護密碼與金鑰庫密碼**：`keytool` 對 PKCS12 忽略不同的 `-keypass`（警告），私鑰只能以金鑰庫密碼取得；JDK API 可以寫出不同密碼的私鑰項目，Engine 載入時不使用它，狀態 `invalid_key`、記錄警告（別名與類別），檢查為 `alias_invalid`。
+- **金鑰庫密碼含非 ASCII（`pässwörd-密碼`）**：密碼檔（`keytool -storepass:file`、`RUNLINE_KEYSTORE_PASSWORD_FILE`）以 UTF-8 讀取，在 POSIX locale 下也可靠往返，Java API 寫出的檔案 `keytool` 也能開；`keytool` 的互動輸入在 POSIX 與 C.UTF-8 下都判為密碼錯誤；`-storepass:env` 與 `RUNLINE_KEYSTORE_PASSWORD` 只在 UTF-8 locale 下正確，POSIX locale 下環境變數被以 ASCII 解碼（11 個字元成為 17 個），開啟失敗為 `wrong_password`。給 WI-42 手冊：建議可列印 ASCII；非 ASCII 只用密碼檔。
+- **失敗類別的辨識方式**（不依賴例外訊息文字）：信任管理器先以 JDK 的 PKIX 只驗憑證鏈（失敗為 `trust_failed`，原因含 `CertPathValidatorException` 的 `EXPIRED` 或 `CertificateExpiredException` 時為 `certificate_expired`），通過後再以 JDK 對整條連線的檢查（含主機名稱）驗證，此時失敗為 `hostname_mismatch`（原因含路徑驗證例外時仍為 `trust_failed`，即演算法限制）；判定結果放在拋出的例外中，由原因鏈取回。`client_cert_rejected`：金鑰管理器記錄服務是否要求過用戶端憑證；HTTP 為「要求過」加上 `SSLException`（TLS 1.3 下服務送出 `certificate_required` 警示），PostgreSQL 在 TLS 1.3 下於握手後才以 `28000`（`connection requires a valid client certificate`）拒絕，所以為「要求過」加上 SQLState `28000`。其他 `SSLException` 為 `handshake_failed`。限度：(1) 「要求過」是安全上下文層級的記號，檢查每次用新的上下文所以準確，run 的連線則以該 run（openai）或該連線池世代（jdbc）的上下文為準，同一上下文先前的成功握手也會留下記號；(2) PostgreSQL 對 `pg_hba.conf` 完全沒有符合的規則也回 `28000`，伺服器設定了 `ssl_ca_file`（因而每次都要求憑證）時會被歸為 `client_cert_rejected`。
+- **開發入口**：未向使用者確認範圍，依本文件只做 Engine 側；開發入口遇到設定了 `trustAliases` 或 `clientCertAlias` 的資源明確拒絕並說明（WI-52 之前這兩個成員本來就是 `invalid_settings`），不改用 JVM 預設信任或驅動預設。
+
+**實作時的決定（超出條文之處，供審閱）**：
+
+- **欄位位置**：`trustAliases`、`clientCertAlias` 放在 `settings` 內（ADR 的「設定各增兩個選填欄位」），因此沒有資料庫遷移，修改會清除 `lastCheck`，寫入時為小寫且 `trustAliases` 不得重複、最多 16 個；別名格式不合為 `invalid_secret_alias`，形狀不合為 `invalid_settings`。
+- **類型不符**：建立與修改時檢查三種別名（含既有的 `secretAlias`），不符為 422 `alias_wrong_type`。這改變了 WI-46、WI-48 的一個行為：`secretAlias` 指向憑證項目原本被接受並顯示 `missing`，現在被拒絕；重載後才變成類型不符的別名，狀態為 `wrong_type`，檢查為 `alias_wrong_type`，呼叫為 `SECRET_UNAVAILABLE`。
+- **資源回應**新增 `trustStatus`（`[{alias, status}]`）與 `clientCertStatus`；機密清單的憑證項目新增 `certificates`（主旨、到期日、剩餘天數、`keytool -list` 格式的 SHA-256 指紋、`expiry`：`valid`／`expiring`／`expired`），機密項目沒有這個成員；`usedBy` 與重載的 `changed` 含以憑證引用的資源。
+- **檢查**：回應新增 `certificates`（每個所用憑證，含私鑰項目的整條憑證鏈）與 `warnings`（`certificate_expiring`，每個別名一次），不保存於 `lastCheck`。所用憑證已過期時檢查失敗為 `certificate_expired` 且不連線；服務憑證過期由握手判定為同一類別。剩餘天數為向下取整的整天數；警告條件為「未過期且剩餘天數小於門檻」。檢查的 log 記錄所用憑證的別名（不記錄憑證內容）。
+- **`openai-compatible` 的 `https` 一律使用資源自己的安全上下文**：沒有 `trustAliases` 時以 `TrustManagerFactory` 的預設初始化取得 JVM 預設信任（與 JVM 預設上下文相同的信任庫與系統屬性），這樣才能分類失敗並套用上面的主機名稱防護。與 WI-52 之前的差異只在邊緣：JVM 預設上下文由 `javax.net.ssl.keyStore` 提供的用戶端憑證不再被使用（要 mTLS 須用 `clientCertAlias`）。
+- **`jdbc-pool` 沒有任何憑證別名時維持現行**（驅動預設 `sslmode=prefer`，不驗證，被拒絕時改用不加密連線，實測確認會發生）；設定了任一別名時固定 `verify-full`，只有 `clientCertAlias` 時信任 JVM 預設。這是對「未設定時行為與現行完全相同」與「未設定 `trustAliases`：使用 JVM 預設信任」兩句的解讀，已列入 ADR-019 待確認問題，需架構決定。
+- **別名不可用時不降級**：任一憑證別名缺失、類型不符或私鑰不可用時，run 仍取得資源，但呼叫以 `SECRET_UNAVAILABLE` 失敗且不連線，不會改用 JVM 預設信任。
+- **pipeline 看到的類別不變**：TLS 失敗對 pipeline 是 `CONNECTION_FAILED`（core 契約沒有新增類別）；類別記在 metric `runline.resources.tls.failures`（標籤 `resource`、`type`、`kind`）與 Engine 的 log（資源名稱與類別）。剩餘天數 metric 為 `runline.secrets.certificate.days_left`（標籤只有 `alias`，取該項目最早到期的憑證）。
+- **Console**：型別表單的「憑證（TLS）」區塊：受信任憑證以勾選框多選、用戶端憑證以選單單選，選項依項目類型從金鑰庫篩選並顯示主旨與剩餘天數，資源現有但金鑰庫已沒有的別名仍列出並標示；`alias_wrong_type` 顯示在此區塊。機密區塊在表格下方列出每個憑證項目的憑證（主旨、有效期限、剩餘天數、指紋、即將到期的警告）。卡片以文字顯示新的檢查失敗類別。沒有修改 Console 的錯誤碼（只有 `problem` 值），`consoleApiDocCheck` 不需要新的翻譯。
+
+**驗證**：
+
+- Red 的證據：每個循環先執行新測試並看到因行為缺失而失敗（例：信任 → `PKIX path building failed`；主機名稱 → 握手成功而非失敗；`jdbc` 的 mTLS 帳號 → `28000` 而非成功；Engine 檢查測試以前一版 production code 執行 6 個全部失敗於 `connection_failed`／`rejected`；遙測測試 2 個失敗於找不到 metric；Console 元件測試 5 個、契約測試對舊 Fake 4 個失敗）。實作先於測試寫出的幾處（主機名稱防護、預設信任與 `trustAliases` 的取代、連線池世代鍵、輪替 run 測試），以「拿掉該段 production code 後測試失敗」驗證測試有效。
+- 新增的測試：`accessors`：`ResourceTlsTest`（9）、`ResourceTlsDefaultTrustTest`（2，獨立 JVM，以命令列的 `javax.net.ssl.trustStore` 使測試 CA 成為「JVM 預設信任」：未設定時連得上、設定了內部 CA 時同一服務為 `trust_failed`）、`OpenAiBindingTlsTest`（3）、`JdbcTlsTest`（7，真實 PostgreSQL TLS）、`FakeOpenAiServerTlsContractTest`（18），`OpenAiSettingsTest`、`JdbcSettingsTest` 各新增；`engine`：`KeystoreCertificatesTest`（4）、`TlsResourceApiTest`（3）、`TlsResourceCheckTest`（6，TLS Fake 與 TLS PostgreSQL）、`TlsResourceRunTest`（1，真實 run、兩次重載：用戶端憑證輪替與信任替換，持有舊世代的 run 不受影響）、`TlsSecretApiTest`（3，含私鑰標記與機密標記不出現在任何回應）、`TlsTelemetryTest`（2），`EngineConfigTest` 新增；`devkit`：`DevSessionResourcesTest` 新增兩種情形；Console：`resource-forms.test.ts` 8 個、`ResourcesPage.test.ts` 6 個、`admin-contract.ts` 1 個新增與 3 個擴充（對 Fake 與真實 Engine）。
+- 對真實打包的 Engine（`engine.jar`、PostgreSQL 17、以 `keytool` 製作的 PKCS12 金鑰庫：機密、受信任憑證、兩個私鑰項目，其中一個 10 天後到期）與 TLS 加 mTLS 的 Fake 行程：`npm run test:contract` 104 個通過；新增的手動腳本 `e2e/certificates.e2e.ts` 1 個通過（憑證清單與 API 一致、即將到期警告、表單選信任與用戶端憑證後真實握手檢查通過、沒有用戶端憑證時 `client_cert_rejected` 的文字與 API 的 `lastCheck` 相同、修改後通過、zh-TW；私鑰標記與金鑰庫密碼不在任何回應、DOM、storage 與 cookie）；既有的 `e2e/resources.e2e.ts` 4 個與 `e2e/typed-forms.e2e.ts` 4 個也在同一環境通過。
+
+**未驗證或未做**：
+
+- 開發入口的 TLS 支援（待使用者確認範圍）。
+- 公開 CA 簽發的真實網際網路服務：以「JVM 預設信任所含的測試 CA」代替（見上），沒有連到真實公開服務。
+- 真實 lemonade 或其他 OpenAI 相容服務的 TLS（手動腳本 `RealOpenAiServerContractTest` 可對 `https` 位址執行，本次沒有可用的服務）。
+- `handshake_failed` 只以單元層級的分類邏輯涵蓋，沒有建立「協定不相容」的真實服務端情境。
+- 憑證過期的 metric 以 gauge 讀取驗證；沒有驗證匯出到 OTLP 後的實際名稱與單位（`d`）。
+- 開發入口的 `jdbc-pool` 拒絕路徑與 `openai-compatible` 共用同一段程式，只以 `openai-compatible` 測試。

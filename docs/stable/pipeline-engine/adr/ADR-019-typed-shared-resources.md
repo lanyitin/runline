@@ -260,6 +260,16 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 - **輪替與重載：** 沿用整體重載與新世代語意：重載後內容（以指紋判斷）有變的憑證別名，其引用資源之後被取得的 run 使用新的信任與用戶端憑證，進行中的 run 不受影響；重載回應列出有變更的別名與引用者，不含任何憑證以外的內容。
 - **實作路徑與風險（待實測，細節與驗收在 WI-52）：** HTTP 用戶端：由受信任憑證與私鑰項目建立安全上下文交給 Engine 使用的 HTTP 用戶端，須實測主機名稱驗證預設為開啟、不被 JDK 的系統屬性關閉。`jdbc-pool`：PostgreSQL 驅動以「socket 工廠類別名稱」接收 TLS 設定，無法直接傳入安全上下文物件；方案一為 Engine 內建的工廠類別，依連線池身分取得該池的安全上下文（類別名稱由資料庫設定檔固定，不接受管理員提供，與「不接受 socket 工廠屬性」的規則相容）；方案二為把憑證與私鑰寫成暫存檔再交給驅動的檔案型屬性，因私鑰落地而否決。推薦方案一，驅動版本與工廠的相容性、主機名稱驗證是否生效、以及連線池重建的世代切換均待實測。
 
+#### 實測結果（WI-52，JDK 25.0.4.1、PostgreSQL 驅動 42.7.13、PostgreSQL 17，2026-10-08）
+
+決策沒有改變；以下是待實測項目的結論，細節與測試在 [WI-52](../work-items/WI-52-tls-trust-and-mtls.md)「實作結果」。
+
+- **私鑰的保護密碼**：`keytool` 對 PKCS12 指定不同的 `-keypass` 時只警告（`Different store and key passwords not supported for PKCS12 KeyStores. Ignoring user-specified -keypass value.`）並以金鑰庫密碼保護私鑰；以另一個密碼取私鑰得到 `UnrecoverableKeyException`，以金鑰庫密碼成功。JDK 的 API（`KeyStore.setEntry` 搭配另一個 `PasswordProtection`）**可以**寫出私鑰密碼不同的 PKCS12；Engine 對這種項目不使用並標示 `invalid_key`。
+- **金鑰庫密碼含非 ASCII**（以 `pässwörd-密碼` 實測）：`keytool -storepass:file` 與 Engine 的密碼檔（`RUNLINE_KEYSTORE_PASSWORD_FILE`）都以 UTF-8 讀檔（JDK 25 的預設字元集在 POSIX locale 下也是 UTF-8），可靠往返，Java API 以同一密碼寫出的檔案 `keytool` 也能開；`keytool` 的互動輸入（標準輸入）在 POSIX 與 C.UTF-8 locale 下都判為密碼錯誤；`-storepass:env` 與 Engine 的 `RUNLINE_KEYSTORE_PASSWORD` 只在 UTF-8 locale 下正確，POSIX locale 下環境變數被以 ASCII 解碼而成為另一個密碼（`wrong_password`）。結論：建議維持可列印 ASCII；需要非 ASCII 時只用密碼檔。
+- **HTTP 用戶端**：JDK HTTP 用戶端預設驗證主機名稱（以 IP 連線、憑證只有 `dns:localhost` 時握手失敗）；系統屬性 `jdk.internal.httpclient.disableHostnameVerification=true` 會關閉它（實測後連線成功）。Engine 不設定它，而且資源的信任管理器拒絕「沒有要求主機名稱驗證」的連線，所以即使有人設定也只會使連線失敗，不會跳過驗證。
+- **`jdbc-pool` 的 socket 工廠（方案一）可行**：驅動以 `sslfactory` 的類別名稱、用驅動自己的 class loader 與 `(Properties)` 建構子為每條連線建立工廠，工廠以連線屬性中的連線池識別取得該池世代的安全上下文；`sslmode=verify-full` 時驅動在握手後另以自己的主機名稱驗證器再驗證一次，工廠也讓 JDK 在握手中驗證（不符時 SQLState 08006，原因為 `CertificateException`）。不使用任何憑證或金鑰檔案屬性，私鑰只在記憶體；憑證改變（以指紋判斷）產生新的連線池世代，舊世代在持有者結束後與其安全上下文一起關閉。驅動不因多一個未知屬性而失敗。
+- **失敗類別的辨識**：信任、過期、主機名稱以 JDK 檢查的步驟與例外型別判定（過期為 `CertPathValidatorException` 的 `EXPIRED` 或 `CertificateExpiredException`），不依賴訊息文字；用戶端憑證被拒絕以「服務要求過用戶端憑證」加上握手失敗（HTTP：TLS 1.3 的 `certificate_required` 警示）或 SQLState `28000`（PostgreSQL 在握手後才拒絕）判定。限度見 WI-52。
+
 ## 取捨
 
 | 項目 | 得到 | 失去 |
@@ -326,9 +336,10 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 - 目標服務（lemonade）對各端點的實際支援（尤其重排序的路徑是 `/rerank` 還是 `/reranking`、音訊與圖像端點、檔案與批次），以及「連線中斷後是否停止生成」。影響：目錄條目的有效路徑與取消後的真實並行。由 WI-46 與 WI-53 的本機手動腳本實測，結果回報，不得宣稱已驗證。
 - 容量 1 時同一時間只有一個 run 持有資源，其他 run 在初始化階段排隊（run 級持有）。若實際使用發現吞吐不足，推薦另開 ADR 引入請求級限流，而非現在改變語意。
 - （已解決，2026-10-07）`keystore.type.compat` 預設下，要求 PKCS12 的讀取也能開啟 JKS 檔；Engine 因此自行檢查檔頭，結果見決策 6 的「實測結果」，由 [WI-41](../work-items/WI-41-keystore-secrets.md) 的測試鎖定。
-- PKCS12 私鑰項目的保護密碼是否確實只能與金鑰庫密碼相同、金鑰庫密碼含非 ASCII 字元時是否可靠往返。影響：決策 12 的私鑰密碼規則與維運手冊。由 WI-52 與 WI-42 實測。
-- PostgreSQL 驅動以內建 socket 工廠承載連線池專屬安全上下文的可行性與主機名稱驗證是否生效；HTTP 用戶端的主機名稱驗證預設。影響：決策 12 的實作路徑。由 WI-52 實測，不可行時停下來回報。
-- 開發入口對 TLS 信任與用戶端憑證的支援範圍（是否與 Engine 同契約）。影響：WI-52 的範圍。由 WI-52 實作前向使用者確認。
+- （已實測，2026-10-08）PKCS12 私鑰項目的保護密碼與金鑰庫密碼的關係、金鑰庫密碼含非 ASCII 字元時的往返：見決策 12 的「實測結果」；維運手冊的寫法由 WI-42 決定。
+- （已實測，2026-10-08）PostgreSQL 驅動以內建 socket 工廠承載連線池專屬安全上下文可行，主機名稱驗證生效；HTTP 用戶端的主機名稱驗證預設開啟：見決策 12 的「實測結果」。
+- 開發入口對 TLS 信任與用戶端憑證的支援範圍（是否與 Engine 同契約）。影響：WI-52 的範圍。尚未確認：WI-52 只做 Engine 側，開發入口對設定了憑證的資源明確拒絕（不改用 JVM 預設信任）。
+- `jdbc-pool` 沒有設定任何憑證別名時的 TLS：WI-52 依「未設定時行為與現行完全相同」維持驅動預設（`sslmode=prefer`：伺服器提供 TLS 時使用但不驗證，被拒絕時改用不加密連線），而決策 12 的「未設定 `trustAliases` 時使用 JVM 預設信任」只在設定了 `clientCertAlias` 時適用。是否要讓沒有別名的資源也固定以 `verify-full` 與 JVM 預設信任連線（不接受 TLS 的資料庫將無法使用）待架構決定。
 - （已決定，2026-10-07）載入時被拒絕的別名（內容含非可列印 ASCII）在機密清單與資源狀態中的狀態為 `invalid_secret`（新增的狀態名稱，與 `found`、`missing` 並列）；08-api 與 WI-41 已記載，Console 顯示由 WI-49 實作。
 
 ## 工作項

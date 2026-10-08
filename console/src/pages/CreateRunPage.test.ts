@@ -109,16 +109,19 @@ describe('the pipeline to run', () => {
 });
 
 describe('the same content uploaded by two people', () => {
+  // Each version has a time of its own: seeded one after the other, the two would have the same
+  // time or not, as the clock happens to tick between them (WI-57), and the page puts the newest
+  // first.
   const both = (b: TestApp['engine']['backend']) => {
-    b.seedArtifact('ada', [sync], { contentHash: HASH });
-    b.seedArtifact('bob', [sync], { contentHash: HASH });
+    b.seedArtifact('ada', [sync], { contentHash: HASH, uploadedAt: '2026-10-04T08:00:00Z' });
+    b.seedArtifact('bob', [sync], { contentHash: HASH, uploadedAt: '2026-10-05T09:00:00Z' });
   };
 
   test('is two choices, each saying whose, and a developer has only their own', async () => {
     const admin = await page({ identity: root, seed: both, query: '' });
     await ready(admin);
     const options = [...admin.querySelectorAll<HTMLOptionElement>('option')].map((o) => o.textContent!.trim());
-    expect(options).toEqual(['Choose a pipeline', 'order-sync · ab12cd3 · ada', 'order-sync · ab12cd3 · bob']);
+    expect(options).toEqual(['Choose a pipeline', 'order-sync · ab12cd3 · bob', 'order-sync · ab12cd3 · ada']);
   });
 
   test('the version the address names is the one that is run', async () => {

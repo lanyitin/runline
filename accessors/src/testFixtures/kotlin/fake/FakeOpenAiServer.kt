@@ -13,6 +13,9 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLServerSocket
+import javax.net.ssl.SSLSocket
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -80,15 +83,40 @@ class FakeOpenAiServer(
     val requiredKey: String? = null,
     /** The root path of the API, as in `http://host/v1`. */
     val rootPath: String = "/v1",
+    /**
+     * When set, the Fake speaks HTTPS with this server identity (WI-52): a real TLS handshake on
+     * the real socket, as a service behind TLS does.
+     */
+    tls: SSLContext? = null,
+    /** With [tls]: whether a client must present a certificate the context trusts (mTLS). */
+    requireClientCertificate: Boolean = false,
 ) : AutoCloseable {
-  private val socket = ServerSocket(0, 128, InetAddress.getByName("127.0.0.1"))
+  private val socket: ServerSocket =
+      if (tls == null) ServerSocket(0, 128, InetAddress.getByName("127.0.0.1"))
+      else
+          (tls.serverSocketFactory.createServerSocket(0, 128, InetAddress.getByName("127.0.0.1"))
+                  as SSLServerSocket)
+              .also { it.needClientAuth = requireClientCertificate }
   val port: Int = socket.localPort
 
+  private val scheme = if (tls == null) "http" else "https"
+
   /** The address of the API, with its root path: what a resource's base address is. */
-  val baseUrl: String = "http://127.0.0.1:$port$rootPath"
+  val baseUrl: String = "$scheme://127.0.0.1:$port$rootPath"
+
+  /**
+   * The address of the API by another name of this host (`localhost`), for a certificate's name.
+   */
+  fun baseUrl(host: String): String = "$scheme://$host:$port$rootPath"
 
   /** The address without the root path. */
-  val origin: String = "http://127.0.0.1:$port"
+  val origin: String = "$scheme://127.0.0.1:$port"
+
+  /** Handshakes that failed: a client that did not trust the Fake, or that it did not trust. */
+  val failedHandshakes: Int
+    get() = handshakeFailures.get()
+
+  private val handshakeFailures = AtomicInteger()
 
   /** How long the default routes keep a client waiting before they answer. */
   @Volatile var responseDelayMillis: Long = 0
@@ -170,6 +198,14 @@ class FakeOpenAiServer(
 
   private fun serve(client: Socket) {
     client.use {
+      if (client is SSLSocket) {
+        try {
+          client.startHandshake()
+        } catch (e: IOException) {
+          handshakeFailures.incrementAndGet()
+          return
+        }
+      }
       val response = FakeResponse(client, this)
       try {
         val request = read(client.getInputStream()) ?: return

@@ -5,6 +5,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import javax.net.ssl.SSLContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -29,6 +30,10 @@ class ContractTarget(
      * instead of failing it: for real services, which serve only some of the groups.
      */
     val missingEndpointsAllowed: Boolean = false,
+    /**
+     * For a server behind TLS (WI-52): what the contract's client trusts; JVM default when null.
+     */
+    val sslContext: SSLContext? = null,
 )
 
 /**
@@ -40,8 +45,12 @@ class ContractTarget(
 abstract class OpenAiServerContract {
   protected abstract fun target(): ContractTarget
 
-  private val http: HttpClient =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+  private val http: HttpClient by lazy {
+    HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .apply { target().sslContext?.let { sslContext(it) } }
+        .build()
+  }
 
   private fun send(
       method: String,

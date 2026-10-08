@@ -14,7 +14,7 @@ made with keytool and two Fake OpenAI compatible services as processes of their 
 | The packaged Engine (`engine.jar` and `run-runtime/`), with the Console | every script | `./gradlew :engine:engineDistribution`; reached as `localhost` |
 | A new, empty database (PostgreSQL 17), migrated | every script | Not one a contract run (`npm run test:contract`) or an earlier `npm run e2e` has used: what they leave behind (versions, triggers, resources) makes tests fail |
 | `API_TOKENS` with two developers and an admin | every script | the same text in `E2E_TOKENS` |
-| `RUNLINE_MAX_CONCURRENT_RUNS` of 8 or more | `admin`, `developer`, `resources`, `typed-forms` | runs that hold or wait for a resource run beside others |
+| `RUNLINE_MAX_CONCURRENT_RUNS` of 8 | every script that makes runs | the value the scripts are verified with (several tests keep runs going side by side; the contract tests need 8 or more) |
 | The sample jars, `dev/sample-pipelines/build/pipelines` | `admin`, `developer`, `resources`, `security`, `typed-forms`, `versions` | `./gradlew -p dev/sample-pipelines pipelineJars`; in `E2E_JARS` |
 | A PKCS12 keystore the Engine opens, writable by the tests | `resources`, `resource-types`, `typed-forms`, `certificates` | its entries are below; `resources` changes it with keytool and puts it back |
 | A database `orders` owned by an account `reader` | `typed-forms` | the password is the secret `db-pass` |

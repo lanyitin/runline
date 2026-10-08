@@ -83,6 +83,21 @@ interface JdbcProfile {
   ): Properties
 
   /**
+   * The properties that make a connection use TLS with the context registered under [contextId]
+   * (WI-52): the server's certificate and host are verified, in the strongest mode the driver has,
+   * fixed here and not by an administrator. They are set after the administrator's properties,
+   * which can hold nothing of TLS anyway.
+   */
+  fun tlsProperties(contextId: String): Map<String, String>
+
+  /**
+   * Whether [e] is the database refusing the account for want of an acceptable client certificate,
+   * as far as the database can be told apart from a refusal for another reason; only asked when the
+   * database did ask for a client certificate.
+   */
+  fun refusesClientCertificate(e: SQLException): Boolean = false
+
+  /**
    * Opens a connection with the driver this Engine ships, loaded by the Engine's own class loader.
    * It never goes through `DriverManager`, which would also find drivers a pipeline brought.
    */

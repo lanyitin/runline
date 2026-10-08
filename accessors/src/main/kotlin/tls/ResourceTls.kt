@@ -2,12 +2,14 @@ package dev.lawlan.runline.accessors.tls
 
 import java.net.Socket
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.Principal
 import java.security.PrivateKey
 import java.security.cert.CertPathValidatorException
 import java.security.cert.CertificateException
 import java.security.cert.CertificateExpiredException
 import java.security.cert.X509Certificate
+import java.util.HexFormat
 import java.util.UUID
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
@@ -48,6 +50,18 @@ class ClientCertificate(internal val key: PrivateKey, val chain: List<X509Certif
  * service asks for one.
  */
 class ResourceTls(val trusted: List<X509Certificate>, val client: ClientCertificate?) {
+  /**
+   * The certificates as one SHA-256 digest: the same for the same certificates, another when any
+   * changes. The key is not part of it (its certificate is, and says which key it is).
+   */
+  val fingerprint: String by lazy {
+    val digest = MessageDigest.getInstance("SHA-256")
+    trusted.forEach { digest.update(it.encoded) }
+    digest.update(0)
+    client?.chain?.forEach { digest.update(it.encoded) }
+    HexFormat.of().formatHex(digest.digest())
+  }
+
   /** A context of its own for connections of the resource. */
   fun newContext(): TlsContext {
     val anchors =

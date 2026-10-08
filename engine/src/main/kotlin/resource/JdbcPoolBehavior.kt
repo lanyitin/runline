@@ -68,7 +68,7 @@ internal class JdbcPoolBehavior(
     val profile = profiles.find(settings.kind) ?: return CheckFailure.ERROR
     val failure =
         JdbcProbe.check(profile, settings, credential, checkTimeout.toMillis()) ?: return null
-    return when (failure) {
+    return when (failure.failure) {
       ResourceFailure.CONNECTION_FAILED -> CheckFailure.CONNECTION_FAILED
       ResourceFailure.CONNECT_TIMEOUT,
       ResourceFailure.TOTAL_TIMEOUT -> CheckFailure.TIMEOUT
@@ -98,6 +98,7 @@ internal class JdbcPoolBehavior(
         JdbcSettingsProblem.PROPERTY_NOT_ALLOWED -> InvalidResource.PROPERTY_NOT_ALLOWED
         JdbcSettingsProblem.INVALID_TIMEOUT -> InvalidResource.INVALID_TIMEOUT
         JdbcSettingsProblem.INVALID_LIMIT -> InvalidResource.INVALID_LIMIT
+        JdbcSettingsProblem.INVALID_ALIAS -> InvalidResource.INVALID_SECRET_ALIAS
       }
 
   private companion object {

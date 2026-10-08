@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceOperationFailure
+import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
 import java.math.BigDecimal
@@ -43,6 +44,9 @@ interface JdbcObserver {
   /** A connection could not be had for a statement. */
   fun acquireFailed(resource: String, failure: ResourceFailure) {}
 
+  /** A connection failed in TLS, with the category of why (WI-52). */
+  fun tlsFailed(resource: String, failure: TlsFailure) {}
+
   companion object {
     val NONE: JdbcObserver = object : JdbcObserver {}
   }
@@ -63,6 +67,8 @@ internal constructor(
     private val credential: JdbcCredential,
     private val pool: JdbcConnectionPool,
     private val observer: JdbcObserver,
+    /** The category of a failure of TLS of the pool's connections, when they use TLS (WI-52). */
+    private val tlsFailureOf: ((Throwable) -> TlsFailure?)?,
     /** Tells the pools that this run is done with its generation; called once. */
     private val done: () -> Unit,
 ) : ResourceBinding {
@@ -322,6 +328,7 @@ internal constructor(
                 ResourceOperationFailure(ResourceFailure.CONNECTION_FAILED, e, withErrorId = true)
           }
       observer.acquireFailed(resource, failure.failure)
+      tlsFailureOf?.invoke(e)?.let { observer.tlsFailed(resource, it) }
       throw failure
     }
   }

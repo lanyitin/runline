@@ -199,6 +199,12 @@ class JdbcSettingsTest {
             "readOnly",
             "readOnlyMode",
             "defaultRowFetchSize",
+            // Nothing of TLS either (WI-52): the profile fixes it, and the pool's own context is
+            // found by a property of the Engine's that an administrator cannot set.
+            "sslNegotiation",
+            "sslResponseTimeout",
+            "sslcertmode",
+            PostgresProfile.TLS_CONTEXT_PROPERTY,
         )
     for (name in forbidden) {
       assertEquals(
@@ -271,5 +277,34 @@ class JdbcSettingsTest {
     )
     assertNull(PostgresProfile.allowedProperties["Flavor"])
     assertTrue(both.kinds == setOf("postgresql", "otherdb"))
+  }
+
+  @Test
+  fun `trusted certificates and a client certificate are named by alias, stored in lower case`() {
+    val result =
+        assertIs<JdbcSettingsResult.Valid>(
+            parse(with(""""trustAliases":["DB-CA"],"clientCertAlias":"App-Client""""))
+        )
+
+    assertEquals(listOf("db-ca"), result.settings.tls.trustAliases)
+    assertEquals("app-client", result.settings.tls.clientCertAlias)
+    assertEquals(
+        listOf("db-ca"),
+        result.normalized["trustAliases"]!!
+            .let { it as kotlinx.serialization.json.JsonArray }
+            .map { it.jsonPrimitive.content },
+    )
+    assertEquals("app-client", result.normalized["clientCertAlias"]!!.jsonPrimitive.content)
+    assertTrue("trustAliases" !in assertIs<JdbcSettingsResult.Valid>(parse(minimal)).normalized)
+  }
+
+  @Test
+  fun `a certificate alias that is not written like one, or a member of the wrong shape, is refused`() {
+    assertEquals(
+        JdbcSettingsProblem.INVALID_ALIAS,
+        problem(with(""""trustAliases":["has space"]""")),
+    )
+    assertEquals(JdbcSettingsProblem.INVALID_ALIAS, problem(with(""""clientCertAlias":"-x"""")))
+    assertEquals(JdbcSettingsProblem.INVALID_SETTINGS, problem(with(""""trustAliases":"db-ca"""")))
   }
 }

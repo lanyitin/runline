@@ -13,6 +13,9 @@ import java.util.Properties
 /** PostgreSQL, the first database (WI-48). */
 object PostgresProfile : JdbcProfile {
   override val kind = "postgresql"
+
+  /** The property that tells the Engine's socket factory which pool's context to use (WI-52). */
+  const val TLS_CONTEXT_PROPERTY = "runlineTlsContext"
   override val defaultPort = 5432
 
   /**
@@ -87,6 +90,26 @@ object PostgresProfile : JdbcProfile {
     extra.forEach { (name, value) -> properties.setProperty(name, value) }
     return properties
   }
+
+  /**
+   * `verify-full`: the certificate must lead to a trusted one and be for the host, which the driver
+   * checks after the handshake on top of the JDK's check in it. The factory is the Engine's own,
+   * which finds the pool's context by [TLS_CONTEXT_PROPERTY]; no file of a certificate or a key is
+   * named, so none is read or written.
+   */
+  override fun tlsProperties(contextId: String): Map<String, String> =
+      linkedMapOf(
+          "sslmode" to "verify-full",
+          "sslfactory" to PostgresTlsSocketFactory::class.java.name,
+          TLS_CONTEXT_PROPERTY to contextId,
+      )
+
+  /**
+   * 28000 (invalid authorization specification) is what PostgreSQL answers when `pg_hba.conf`
+   * requires a client certificate the connection did not give; a wrong password is 28P01. It is
+   * also the answer when no line of `pg_hba.conf` lets the account in at all (WI-52 records this).
+   */
+  override fun refusesClientCertificate(e: SQLException): Boolean = e.sqlState == "28000"
 
   /** The driver is asked directly, never through `DriverManager`, so only the Engine's is used. */
   override fun connect(url: String, properties: Properties): Connection =

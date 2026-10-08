@@ -18,7 +18,7 @@ class JdbcProbeTest {
       settings: JdbcSettings = rig.settings(),
       credential: JdbcCredential = JdbcCredential.Password(rig.password),
       profile: JdbcProfile = PostgresProfile,
-  ) = JdbcProbe.check(profile, settings, credential, 1500)
+  ) = JdbcProbe.check(profile, settings, credential, 1500)?.failure
 
   @Test
   fun `a database that answers the health query passes, and nothing is left connected`() {

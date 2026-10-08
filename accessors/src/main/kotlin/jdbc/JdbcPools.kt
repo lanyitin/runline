@@ -1,6 +1,7 @@
 package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.ResourceBinding
+import dev.lawlan.runline.accessors.tls.ResourceTls
 import java.security.MessageDigest
 import java.sql.Connection
 import java.util.concurrent.atomic.AtomicBoolean
@@ -19,9 +20,11 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
       val capacity: Int,
       val password: String?,
       val unavailable: Boolean,
+      /** The certificates, by what they are: a reload that changes one makes a new generation. */
+      val tls: String?,
   )
 
-  private class Generation(val key: Key, val pool: JdbcConnectionPool) {
+  private class Generation(val key: Key, val pool: JdbcConnectionPool, val tls: PoolTls?) {
     var holders = 0
     var retired = false
   }
@@ -38,6 +41,8 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
       credential: JdbcCredential,
       capacity: Int,
       observer: JdbcObserver = JdbcObserver.NONE,
+      /** The certificates of the connections (WI-52); null: the profile's connection as before. */
+      tls: ResourceTls? = null,
   ): ResourceBinding {
     val profile = requireNotNull(profiles.find(settings.kind)) { "no profile for ${settings.kind}" }
     val key =
@@ -46,6 +51,7 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
             capacity,
             (credential as? JdbcCredential.Password)?.let { digest(it.value) },
             credential is JdbcCredential.Unavailable,
+            tls?.fingerprint,
         )
     val generation =
         synchronized(lock) {
@@ -55,16 +61,26 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
               if (existing != null && existing.key == key) existing
               else {
                 existing?.let { retire(resource, it) }
-                Generation(key, poolFor(profile, settings, credential, capacity)).also {
-                  current[resource] = it
-                  all.getOrPut(resource) { ArrayList() } += it
-                }
+                val poolTls = tls?.let { PoolTls(it, profile) }
+                Generation(key, poolFor(profile, settings, credential, capacity, poolTls), poolTls)
+                    .also {
+                      current[resource] = it
+                      all.getOrPut(resource) { ArrayList() } += it
+                    }
               }
           generation.holders++
           generation
         }
     val released = AtomicBoolean()
-    return JdbcBinding(resource, settings, profile, credential, generation.pool, observer) {
+    return JdbcBinding(
+        resource,
+        settings,
+        profile,
+        credential,
+        generation.pool,
+        observer,
+        generation.tls?.let { it::classify },
+    ) {
       if (released.compareAndSet(false, true)) synchronized(lock) { done(resource, generation) }
     }
   }
@@ -74,6 +90,7 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
       settings: JdbcSettings,
       credential: JdbcCredential,
       capacity: Int,
+      tls: PoolTls?,
   ): JdbcConnectionPool {
     val password = (credential as? JdbcCredential.Password)?.value
     val clean = { connection: Connection ->
@@ -93,7 +110,7 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
           }
     }
     return JdbcConnectionPool(capacity * settings.connectionsPerRun, clean) {
-      JdbcConnector.open(profile, settings, password)
+      JdbcConnector.open(profile, settings, password, tls = tls)
     }
   }
 
@@ -111,6 +128,7 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
   private fun discard(resource: String, generation: Generation) {
     all[resource]?.remove(generation)
     generation.pool.close()
+    generation.tls?.close()
   }
 
   /** How many connections of [resource] a run is using now, in every generation. */
@@ -130,7 +148,10 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
   override fun close() {
     if (!closed.compareAndSet(false, true)) return
     synchronized(lock) {
-      all.values.flatten().forEach { it.pool.close() }
+      all.values.flatten().forEach {
+        it.pool.close()
+        it.tls?.close()
+      }
       all.clear()
       current.clear()
     }

@@ -10,17 +10,14 @@ internal object JdbcConnector {
       settings: JdbcSettings,
       password: String?,
       connectTimeoutMillis: Long = settings.connectTimeoutMillis,
+      /** The pool's TLS (WI-52); null: the profile's connection as before. */
+      tls: PoolTls? = null,
   ): Connection {
+    val properties =
+        profile.properties(settings.username, password, connectTimeoutMillis, settings.properties)
+    tls?.let { properties.putAll(profile.tlsProperties(it.id)) }
     val connection =
-        profile.connect(
-            profile.url(settings.host, settings.port, settings.database),
-            profile.properties(
-                settings.username,
-                password,
-                connectTimeoutMillis,
-                settings.properties,
-            ),
-        )
+        profile.connect(profile.url(settings.host, settings.port, settings.database), properties)
     try {
       start(profile, settings, connection)
     } catch (e: Throwable) {

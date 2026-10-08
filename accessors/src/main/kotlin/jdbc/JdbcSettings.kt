@@ -1,5 +1,6 @@
 package dev.lawlan.runline.accessors.jdbc
 
+import dev.lawlan.runline.accessors.tls.TlsAliases
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -19,6 +20,9 @@ enum class JdbcSettingsProblem(val wire: String) {
 
   /** Connections per run, or a limit on rows or size. */
   INVALID_LIMIT("invalid_limit"),
+
+  /** A keystore alias of a certificate that is not written like one (WI-52). */
+  INVALID_ALIAS("invalid_secret_alias"),
 }
 
 sealed interface JdbcSettingsResult {
@@ -51,6 +55,8 @@ data class JdbcSettings(
     /** The most one answer may hold, counting text and bytes. */
     val maxResponseBytes: Long,
     val properties: Map<String, String>,
+    /** The certificates of the connections (WI-52); none: the profile's connection as before. */
+    val tls: TlsAliases = TlsAliases.NONE,
 ) {
   companion object {
     private val MEMBERS =
@@ -65,7 +71,7 @@ data class JdbcSettings(
             "maxRows",
             "maxResponseBytes",
             "properties",
-        )
+        ) + TlsAliases.MEMBERS
     private val TIMEOUT_MEMBERS = setOf("connectMs", "statementMs", "quotaWaitMs")
 
     const val DEFAULT_CONNECT_MS = 10_000L
@@ -117,6 +123,15 @@ data class JdbcSettings(
             is Properties.Bad -> return invalid(result.problem)
             is Properties.Good -> result.values
           }
+      val tls =
+          when (val result = TlsAliases.parse(settings)) {
+            is TlsAliases.Parsed.Invalid ->
+                return invalid(
+                    if (result.shape) JdbcSettingsProblem.INVALID_SETTINGS
+                    else JdbcSettingsProblem.INVALID_ALIAS
+                )
+            is TlsAliases.Parsed.Valid -> result.aliases
+          }
       val parsed =
           JdbcSettings(
               kind,
@@ -131,6 +146,7 @@ data class JdbcSettings(
               maxRows.toInt(),
               maxBytes,
               properties,
+              tls,
           )
       return JdbcSettingsResult.Valid(parsed, parsed.normalized())
     }
@@ -219,6 +235,7 @@ data class JdbcSettings(
     if (properties.isNotEmpty()) {
       result["properties"] = JsonObject(properties.mapValues { JsonPrimitive(it.value) })
     }
+    tls.writeTo(result)
     return JsonObject(result)
   }
 }

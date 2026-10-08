@@ -30,6 +30,7 @@
 | 共享資源 | 管理員在 Engine 定義命名資源與容量；pipeline 宣告，run 初始化階段整體取得，鎖由 Engine 持有 | [ADR-007](adr/ADR-007-shared-resources.md) |
 | 型別化共享資源 | 資源有型別（`counter`、`file`、`jdbc-pool`、`openai-compatible`，封閉集合）；Engine 持有實體並以受控存取端中介，機密只存在 PKCS12 金鑰庫（維運以工具管理，Engine 唯讀加重載），資源可刪除與檢查；容量語意仍為 run 級，整體並行上限 = 容量 × 每 run 同時請求數（預設 1）；`openai-compatible` 以版本化端點目錄（涵蓋全部 OpenAI 相容端點，管理員逐條啟用，pipeline 不能自選主機、路徑與標頭）與分階段逾時（連線、首位元組、閒置、選填總時間、等待額度；串流為必要）支援長時間生成（補充 ADR-007、ADR-009） | [ADR-019](adr/ADR-019-typed-shared-resources.md) |
 | 版本識別 | 版本以（內容雜湊，上傳者）識別；相同位元組由不同上傳者上傳時各自成為版本，位元組去重儲存，判定與 unsafe 設定逐版本獨立；API 仍以 `contentHash` 為主，管理員以 `uploader` 消歧義；不洩漏他人是否上傳過（修訂 ADR-003 的版本識別） | [ADR-020](adr/ADR-020-per-uploader-artifact-versions.md) |
+| 資源型別目錄 | 唯讀的 `GET /api/v1/resource-types`（管理員）公開 Engine 內建的型別描述（端點目錄、請求參數、資料庫種類與允許屬性）；端點回應與資源驗證共用同一份描述，Console 不保留複本（補充 ADR-019） | [ADR-021](adr/ADR-021-resource-type-catalog-endpoint.md) |
 | Console 前端 | Svelte 靜態 SPA 打包進 engine.jar，由 Engine 在 `/` 提供；同源、不啟用 CORS；首版 zh-TW 與 en | [ADR-015](adr/ADR-015-console-frontend.md) |
 | 版本與 commit hash | 免認證的 `GET /api/v1/info` 公開版本與完整 hash；詳細資訊與呼叫者身分在 Bearer 的 `GET /api/v1/system`；建置時注入，發佈 jar 位元組級可重現 | [ADR-016](adr/ADR-016-engine-build-info-endpoint.md) |
 | Console 的 log 與 token | log 以輪詢顯示（不用 WebSocket）；token 存 sessionStorage 並以 BroadcastChannel 跨分頁同步；登入與憑證種類脫鉤，token 登入為過渡機制 | [ADR-017](adr/ADR-017-console-websocket-and-token.md) |

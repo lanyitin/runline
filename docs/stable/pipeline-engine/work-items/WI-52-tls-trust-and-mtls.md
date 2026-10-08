@@ -69,7 +69,7 @@
 **驗證**：
 
 - Red 的證據：每個循環先執行新測試並看到因行為缺失而失敗（例：信任 → `PKIX path building failed`；主機名稱 → 握手成功而非失敗；`jdbc` 的 mTLS 帳號 → `28000` 而非成功；Engine 檢查測試以前一版 production code 執行 6 個全部失敗於 `connection_failed`／`rejected`；遙測測試 2 個失敗於找不到 metric；Console 元件測試 5 個、契約測試對舊 Fake 4 個失敗）。實作先於測試寫出的幾處（主機名稱防護、預設信任與 `trustAliases` 的取代、連線池世代鍵、輪替 run 測試），以「拿掉該段 production code 後測試失敗」驗證測試有效。
-- 新增的測試：`accessors`：`ResourceTlsTest`（9）、`ResourceTlsDefaultTrustTest`（2，獨立 JVM，以命令列的 `javax.net.ssl.trustStore` 使測試 CA 成為「JVM 預設信任」：未設定時連得上、設定了內部 CA 時同一服務為 `trust_failed`）、`OpenAiBindingTlsTest`（3）、`JdbcTlsTest`（7，真實 PostgreSQL TLS）、`FakeOpenAiServerTlsContractTest`（18），`OpenAiSettingsTest`、`JdbcSettingsTest` 各新增；`engine`：`KeystoreCertificatesTest`（4）、`TlsResourceApiTest`（3）、`TlsResourceCheckTest`（6，TLS Fake 與 TLS PostgreSQL）、`TlsResourceRunTest`（1，真實 run、兩次重載：用戶端憑證輪替與信任替換，持有舊世代的 run 不受影響）、`TlsSecretApiTest`（3，含私鑰標記與機密標記不出現在任何回應）、`TlsTelemetryTest`（2），`EngineConfigTest` 新增；`devkit`：`DevSessionResourcesTest` 新增兩種情形；Console：`resource-forms.test.ts` 8 個、`ResourcesPage.test.ts` 6 個、`admin-contract.ts` 1 個新增與 3 個擴充（對 Fake 與真實 Engine）。
+- 新增的測試：`accessors`：`ResourceTlsTest`（10）、`ResourceTlsDefaultTrustTest`（2，獨立 JVM，以命令列的 `javax.net.ssl.trustStore` 使測試 CA 成為「JVM 預設信任」：未設定時連得上、設定了內部 CA 時同一服務為 `trust_failed`）、`OpenAiBindingTlsTest`（3）、`JdbcTlsTest`（7，真實 PostgreSQL TLS）、`FakeOpenAiServerTlsContractTest`（18），`OpenAiSettingsTest`、`JdbcSettingsTest` 各新增；`engine`：`KeystoreCertificatesTest`（4）、`TlsResourceApiTest`（3）、`TlsResourceCheckTest`（6，TLS Fake 與 TLS PostgreSQL）、`TlsResourceRunTest`（1，真實 run、兩次重載：用戶端憑證輪替與信任替換，持有舊世代的 run 不受影響）、`TlsSecretApiTest`（3，含私鑰標記與機密標記不出現在任何回應）、`TlsTelemetryTest`（2），`EngineConfigTest` 新增；`devkit`：`DevSessionResourcesTest` 新增兩種情形；Console：`resource-forms.test.ts` 8 個、`ResourcesPage.test.ts` 6 個、`admin-contract.ts` 1 個新增與 3 個擴充（對 Fake 與真實 Engine）。
 - 對真實打包的 Engine（`engine.jar`、PostgreSQL 17、以 `keytool` 製作的 PKCS12 金鑰庫：機密、受信任憑證、兩個私鑰項目，其中一個 10 天後到期）與 TLS 加 mTLS 的 Fake 行程：`npm run test:contract` 104 個通過；新增的手動腳本 `e2e/certificates.e2e.ts` 1 個通過（憑證清單與 API 一致、即將到期警告、表單選信任與用戶端憑證後真實握手檢查通過、沒有用戶端憑證時 `client_cert_rejected` 的文字與 API 的 `lastCheck` 相同、修改後通過、zh-TW；私鑰標記與金鑰庫密碼不在任何回應、DOM、storage 與 cookie）；既有的 `e2e/resources.e2e.ts` 4 個與 `e2e/typed-forms.e2e.ts` 4 個也在同一環境通過。
 
 **未驗證或未做**：
@@ -77,6 +77,6 @@
 - 開發入口的 TLS 支援（待使用者確認範圍）。
 - 公開 CA 簽發的真實網際網路服務：以「JVM 預設信任所含的測試 CA」代替（見上），沒有連到真實公開服務。
 - 真實 lemonade 或其他 OpenAI 相容服務的 TLS（手動腳本 `RealOpenAiServerContractTest` 可對 `https` 位址執行，本次沒有可用的服務）。
-- `handshake_failed` 只以單元層級的分類邏輯涵蓋，沒有建立「協定不相容」的真實服務端情境。
+- `handshake_failed` 只以「以純 HTTP 回答握手的服務端」驗證（`ResourceTlsTest`；這個測試在分類邏輯之後才寫），沒有建立協定版本或加密套件不相容的服務端情境。實測另見：服務端收下 ClientHello 卻不回應時，JDK HTTP 用戶端的連線逾時涵蓋握手，結果為 `CONNECT_TIMEOUT`（檢查為 `timeout`），不是 TLS 類別。
 - 憑證過期的 metric 以 gauge 讀取驗證；沒有驗證匯出到 OTLP 後的實際名稱與單位（`d`）。
 - 開發入口的 `jdbc-pool` 拒絕路徑與 `openai-compatible` 共用同一段程式，只以 `openai-compatible` 測試。

@@ -135,6 +135,36 @@ class ResourceTlsTest {
   }
 
   @Test
+  fun `a handshake that fails for another reason, here a service that answers in plain HTTP, is handshake_failed`() {
+    // A real socket that answers whatever comes with a plain HTTP response, as a service without
+    // TLS on that port does.
+    val plain = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+    val answering =
+        Thread.ofPlatform().daemon().start {
+          runCatching {
+            while (true) {
+              plain.accept().use {
+                it.getOutputStream()
+                    .write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                it.getOutputStream().flush()
+              }
+            }
+          }
+        }
+    val tls = ResourceTls(listOf(authority.certificate), null)
+
+    try {
+      assertEquals(
+          TlsFailure.HANDSHAKE_FAILED,
+          failure(tls.newContext(), "https://localhost:${plain.localPort}/v1"),
+      )
+    } finally {
+      plain.close()
+      answering.join(2000)
+    }
+  }
+
+  @Test
   fun `making contexts leaves the JVM's default context, factories and properties as they were`() {
     val defaultContext = javax.net.ssl.SSLContext.getDefault()
     val defaultFactory = javax.net.ssl.HttpsURLConnection.getDefaultSSLSocketFactory()

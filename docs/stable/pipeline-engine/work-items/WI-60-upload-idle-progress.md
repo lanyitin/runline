@@ -12,8 +12,8 @@
   - 以自製 Fake 服務驗證。
   - 須在作業系統送出緩衝很大的環境（例如本開發容器）中通過。
   - 須涵蓋多部分表單與二進位本文兩種上傳。
-- 服務端停止讀取超過 `idleMs` 時，上傳仍以 `IDLE_TIMEOUT` 失敗；從服務端停止讀取到判定逾時，所需時間不超過 `idleMs`，加上把固定緩衝上限內的資料送完的時間。
-- 送出緩衝的上限是 Engine 內部固定值，記載於 08-api；只作用於資源連線，不改變 JVM 中其他 HTTP 用戶端。若無法只作用於資源連線，停下回報。
+- 服務端停止讀取超過 `idleMs` 時，上傳仍以 `IDLE_TIMEOUT` 失敗；從服務端停止讀取到判定逾時，所需時間不超過 `idleMs`，加上填滿 Engine 的送出緩衝與服務端接收緩衝所需的時間（服務端接收緩衝不歸 Engine 控制，08-api 註明）。
+- 送出緩衝上限為 256 KiB（設定值），由 Engine 啟動時設定，開發入口相同；記載於 08-api，含它作用於整個 JVM 的 JDK HTTP 用戶端這一副作用（[ADR-019](../adr/ADR-019-typed-shared-resources.md) 決策 4）。
 - 大檔上傳的吞吐沒有不合理的下降：以同一環境量測修正前後的上傳時間，並在回報中列出結果。
 - `OpenAiBindingMultipartTest`「a slow upload that keeps going…」通過，斷言不放寬。
 - 08-api 記載送出緩衝上限；[WI-53](WI-53-openai-compatible-multipart-and-binary.md)「實作結果」中「上傳的閒置逾時」的描述同步改寫。
@@ -22,5 +22,5 @@
 
 - 不改變 `idleMs` 的設定方式、預設值與錯誤類別，也不改變串流回應的閒置語意。
 - 不新增管理員或 pipeline 可調整的設定。
-- 不得以全域系統屬性改變整個 JVM 的 HTTP 行為。
+- 除送出緩衝上限外，不以全域系統屬性改變 JVM 的 HTTP 行為。
 - 測試不使用 Stub 或 Mock。

@@ -1,6 +1,6 @@
 # 工作項總覽
 
-本文回答：要交給 tdd-coder 的工作有哪些、先後順序為何。tdd-coder 只需讀本頁加被派到的那一項。狀態：已核可（2026-10-03；WI-40 至 WI-51 為 2026-10-06；WI-52、WI-53、WI-54 為 2026-10-07 納入，WI-55 為 2026-10-08 納入，WI-46、WI-47 的端點目錄與逾時為 2026-10-07 修訂，皆待使用者確認）。
+本文回答：要交給 tdd-coder 的工作有哪些、先後順序為何。tdd-coder 只需讀本頁加被派到的那一項。狀態：已核可（2026-10-03；WI-40 至 WI-51 為 2026-10-06；WI-52、WI-53、WI-54 為 2026-10-07 納入，WI-55 至 WI-58 為 2026-10-08 納入，WI-46、WI-47 的端點目錄與逾時為 2026-10-07 修訂，皆待使用者確認）。
 
 | 項目 | 目標 | 相依 |
 |---|---|---|
@@ -55,17 +55,20 @@
 | [WI-48](WI-48-jdbc-pool-resource.md) | `jdbc-pool` 型別（PostgreSQL）：連線池世代、窄 SQL 存取、資料庫設定檔機制 | WI-41、WI-43、WI-46 |
 | [WI-49](WI-49-console-resources-page-rework.md) | Console 資源頁改造：型別、檢查、刪除、機密檢視、宣告者 | WI-36、WI-40、WI-41、WI-43、WI-46 |
 | [WI-50](WI-50-console-typed-resource-forms.md) | Console 各型別資源表單與使用量 | WI-43、WI-46、WI-48、WI-49 |
-| [WI-51](WI-51-secret-non-leak-verification.md) | 機密不外洩與型別化資源的整體驗證、文件一致性核對 | WI-42、WI-47、WI-48、WI-50、WI-52、WI-53、WI-55 |
+| [WI-51](WI-51-secret-non-leak-verification.md) | 機密不外洩與型別化資源的整體驗證、文件一致性核對 | WI-42、WI-47、WI-48、WI-50、WI-52、WI-53、WI-55、WI-56、WI-57、WI-58 |
 | [WI-52](WI-52-tls-trust-and-mtls.md) | TLS 信任與 mTLS：金鑰庫的受信任憑證與私鑰項目、`trustAliases` 與 `clientCertAlias`、到期監看、輪替、Console 顯示與欄位 | WI-41、WI-46、WI-48、WI-50 |
 | [WI-53](WI-53-openai-compatible-multipart-and-binary.md) | `openai-compatible` 的多部分上傳與二進位回應：圖像、音訊、檔案端點；檔案來源與去處走 ADR-009 範圍；大小上限 | WI-46、WI-47 |
 | [WI-54](WI-54-per-uploader-artifact-versions.md) | 相同位元組由不同上傳者各自成為版本（內容雜湊 + 上傳者）：位元組去重儲存、`uploader` 消歧義與 `ambiguous_version`、不洩漏他人上傳、遷移、白名單重判與刪除逐版本、Console 調整（[ADR-020](../adr/ADR-020-per-uploader-artifact-versions.md)） | WI-06、WI-07、WI-08、WI-10、WI-18、WI-35、WI-36、WI-40 |
 | [WI-55](WI-55-resource-type-catalog-endpoint.md) | 資源型別目錄端點 `GET /api/v1/resource-types`：Engine 內建型別描述為唯一來源（端點目錄、請求參數、資料庫種類與允許屬性），Console 改用它並移除前端複本（[ADR-021](../adr/ADR-021-resource-type-catalog-endpoint.md)） | WI-50、WI-52 |
+| [WI-56](WI-56-check-time-precision.md) | 檢查回應的時間與保存後讀回的時間完全相同 | WI-43 |
+| [WI-57](WI-57-test-environment-robustness.md) | `./gradlew check` 在開發容器（以 root 執行、負載下）穩定通過；真實瀏覽器腳本的前置條件寫入文件 | WI-26 |
+| [WI-58](WI-58-responses-create-stateful.md) | `responses.create` 在型別目錄中標為有狀態 | WI-55 |
 
 建議順序：WI-00 → WI-13 → WI-01（WI-12 與 WI-01 無相依，可並行）→ (WI-02、WI-05、WI-11 並行) → WI-16 → WI-03 → WI-04（WI-03 的 IDE 實測需要 WI-17 提供外部測試專案，WI-17 在 WI-03 實作完成後進行）；WI-06 → WI-19 → WI-08 → (WI-07、WI-09 並行)；WI-10 與 WI-18 在 WI-06 之後即可進行，與其他項無先後要求。WI-02 的初始化階段需要 WI-11 提供目錄位置，WI-02 與 WI-11 需一併驗收。WI-15 與其他項無相依，在尚未完成的項目之前先做，使後續項目都使用新的套件名稱。
 
 Console 與部署相關項目（WI-28 至 WI-39，決策見 [ADR-015](../adr/ADR-015-console-frontend.md) 至 [ADR-018](../adr/ADR-018-liveness-readiness-probes.md)）的建議順序：WI-28 → WI-29 → WI-30 → WI-31 → WI-32（WI-28 與 WI-30 無相依，可並行；WI-29 與前端項目無相依，可在任何時間點進行）；WI-31 之後 WI-33 → WI-34 → WI-35 → WI-36 → WI-37；WI-29 之後 WI-38 → WI-39（WI-39 同時需要 WI-31 完成；WI-38 內的健康檢查工具選項須先經架構決定）。WI-32 與 Console 畫面項目無先後要求。WI-28 與 WI-29 完成之前，`ApiDocumentationTest` 會因 08-api 已記載尚未實作的端點而失敗，屬預期，完成後轉為通過。
 
-型別化共享資源項目（WI-40 至 WI-53，決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md)）的建議順序：WI-40 → WI-43 → WI-41 → WI-46 → WI-47 → WI-53 → WI-48 → WI-49 → WI-50 → WI-52 → WI-55 → WI-51。WI-47（串流）是長時間生成的必要項，緊接 WI-46，兩者之間不插入其他型別項目；WI-53 在 WI-47 之後，可與 WI-48 並行，須在 WI-50 之前完成（WI-50 的端點啟用表單需要完整目錄）與 WI-51 之前完成。WI-42（部署掛載與維運手冊）在 WI-41 之後即可進行，與型別項目無先後要求，須在 WI-51 之前完成；WI-49（Console 資源頁改造）在 WI-46 之後即可，可與 WI-47、WI-48 並行，須在 WI-50 之前完成。
+型別化共享資源項目（WI-40 至 WI-53，決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md)）的建議順序：WI-40 → WI-43 → WI-41 → WI-46 → WI-47 → WI-53 → WI-48 → WI-49 → WI-50 → WI-52 → WI-55 → WI-58 → WI-56 → WI-57 → WI-51（WI-56、WI-57、WI-58 互不相依，仍一次派一項；三者都完成後才派 WI-51，使整體驗證與文件一致性核對涵蓋它們）。WI-47（串流）是長時間生成的必要項，緊接 WI-46，兩者之間不插入其他型別項目；WI-53 在 WI-47 之後，可與 WI-48 並行，須在 WI-50 之前完成（WI-50 的端點啟用表單需要完整目錄）與 WI-51 之前完成。WI-42（部署掛載與維運手冊）在 WI-41 之後即可進行，與型別項目無先後要求，須在 WI-51 之前完成；WI-49（Console 資源頁改造）在 WI-46 之後即可，可與 WI-47、WI-48 並行，須在 WI-50 之前完成。
 
 WI-54（版本以內容雜湊加上傳者識別，決策見 [ADR-020](../adr/ADR-020-per-uploader-artifact-versions.md)）與型別化資源鏈無相依，WI-40 之後即可進行；建議在 WI-49 之前完成，使資源頁的宣告者顯示一次到位。WI-54 含遷移與 06、08-api 的同步更新，與資源項目的遷移檔編號依實際先後排序。
 
@@ -111,6 +114,10 @@ flowchart LR
   WI48 --> WI52
   WI52 --> WI55[WI-55 型別目錄端點]
   WI50 --> WI55
+  WI55 --> WI58[WI-58 responses.create 有狀態]
+  WI58 --> WI51
+  WI56[WI-56 檢查時間精度] --> WI51
+  WI57[WI-57 測試環境穩定] --> WI51
   WI55 --> WI51
   WI52 --> WI51
   WI50 --> WI51

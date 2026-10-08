@@ -156,8 +156,12 @@ export interface Resource {
   settings: Record<string, unknown>;
   /** The alias of the secret in the keystore; never a secret value. */
   secretAlias: string | null;
-  /** `not_set`, `found`, `missing` or `invalid_secret`. */
+  /** `not_set`, `found`, `missing`, `invalid_secret` or `wrong_type`. */
   secretStatus: string;
+  /** Each trusted certificate alias of the settings with its status (WI-52), in order. */
+  trustStatus: Array<{ alias: string; status: string }>;
+  /** The status of the client certificate alias (WI-52): `not_set` when there is none. */
+  clientCertStatus: string;
   /**
    * The most requests its entity is asked at once: the capacity times what one holder may do at
    * once (`jdbc-pool`: the size of the pool); null for the types that cannot say.
@@ -188,14 +192,28 @@ export interface RemovalPreview {
   inUse: boolean;
 }
 
+/** What may be shown of a certificate of the keystore (WI-52): never anything of a key. */
+export interface Certificate {
+  subject: string;
+  notAfter: string;
+  /** Whole days to `notAfter`; negative once it has passed. */
+  daysLeft: number;
+  /** SHA-256, as `keytool -list` prints it. */
+  fingerprint: string;
+  /** `valid`, `expiring` (fewer days left than the Engine's threshold) or `expired`. */
+  expiry: string;
+}
+
 /** An alias of the keystore: what it is and which resources use it; never its value. */
 export interface Secret {
   alias: string;
   /** `secret`, `trusted_certificate` or `private_key`. */
   type: string;
-  /** `found` or `invalid_secret`. */
+  /** `found`, `invalid_secret` or `invalid_key`. */
   status: string;
   usedBy: string[];
+  /** The certificate of a certificate entry, the chain of a private key entry, its own first; none for a secret. */
+  certificates: Certificate[];
 }
 
 /** What a reload of the keystore found: how many aliases, and those that changed. */
@@ -386,6 +404,11 @@ export function parseResource(json: unknown): Resource {
     settings: obj(r.settings, 'resource settings'),
     secretAlias: strOrNull(r.secretAlias, 'resource secretAlias'),
     secretStatus: str(r.secretStatus, 'resource secretStatus'),
+    trustStatus: list(r.trustStatus ?? [], 'resource trustStatus', (v) => {
+      const status = obj(v, 'a trust alias status');
+      return { alias: str(status.alias, 'trust alias'), status: str(status.status, 'trust status') };
+    }),
+    clientCertStatus: str(r.clientCertStatus ?? 'not_set', 'resource clientCertStatus'),
     concurrencyLimit:
       r.concurrencyLimit === null || r.concurrencyLimit === undefined
         ? null
@@ -448,6 +471,16 @@ export function parseSecrets(json: unknown): Secret[] {
       type: str(r.type, 'secret type'),
       status: str(r.status, 'secret status'),
       usedBy: strings(r.usedBy, 'secret usedBy'),
+      certificates: list(r.certificates ?? [], 'secret certificates', (c) => {
+        const certificate = obj(c, 'a certificate');
+        return {
+          subject: str(certificate.subject, 'certificate subject'),
+          notAfter: str(certificate.notAfter, 'certificate notAfter'),
+          daysLeft: num(certificate.daysLeft, 'certificate daysLeft'),
+          fingerprint: str(certificate.fingerprint, 'certificate fingerprint'),
+          expiry: str(certificate.expiry, 'certificate expiry'),
+        };
+      }),
     };
   });
 }

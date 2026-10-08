@@ -1195,3 +1195,119 @@ describe('the forms in zh-TW', () => {
     expect(dialog(view).textContent).toContain('資源根目錄');
   });
 });
+
+describe('the certificates of a resource (WI-52)', () => {
+  const certificate = (subject: string, daysLeft: number, expiry = 'valid') => ({
+    subject,
+    notAfter: '2027-10-08T00:00:00Z',
+    daysLeft,
+    fingerprint: 'AB:CD:' + '00:'.repeat(29) + 'EF',
+    expiry,
+  });
+  const withCertificates = (backend: TestApp['engine']['backend']) =>
+    backend.secrets.configure([
+      { alias: 'orders-pass', type: 'secret', status: 'found', fingerprint: 'a' },
+      { alias: 'corporate-ca', type: 'trusted_certificate', status: 'found', fingerprint: 'd', certificates: [certificate('CN=Corporate CA', 300)] },
+      { alias: 'backup-ca', type: 'trusted_certificate', status: 'found', fingerprint: 'e', certificates: [certificate('CN=Backup CA', 12, 'expiring')] },
+      {
+        alias: 'app-client',
+        type: 'private_key',
+        status: 'found',
+        fingerprint: 'f',
+        certificates: [certificate('CN=app-client', 20, 'expiring'), certificate('CN=Corporate CA', 300)],
+      },
+    ]);
+  const trustBoxes = (view: HTMLElement) =>
+    [...dialog(view).querySelectorAll<HTMLInputElement>('#resource-certificates input[type="checkbox"]')];
+  const clientSelect = (view: HTMLElement) => dialog(view).querySelector<HTMLSelectElement>('#resource-client-cert')!;
+
+  test('are chosen among the keystore\'s by kind: trusted certificates to tick, a private key to choose, nothing of a secret', async () => {
+    const { view } = await page({ seed: withCertificates });
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'orders-db');
+    await vi.waitFor(() => expect(trustBoxes(view)).toHaveLength(2));
+
+    expect(trustBoxes(view).map((box) => box.value)).toEqual(['backup-ca', 'corporate-ca']);
+    expect(dialog(view).querySelector('#resource-certificates')!.textContent).toContain('CN=Backup CA');
+    expect(dialog(view).querySelector('#resource-certificates')!.textContent).toContain('12');
+    expect([...clientSelect(view).options].map((o) => o.value)).toEqual(['', 'app-client']);
+    expect(dialog(view).querySelector('#resource-certificates')!.textContent).toContain('verify-full');
+  });
+
+  test('are sent in the settings by alias, and the card is defined with them', async () => {
+    const { view } = await page({ seed: withCertificates });
+    await loaded(view);
+    await defineForm(view, 'openai-compatible', 'llm');
+    type(field(view, 'openai-base-url'), 'https://llm.internal/v1');
+    await vi.waitFor(() => expect(trustBoxes(view)).toHaveLength(2));
+    const corporate = trustBoxes(view).find((box) => box.value === 'corporate-ca')!;
+    corporate.click();
+    choose(clientSelect(view), 'app-client');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST').settings).toMatchObject({ trustAliases: ['corporate-ca'], clientCertAlias: 'app-client' });
+    expect(app.engine.backend.resources.usersOf('corporate-ca')).toEqual(['llm']);
+  });
+
+  test('of an existing resource start as they are, one the keystore lost included, and can be taken away', async () => {
+    const { view } = await page({
+      seed: (backend) => {
+        withCertificates(backend);
+        backend.resources.define('orders-db', {
+          type: 'jdbc-pool',
+          settings: { kind: 'postgresql', host: 'db', port: 5432, database: 'orders', username: 'reader', trustAliases: ['corporate-ca', 'gone-ca'], clientCertAlias: 'app-client' },
+        });
+      },
+    });
+    await loaded(view);
+    button(card(view, 'orders-db'), 'Change').click();
+    await vi.waitFor(() => expect(trustBoxes(view).length).toBe(3));
+    expect(trustBoxes(view).filter((box) => box.checked).map((box) => box.value)).toEqual(['corporate-ca', 'gone-ca']);
+    expect(dialog(view).querySelector('#resource-certificates')!.textContent).toContain('gone-ca');
+    expect(clientSelect(view).value).toBe('app-client');
+
+    trustBoxes(view).find((box) => box.value === 'gone-ca')!.click();
+    choose(clientSelect(view), '');
+    button(dialog(view), 'Save').click();
+
+    await vi.waitFor(() => expect(sent('PATCH')).toBeDefined());
+    expect(sent('PATCH').settings.trustAliases).toEqual(['corporate-ca']);
+    expect(sent('PATCH').settings).not.toHaveProperty('clientCertAlias');
+  });
+
+  test('say at the field that the Engine refused an alias of another kind', async () => {
+    const { view } = await page({ seed: withCertificates });
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'orders-db');
+    type(field(view, 'jdbc-host'), 'db');
+    type(field(view, 'jdbc-database'), 'orders');
+    type(field(view, 'jdbc-username'), 'reader');
+    await vi.waitFor(() => expect(trustBoxes(view)).toHaveLength(2));
+    // A reload made `corporate-ca` a secret while the form was open.
+    app.engine.backend.secrets.writeFile({ entries: [{ alias: 'corporate-ca', type: 'secret', status: 'found', fingerprint: 'z' }] });
+    await app.context.api.reloadSecrets();
+    trustBoxes(view).find((box) => box.value === 'corporate-ca')!.click();
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(errorAt(view, 'resource-certificates')).not.toBeNull());
+    expect(errorAt(view, 'resource-certificates')).toContain('kind');
+  });
+
+  test('of the secrets list: each certificate with its subject, end, days left and fingerprint, and a warning near the end', async () => {
+    const { view } = await page({ seed: withCertificates });
+    const section = () => view.querySelector<HTMLElement>('section.secrets')!;
+    await vi.waitFor(() => expect(section().querySelector('table')).not.toBeNull());
+
+    const shown = section().querySelector<HTMLElement>('tr[data-alias="app-client"]')!;
+    const certificates = [...section().querySelectorAll<HTMLElement>('[data-certificates-of="app-client"] li')];
+    expect(certificates.map((li) => li.querySelector('.subject')!.textContent)).toEqual(['CN=app-client', 'CN=Corporate CA']);
+    expect(certificates[0].querySelector('.fingerprint')!.textContent).toContain('AB:CD');
+    expect(certificates[0].querySelector('.expiry')!.textContent).toContain('20');
+    expect(certificates[0].classList.contains('expiring')).toBe(true);
+    expect(shown).toBeDefined();
+    expect(section().querySelector('[data-certificates-of="orders-pass"]')).toBeNull();
+  });
+});

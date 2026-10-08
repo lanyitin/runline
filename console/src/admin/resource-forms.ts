@@ -97,6 +97,27 @@ const objectOf = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 const pairsOf = (value: unknown): Pair[] =>
   Object.entries(objectOf(value)).map(([name, v]) => ({ name, value: text(v) }));
+/** The certificates of a type that connects over TLS (WI-52), by their aliases in the keystore. */
+export interface CertificateFields {
+  /** The trusted certificate entries; none: the JVM's default trust (or, for a database, as before). */
+  trustAliases: string[];
+  /** The private key entry of the client certificate; '' for none. */
+  clientCertAlias: string;
+}
+
+const certificatesOf = (settings: Record<string, unknown>): CertificateFields => ({
+  trustAliases: Array.isArray(settings.trustAliases) ? settings.trustAliases.map(String) : [],
+  clientCertAlias: text(settings.clientCertAlias),
+});
+
+/** Writes the certificates that are named; those taken away are not written, so they are gone. */
+const writeCertificates = (out: Collected, fields: CertificateFields) => {
+  if (fields.trustAliases.length > 0) out.settings.trustAliases = [...fields.trustAliases];
+  if (fields.clientCertAlias !== '') out.settings.clientCertAlias = fields.clientCertAlias;
+};
+
+const CERTIFICATE_MEMBERS = ['trustAliases', 'clientCertAlias'];
+
 /** The pairs that have a name, as an object; undefined when none has. */
 const objectOfPairs = (pairs: Pair[]): Record<string, string> | undefined => {
   const named = pairs.filter((pair) => pair.name.trim() !== '');
@@ -108,7 +129,7 @@ const present = <T>(values: Record<string, T | undefined>): Record<string, T> | 
   return given.length === 0 ? undefined : Object.fromEntries(given);
 };
 
-export interface JdbcFields {
+export interface JdbcFields extends CertificateFields {
   /** The kind of database; the first version has PostgreSQL only. */
   kind: string;
   host: string;
@@ -144,6 +165,8 @@ const jdbcPool: TypeForm<JdbcFields> = {
     statementMs: '',
     quotaWaitMs: '',
     properties: [],
+    trustAliases: [],
+    clientCertAlias: '',
   }),
   fromSettings: (settings) => {
     const timeouts = objectOf(settings.timeouts);
@@ -158,6 +181,7 @@ const jdbcPool: TypeForm<JdbcFields> = {
       statementMs: text(timeouts.statementMs),
       quotaWaitMs: text(timeouts.quotaWaitMs),
       properties: pairsOf(settings.properties),
+      ...certificatesOf(settings),
     };
   },
   toSettings: (fields, stored) => {
@@ -170,6 +194,7 @@ const jdbcPool: TypeForm<JdbcFields> = {
       'connectionsPerRun',
       'timeouts',
       'properties',
+      ...CERTIFICATE_MEMBERS,
     ]);
     out.settings.kind = fields.kind;
     out.required('jdbc-host', 'host', fields.host);
@@ -185,6 +210,7 @@ const jdbcPool: TypeForm<JdbcFields> = {
     if (timeouts !== undefined) out.settings.timeouts = timeouts;
     const properties = objectOfPairs(fields.properties);
     if (properties !== undefined) out.settings.properties = properties;
+    writeCertificates(out, fields);
     return out.result();
   },
   fieldOf: (problem) =>
@@ -194,6 +220,7 @@ const jdbcPool: TypeForm<JdbcFields> = {
       invalid_timeout: 'jdbc-timeouts',
       invalid_limit: 'jdbc-per-run',
       invalid_settings: 'jdbc-settings',
+      alias_wrong_type: 'resource-certificates',
     })[problem],
 };
 
@@ -207,7 +234,7 @@ export interface ParameterFields {
   max: string;
 }
 
-export interface OpenAiFields {
+export interface OpenAiFields extends CertificateFields {
   baseUrl: string;
   organization: string;
   project: string;
@@ -289,6 +316,8 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
     requestsPerRun: '',
     allowedModels: '',
     parameters: parameterFields(),
+    trustAliases: [],
+    clientCertAlias: '',
   }),
   fromSettings: (settings) => {
     const timeouts = objectOf(settings.timeouts);
@@ -306,6 +335,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
       requestsPerRun: text(settings.requestsPerRun),
       allowedModels: Array.isArray(settings.allowedModels) ? settings.allowedModels.join(', ') : '',
       parameters: parameterFields(settings),
+      ...certificatesOf(settings),
     };
   },
   toSettings: (fields, stored) => {
@@ -321,6 +351,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
       'allowedModels',
       'lockedParameters',
       'maxValues',
+      ...CERTIFICATE_MEMBERS,
     ]);
     out.required('openai-base-url', 'baseUrl', fields.baseUrl);
     if (fields.organization.trim() !== '') out.settings.organization = fields.organization.trim();
@@ -363,6 +394,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
       .map((model) => model.trim())
       .filter((model) => model !== '');
     if (models.length > 0) out.settings.allowedModels = models;
+    writeCertificates(out, fields);
     return out.result();
   },
   fieldOf: (problem) =>
@@ -374,6 +406,7 @@ const openAiCompatible: TypeForm<OpenAiFields> = {
       invalid_timeout: 'openai-timeouts',
       invalid_limit: 'openai-per-run',
       invalid_settings: 'openai-settings',
+      alias_wrong_type: 'resource-certificates',
     })[problem],
 };
 

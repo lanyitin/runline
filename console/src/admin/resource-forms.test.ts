@@ -56,6 +56,8 @@ describe('the form of a jdbc-pool', () => {
       { name: 'ApplicationName', value: 'reports' },
       { name: 'tcpKeepAlive', value: 'true' },
     ],
+    trustAliases: [],
+    clientCertAlias: '',
   };
 
   test('a new one is of PostgreSQL, the only kind there is, and leaves the rest to be filled or to the defaults', () => {
@@ -70,6 +72,8 @@ describe('the form of a jdbc-pool', () => {
       statementMs: '',
       quotaWaitMs: '',
       properties: [],
+      trustAliases: [],
+      clientCertAlias: '',
     });
   });
 
@@ -289,4 +293,41 @@ describe('the forms there are', () => {
     expect(formOf('counter')!.toSettings(formOf('counter')!.empty(), {})).toEqual({ settings: undefined });
     expect(formOf('quantum')).toBeUndefined();
   });
+});
+
+describe('the certificates of the types that connect over TLS (WI-52)', () => {
+  for (const [type, base] of [
+    ['jdbc-pool', { kind: 'postgresql', host: 'db', database: 'orders', username: 'reader' }],
+    ['openai-compatible', { baseUrl: 'https://llm.internal/v1', endpoints: ['chat.completions'] }],
+  ] as const) {
+    const form = formOf(type)!;
+
+    test(`${type}: a new one names none, so the connection is as without them`, () => {
+      expect(form.empty()).toMatchObject({ trustAliases: [], clientCertAlias: '' });
+      const made = form.toSettings({ ...form.fromSettings(base) }, {}) as { settings: Record<string, unknown> };
+      expect(made.settings).not.toHaveProperty('trustAliases');
+      expect(made.settings).not.toHaveProperty('clientCertAlias');
+    });
+
+    test(`${type}: the trusted certificates and the client certificate are read and written by alias`, () => {
+      const stored = { ...base, trustAliases: ['internal-ca', 'backup-ca'], clientCertAlias: 'app-client' };
+      const fields = form.fromSettings(stored);
+      expect(fields).toMatchObject({ trustAliases: ['internal-ca', 'backup-ca'], clientCertAlias: 'app-client' });
+      const made = form.toSettings(fields, stored) as { settings: Record<string, unknown> };
+      expect(made.settings).toMatchObject({ trustAliases: ['internal-ca', 'backup-ca'], clientCertAlias: 'app-client' });
+    });
+
+    test(`${type}: certificates that were taken away are gone, not kept`, () => {
+      const stored = { ...base, trustAliases: ['internal-ca'], clientCertAlias: 'app-client' };
+      const made = form.toSettings({ ...form.fromSettings(stored), trustAliases: [], clientCertAlias: '' }, stored) as {
+        settings: Record<string, unknown>;
+      };
+      expect(made.settings).not.toHaveProperty('trustAliases');
+      expect(made.settings).not.toHaveProperty('clientCertAlias');
+    });
+
+    test(`${type}: an alias of the wrong kind is said at the certificates`, () => {
+      expect(form.fieldOf('alias_wrong_type')).toBe('resource-certificates');
+    });
+  }
 });

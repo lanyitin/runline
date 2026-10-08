@@ -490,7 +490,8 @@ describe('typed resources, checks, deleting and secrets', () => {
     secrets.configure([{ alias: 'llm-key', type: 'secret', status: 'found', fingerprint: 'a' }]);
     app.engine.backend.resources.define('llm', { type: 'openai-compatible', settings: { baseUrl: 'http://x/v1' }, secretAlias: 'llm-key' });
 
-    expect(await api.secrets()).toEqual([{ alias: 'llm-key', type: 'secret', status: 'found', usedBy: ['llm'] }]);
+    // A secret has no certificates (WI-52): the list of them is empty.
+    expect(await api.secrets()).toEqual([{ alias: 'llm-key', type: 'secret', status: 'found', usedBy: ['llm'], certificates: [] }]);
 
     secrets.writeFile({
       entries: [

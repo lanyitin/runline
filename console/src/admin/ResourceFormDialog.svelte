@@ -8,6 +8,7 @@
   import OpenAiFields from './OpenAiFields.svelte';
   import { formOf } from './resource-forms';
   import { formTypes } from './resource-types';
+  import CertificateAliasesField from './CertificateAliasesField.svelte';
   import SecretAliasField from './SecretAliasField.svelte';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
   import Dialog from '../ui/Dialog.svelte';
@@ -260,6 +261,15 @@
           {type}
           error={errors['resource-secret']}
           onchange={() => cleared('resource-secret')}
+        />
+      {/if}
+      {#if fields !== undefined && (type === 'jdbc-pool' || type === 'openai-compatible')}
+        <CertificateAliasesField
+          bind:trustAliases={fields.trustAliases}
+          bind:clientCertAlias={fields.clientCertAlias}
+          {type}
+          error={errors['resource-certificates']}
+          onchange={() => cleared('resource-certificates')}
         />
       {/if}
     {/if}

@@ -130,7 +130,7 @@
         </thead>
         <tbody>
           {#each keystore.data.secrets as secret (secret.alias)}
-            <tr>
+            <tr data-alias={secret.alias}>
               <td><PlainText value={secret.alias} mono /></td>
               <td>{enumLabel(i18n.translate, 'secretType', secret.type)}</td>
               <td class="status {secret.status}">{enumLabel(i18n.translate, 'keystoreStatus', secret.status)}</td>
@@ -140,6 +140,33 @@
         </tbody>
       </table>
     </div>
+    {#if keystore.data.secrets.some((secret) => secret.certificates.length > 0)}
+      <div class="certificate-list">
+        <h3>{i18n.t('secrets.certificates')}</h3>
+        {#each keystore.data.secrets.filter((secret) => secret.certificates.length > 0) as secret (secret.alias)}
+          <div class="entry">
+            <PlainText value={secret.alias} mono />
+            <ul class="certificates" data-certificates-of={secret.alias}>
+              {#each secret.certificates as certificate, index (index)}
+                <li class={certificate.expiry}>
+                  <span class="subject"><PlainText value={certificate.subject} mono /></span>
+                  <span class="expiry">
+                    {i18n.t('secrets.certificate.notAfter', { date: certificate.notAfter })} ·
+                    {certificate.expiry === 'expired'
+                      ? i18n.t('secrets.certificate.expired')
+                      : i18n.t('secrets.certificate.daysLeft', { days: certificate.daysLeft })}
+                  </span>
+                  {#if certificate.expiry === 'expiring'}
+                    <span class="warning" role="note">{i18n.t('secrets.certificate.expiring')}</span>
+                  {/if}
+                  <span class="fingerprint mono">{i18n.t('secrets.certificate.fingerprint')} {certificate.fingerprint}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+      </div>
+    {/if}
     {#if keystore.error}
       <ApiErrorNotice failure={keystore.error} />
     {/if}
@@ -174,7 +201,40 @@
   .status.found {
     color: var(--success-text);
   }
-  .status.invalid_secret {
+  .status.invalid_secret,
+  .status.invalid_key {
+    color: var(--danger-text);
+  }
+  .certificate-list {
+    display: grid;
+    gap: var(--space-2);
+  }
+  h3 {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .certificates {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding-left: var(--space-4);
+    font-size: var(--text-sm);
+  }
+  .certificates li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .expiry,
+  .fingerprint {
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+  .expiring .warning {
+    color: var(--warning-text);
+  }
+  .expired .expiry {
     color: var(--danger-text);
   }
 </style>

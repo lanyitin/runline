@@ -53,6 +53,8 @@ class RunHarness(
     retention: Duration = Duration.ofHours(1),
     unfinishedGrace: Duration = Duration.ofMillis(300),
     shutdownGrace: Duration = Duration.ofSeconds(5),
+    /** How long the end of a run waits for its resources to be given back (ADR-007). */
+    releaseWait: Duration = Duration.ofSeconds(30),
     jarDirectory: Path? = null,
     openTelemetry: OpenTelemetry = OpenTelemetry.noop(),
     maxReadBytes: Long = 10L * 1024 * 1024,
@@ -138,7 +140,7 @@ class RunHarness(
           gateAround(gate ?: accessorGate ?: NoResources),
           telemetry,
           Clock.systemUTC(),
-          SchedulerConfig(maxConcurrent, runTimeout, shutdownGrace, jars),
+          SchedulerConfig(maxConcurrent, runTimeout, shutdownGrace, jars, releaseWait),
       )
   val service =
       RunService(

@@ -77,6 +77,11 @@ data class RunSettings(
     val shutdownGrace: Duration,
     /** How long a run waits for its shared resources before it fails (ADR-007). */
     val resourceWaitTimeout: Duration,
+    /**
+     * How long the end of a run waits for its resources to be given back before it is recorded as
+     * ended all the same (ADR-007); not the shutdown grace.
+     */
+    val releaseWait: Duration = Duration.ofSeconds(EngineConfig.DEFAULT_RELEASE_WAIT_SECONDS),
 )
 
 /** Where the files of `file` shared resources live (ADR-019); every such path is inside it. */
@@ -166,6 +171,8 @@ data class EngineConfig(
     /** How long a shutdown waits for requests in flight and for runs it asked to stop. */
     const val DEFAULT_SHUTDOWN_GRACE_SECONDS = 30L
     private const val DEFAULT_RESOURCE_WAIT_SECONDS = 3600L
+    /** How long the end of a run waits for its resources to be given back (ADR-007). */
+    const val DEFAULT_RELEASE_WAIT_SECONDS = 30L
     private const val DEFAULT_CHECK_TIMEOUT_SECONDS = 10L
     private const val DEFAULT_CERTIFICATE_WARNING_DAYS = 30L
     private const val DEFAULT_MAX_READ_BYTES =
@@ -308,6 +315,11 @@ data class EngineConfig(
                   Duration.ofSeconds(
                       optionalNumber("runs.resourceWaitTimeoutSeconds", min = 1)
                           ?: DEFAULT_RESOURCE_WAIT_SECONDS
+                  ),
+              releaseWait =
+                  Duration.ofSeconds(
+                      optionalNumber("runs.releaseWaitSeconds", min = 1)
+                          ?: DEFAULT_RELEASE_WAIT_SECONDS
                   ),
           )
 

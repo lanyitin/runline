@@ -126,6 +126,8 @@ class BoundResources(
 
   /**
    * From now on every operation on [resource] fails with the reason; nothing reaches the entity.
+   * When letting go of what the binding holds fails, the resource is invalidated all the same and
+   * the failure is thrown.
    */
   fun invalidate(resource: String, reason: Invalidation) {
     val binding = bindings[resource] ?: return
@@ -134,17 +136,31 @@ class BoundResources(
     // with it, and the first reason stays.
     val first = state.claimed.compareAndSet(null, reason)
     binding.abort()
-    state.lock.write {
-      // Nothing is running on the binding now and nothing can start: let it go.
-      if (first) runCatching { binding.close() }
+    try {
+      state.lock.write {
+        // Nothing is running on the binding now and nothing can start: let it go.
+        if (first) binding.close()
+      }
+    } finally {
+      if (first) observer.invalidated(resource, binding.type, reason)
     }
-    if (first) observer.invalidated(resource, binding.type, reason)
   }
 
-  /** [invalidate] for every resource of the run, and for any that is looked at later. */
+  /**
+   * [invalidate] for every resource of the run, and for any that is looked at later. Every resource
+   * is invalidated even when one fails to let go; the first failure is then thrown.
+   */
   fun invalidateAll(reason: Invalidation) {
     if (runInvalidation == null) runInvalidation = reason
-    bindings.keys.forEach { invalidate(it, reason) }
+    var failure: Throwable? = null
+    for (resource in bindings.keys) {
+      try {
+        invalidate(resource, reason)
+      } catch (e: Throwable) {
+        failure?.addSuppressed(e) ?: run { failure = e }
+      }
+    }
+    failure?.let { throw it }
   }
 
   private companion object {

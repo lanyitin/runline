@@ -189,9 +189,11 @@ internal constructor(
   /**
    * Ends the run's use of the resource: an open transaction is rolled back, the connections are
    * given back to the pool, which cleans each of them before another run can have it (and closes
-   * one that it cannot show to be clean), and the run leaves its generation.
+   * one that it cannot show to be clean), and the run leaves its generation. Every connection is
+   * given back even when one fails to be cleaned; the first such failure is then thrown.
    */
   override fun close() {
+    var failure: Throwable? = null
     try {
       val open = transaction
       transaction = null
@@ -201,10 +203,15 @@ internal constructor(
           val held = idle.removeFirst()
           // The pool cleans it, or closes it when it cannot show it clean (a connection cut by
           // an abort is closed already).
-          runCatching { pool.release(held.connection) }
+          try {
+            pool.release(held.connection)
+          } catch (e: Throwable) {
+            failure?.addSuppressed(e) ?: run { failure = e }
+          }
         }
         owned = 0
       }
+      failure?.let { throw it }
     } finally {
       if (timerOnce.isInitialized()) timer.shutdownNow()
       runCatching { workers.shutdownNow() }

@@ -267,6 +267,7 @@ fun Application.configureDependencyInjection() {
               runs.timeout,
               runs.shutdownGrace,
               Path.of(System.getProperty("java.io.tmpdir")),
+              runs.releaseWait,
           ),
       )
     }

@@ -4,6 +4,7 @@ import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.tls.ResourceTls
 import java.security.MessageDigest
 import java.sql.Connection
+import java.sql.SQLException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -95,9 +96,12 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
     val password = (credential as? JdbcCredential.Password)?.value
     val clean = { connection: Connection ->
       // Nothing of a transaction, then everything of the session, then what the Engine wants of
-      // it; and only a connection that is open, in autocommit and answers is kept.
+      // it; and only a connection that is open, in autocommit and answers is kept. A database that
+      // does not answer is waited for no longer than the limit of a reset.
       !connection.isClosed &&
-          run {
+          try {
+            val before = connection.networkTimeout
+            connection.setNetworkTimeout(Runnable::run, RESET_LIMIT_MILLIS)
             if (!connection.autoCommit) {
               connection.rollback()
               connection.autoCommit = true
@@ -106,7 +110,10 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
               profile.resetStatements.forEach { statement.execute(it) }
             }
             JdbcConnector.start(profile, settings, connection)
+            connection.setNetworkTimeout(Runnable::run, before)
             connection.autoCommit && connection.isValid(5)
+          } catch (e: SQLException) {
+            throw JdbcFailureCause.of(profile.classify(e).failure, e, password)
           }
     }
     return JdbcConnectionPool(capacity * settings.connectionsPerRun, clean) {
@@ -155,6 +162,15 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
       all.clear()
       current.clear()
     }
+  }
+
+  companion object {
+    /**
+     * The longest the database may leave the cleaning of a connection unanswered, on each read; a
+     * connection whose cleaning takes longer is closed and the failure is said (WI-62). Fixed: a
+     * cleaning is a few short statements, so this is about the network, not the work.
+     */
+    const val RESET_LIMIT_MILLIS = 5_000
   }
 
   private fun digest(password: String): String =

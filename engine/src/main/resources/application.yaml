@@ -93,12 +93,16 @@ workspace:
 # to stop; during it no new request is admitted.
 # RUNLINE_RESOURCE_WAIT_TIMEOUT_SECONDS (optional, default 3600) is how long a run may wait for the
 # shared resources it declares (WI-09, ADR-007) before it fails; pipelines cannot set it.
+# RUNLINE_RELEASE_WAIT_SECONDS (optional, default 30) is how long the end of a run waits for its
+# resources to be given back (ADR-007, WI-62); after it the run is recorded as ended and its slot is
+# freed, while what it held stays held until the release really ends. Not the shutdown grace.
 runs:
   maxConcurrent: "$RUNLINE_MAX_CONCURRENT_RUNS:"
   runtimeDir: "$RUNLINE_RUNTIME_DIR:"
   timeoutSeconds: "$RUNLINE_RUN_TIMEOUT_SECONDS:"
   shutdownGraceSeconds: "$RUNLINE_SHUTDOWN_GRACE_SECONDS:"
   resourceWaitTimeoutSeconds: "$RUNLINE_RESOURCE_WAIT_TIMEOUT_SECONDS:"
+  releaseWaitSeconds: "$RUNLINE_RELEASE_WAIT_SECONDS:"
 
 # Retention of runs, their logs and trigger firings (WI-20), counted from when a run ended and from
 # when a firing happened; runs not yet ended and firings still pending are never removed. Not the

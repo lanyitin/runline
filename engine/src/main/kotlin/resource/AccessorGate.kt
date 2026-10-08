@@ -11,6 +11,7 @@ import dev.lawlan.runline.engine.run.RunTelemetry
 import dev.lawlan.runline.runner.ResourceHost
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import org.slf4j.LoggerFactory
 
 /**
  * The gate of the Engine: the [ResourceCoordinator] decides who holds what, and on top of that a
@@ -26,6 +27,8 @@ class AccessorGate(
     private val telemetry: ResourceTelemetry,
 ) : ResourceGate {
   private class Prepared(val host: BoundResources, val observer: EngineResourceObserver)
+
+  private val log = LoggerFactory.getLogger(AccessorGate::class.java)
 
   private val prepared = ConcurrentHashMap<UUID, Prepared>()
 
@@ -53,14 +56,33 @@ class AccessorGate(
 
   init {
     coordinator.beforeForcedRelease { runId, resource ->
-      prepared[runId]?.host?.invalidate(resource, Invalidation.FORCE_RELEASED)
+      try {
+        prepared[runId]?.host?.invalidate(resource, Invalidation.FORCE_RELEASED)
+      } catch (e: Exception) {
+        // The accessor refuses every call already; what failed is letting go of the entity, and
+        // the resource is taken off the run all the same.
+        log.error(
+            "Letting go of resource {} of run {}, released by force, failed",
+            resource,
+            runId,
+            e,
+        )
+      }
     }
   }
 
+  /**
+   * Stops the accessors of [runId], then gives back what it holds. When letting go of an entity
+   * fails, the accessors refuse every call all the same, so the capacity is given back and the
+   * failure is thrown.
+   */
   override fun release(runId: UUID) {
     // The accessors stop first: nothing the run still does may reach an entity another run gets.
-    prepared.remove(runId)?.host?.invalidateAll(Invalidation.RUN_ENDED)
-    coordinator.release(runId)
+    try {
+      prepared.remove(runId)?.host?.invalidateAll(Invalidation.RUN_ENDED)
+    } finally {
+      coordinator.release(runId)
+    }
   }
 
   override fun attach(wake: () -> Unit) = coordinator.attach(wake)

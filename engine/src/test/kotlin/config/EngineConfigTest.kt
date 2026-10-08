@@ -417,6 +417,32 @@ class EngineConfigTest {
   }
 
   @Test
+  fun `the wait for a run's resources to be given back has a default limit of its own`() {
+    val config = parse("runs.shutdownGraceSeconds" to "5")
+
+    assertEquals(java.time.Duration.ofSeconds(30), config.runs.releaseWait)
+  }
+
+  @Test
+  fun `the wait for a run's resources to be given back is configurable apart from the shutdown grace`() {
+    val config = parse("runs.releaseWaitSeconds" to "7")
+
+    assertEquals(java.time.Duration.ofSeconds(7), config.runs.releaseWait)
+    assertEquals(java.time.Duration.ofSeconds(30), config.runs.shutdownGrace)
+  }
+
+  @Test
+  fun `a release wait that is not a positive number of seconds is rejected by name`() {
+    for (value in listOf("0", "-1", "soon")) {
+      val e =
+          assertFailsWith<ConfigurationException>(value) {
+            parse("runs.releaseWaitSeconds" to value)
+          }
+      assertTrue(e.message!!.contains("runs.releaseWaitSeconds"), "missing from: ${e.message}")
+    }
+  }
+
+  @Test
   fun `zero retention is allowed and removes failed run directories at the next sweep`() {
     assertEquals(
         java.time.Duration.ZERO,

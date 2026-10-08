@@ -73,6 +73,7 @@ Every run executes in its own class loader whose parent is only the JDK, so a ru
 | `RUNLINE_WORKSPACE_MAX_BYTES`, `RUNLINE_FAILED_RUN_RETENTION_SECONDS` (required) | Size limit per directory; how long a failed, cancelled or interrupted run keeps its private directory |
 | `RUNLINE_RUN_TIMEOUT_SECONDS` (optional) | Cooperative limit on a pipeline body; none by default |
 | `RUNLINE_SHUTDOWN_GRACE_SECONDS` (optional, 30) | The grace time of a shutdown: how long it waits for requests in flight, and again for runs it asked to stop (see "Shutdown" below) |
+| `RUNLINE_RELEASE_WAIT_SECONDS` (optional, 30, at least 1) | How long the end of a run waits for its resources to be given back; after it the run is recorded as ended and its slot is freed, with an error in the log and `runline.runs.release.failures` counted, while what it held stays held until the release really ends. Not the shutdown grace |
 | `UPLOAD_MAX_BYTES` (optional, 50 MiB) | Largest jar accepted by the upload API, as sent |
 | `UPLOAD_MAX_ENTRIES` (optional, 20000) | Most entries a jar may hold |
 | `UPLOAD_MAX_ENTRY_BYTES` (optional, 64 MiB) | Most one entry of a jar may expand to |

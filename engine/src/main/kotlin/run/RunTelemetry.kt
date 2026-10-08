@@ -28,6 +28,7 @@ class RunTelemetry(openTelemetry: OpenTelemetry) {
   private val ended = meter.counterBuilder("runline.runs.ended").build()
   private val residual = meter.counterBuilder("runline.runs.residual.threads").build()
   private val unfinished = meter.upDownCounterBuilder("runline.runs.timed_out_unfinished").build()
+  private val releaseFailures = meter.counterBuilder("runline.runs.release.failures").build()
 
   private class Trace(val root: Span, var phase: Span, var state: RunState)
 
@@ -78,6 +79,16 @@ class RunTelemetry(openTelemetry: OpenTelemetry) {
     }
     ended.add(1, Attributes.of(STATE_LABEL, state.name))
     if (residualThreads.isNotEmpty()) residual.add(residualThreads.size.toLong())
+  }
+
+  /**
+   * Giving back what a run held [outcome] failed or timed out: counted once for each type of the
+   * typed resources it held ([types]), or once as `none` when it held no typed resource.
+   */
+  fun releaseFailed(outcome: ReleaseOutcome, types: Collection<String>) {
+    for (type in types.distinct().ifEmpty { listOf(NO_TYPE) }) {
+      releaseFailures.add(1, Attributes.of(OUTCOME, outcome.label, TYPE, type))
+    }
   }
 
   /**
@@ -137,6 +148,9 @@ class RunTelemetry(openTelemetry: OpenTelemetry) {
     val VERDICT_LABEL = AttributeKey.stringKey("verdict")
     val STATE_LABEL = AttributeKey.stringKey("state")
     val REASON = AttributeKey.stringKey("reason")
+    val OUTCOME = AttributeKey.stringKey("outcome")
+    val TYPE = AttributeKey.stringKey("type")
+    const val NO_TYPE = "none"
     val ERROR_STATES = setOf(RunState.FAILED, RunState.TIMED_OUT, RunState.INTERRUPTED)
   }
 }

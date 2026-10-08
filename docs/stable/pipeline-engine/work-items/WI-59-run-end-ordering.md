@@ -1,6 +1,6 @@
 # WI-59 Run 被觀察為已結束時，資源已釋放
 
-本文回答：Run 結束時，存取端失效、資源釋放與結束記錄三者的先後，以及如何驗收。狀態：已核可（2026-10-08）；部分實作（2026-10-08，見「實作結果」；失效或釋放卡住時的時間界限待架構決定）。相依：WI-09、WI-43。決策見[ADR-007](../adr/ADR-007-shared-resources.md)「Run 終止時」一點。
+本文回答：Run 結束時，存取端失效、資源釋放與結束記錄三者的先後，以及如何驗收。狀態：已核可（2026-10-08）；已實作（2026-10-08，見「實作結果」；第 5 條驗收條件由 [WI-62](WI-62-release-wait-limit.md) 完成）。相依：WI-09、WI-43。決策見[ADR-007](../adr/ADR-007-shared-resources.md)「Run 終止時」一點。
 
 ## 背景
 
@@ -40,3 +40,5 @@
 - 建議的做法（待決定）：釋放改在排程器執行緒之外進行，排程器最多等界限時間；逾時則記錄 run 已結束、釋放其並行名額，並以 log（error）與 metric（例如 `runline.runs.release.failures`，標籤區分失敗或逾時）記錄；卡住的釋放之後若完成，照常歸還容量並喚醒等待者，期間容量仍被占用，等待者繼續等待，符合 ADR-007 允許的「已結束但釋放未完成」。需要決定的是界限的組態名稱與預設值（或沿用 `runs.shutdownGraceSeconds`）。
 
 **驗證。** `./gradlew cleanTest :engine:cleanPackagedTest :engine:cleanConsoleTest :engine:cleanConsoleTypecheck :engine:cleanConsoleApiDocCheck check --continue` 1 次：只有 `OpenAiBindingMultipartTest`「a slow upload…」失敗（WI-60）。其餘全部通過：accessors 349 個（21 個跳過，同 WI-57）、analyzer 133、core 88、devkit 181、runner 58、engine 1117（1 個跳過，同 WI-57）、packagedTest 63，Console 1093 與 API 文件檢查 9 個。
+
+**WI-62 完成後（2026-10-08）：失效或釋放失敗或卡住，已實作。** 架構決定為新的 Engine 組態「釋放等待上限」（`RUNLINE_RELEASE_WAIT_SECONDS`，預設 30 秒，與關閉寬限時間分開）與 `jdbc-pool` 重置的型別逾時。run 結束的釋放改在排程執行緒之外進行（`RunRelease`），排程器在釋放完成或超過上限時才記錄結束，期間該 run 仍占並行額度；超過上限時記錄結束、歸還額度、寫 error log 並以 `runline.runs.release.failures{outcome=timed_out}` 計數，卡住的容量在實際釋放完成前仍被占用。釋放拋出的例外不再被吞掉：`BoundResources.invalidate` 與 `JdbcBinding.close` 會在完成失效與歸還其餘連線後拋出第一個失敗，`AccessorGate.release` 無論如何都歸還容量再拋出，排程器以 error log 與 `outcome=failed` 記錄。以上述可凍結 TCP 轉送的同一情境驗證（`RunReleaseLimitTest`），細節見 WI-62「實作結果」。本項的 5 個順序測試與原本因時間差失敗的 5 個測試在 WI-62 之後仍全部通過。

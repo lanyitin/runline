@@ -16,7 +16,6 @@ ktor:
       - dev.lawlan.runline.engine.CleanExitKt.configureCleanExit
       - dev.lawlan.runline.engine.StartupKt.configureStartupChecks
       - dev.lawlan.runline.engine.HttpKt.configureHttp
-      - dev.lawlan.runline.engine.MonitoringKt.configureMonitoring
       - dev.lawlan.runline.engine.SerializationKt.configureSerialization
       - dev.lawlan.runline.engine.SecurityKt.configureSecurity
       - dev.lawlan.runline.engine.StatusPagesKt.configureStatusPages

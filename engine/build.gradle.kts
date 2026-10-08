@@ -16,7 +16,6 @@ dependencies {
   implementation(ktorLibs.server.contentNegotiation)
   implementation(ktorLibs.server.core)
   implementation(ktorLibs.server.di)
-  implementation(ktorLibs.server.metrics)
   implementation(ktorLibs.server.netty)
   implementation(ktorLibs.server.routingOpenapi)
   implementation(ktorLibs.server.statusPages)

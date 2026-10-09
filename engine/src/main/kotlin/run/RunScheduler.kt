@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.engine.ShutdownBudget
 import dev.lawlan.runline.engine.artifact.DefinitionStore
 import dev.lawlan.runline.runner.RunHandle
 import dev.lawlan.runline.runner.RunRequest
@@ -36,10 +37,13 @@ data class SchedulerConfig(
     val maxConcurrentRuns: Int,
     /** Cooperative limit on a pipeline body; none when null. */
     val runTimeout: Duration?,
-    /** How long a shutdown waits for runs it asked to stop. */
-    val shutdownGrace: Duration,
     /** Where a run's jar is written for as long as it runs. */
     val jarDirectory: Path,
+    /**
+     * How long the end of a run waits for its resources to be given back before it is recorded as
+     * ended all the same (ADR-007).
+     */
+    val releaseWait: Duration = Duration.ofSeconds(30),
 )
 
 enum class CancelOutcome {
@@ -64,6 +68,11 @@ enum class CancelOutcome {
  * the Runner, becomes a failed run, and the slot, the jar copy, the resources and the log
  * connection are released. All decisions are made on one thread, so there are no races between
  * starting, cancelling and ending; each run's pipeline still runs on its own Runner thread.
+ *
+ * What a run that started held is given back off that thread ([RunRelease]), and the run is
+ * recorded as ended once that is over or once the release wait has passed, whichever is first; it
+ * keeps its slot until then. A release that hangs therefore holds up no other run, and what it
+ * holds stays held, as the coordinator says, until it really ends (ADR-007 "Run 終止時").
  */
 class RunScheduler(
     private val runner: Runner,
@@ -74,19 +83,31 @@ class RunScheduler(
     private val telemetry: RunTelemetry,
     private val clock: Clock,
     private val config: SchedulerConfig,
+    /** What a shutdown may still wait for runs it asked to stop and for what they give back. */
+    private val shutdown: ShutdownBudget,
 ) : AutoCloseable {
   private val log = LoggerFactory.getLogger(RunScheduler::class.java)
   private val executor = Executors.newSingleThreadExecutor { task ->
     Thread.ofPlatform().name("run-scheduler").unstarted(task)
   }
+  private val releases = RunRelease(gate, config.releaseWait, telemetry)
 
   // Confined to the scheduler thread.
   private class Queued(val plan: RunPlan, var waiting: Boolean = false)
 
-  private class Active(val handle: RunHandle, val jar: Path, val recorder: RunRecorder)
+  private class Active(
+      val handle: RunHandle,
+      val jar: Path,
+      val recorder: RunRecorder,
+      val types: Collection<String>,
+  )
+
+  /** A run that has finished and is giving back what it held; it keeps its slot until then. */
+  private class Ending(val jar: Path, val end: End)
 
   private val queue = ArrayDeque<Queued>()
   private val active = HashMap<UUID, Active>()
+  private val ending = HashMap<UUID, Ending>()
   private var closing = false
   private var drained: CompletableFuture<Unit>? = null
 
@@ -150,8 +171,9 @@ class RunScheduler(
 
   /**
    * Stops accepting work: runs that have not started are interrupted, running ones are asked to
-   * stop and given the configured grace to end. Whatever has not ended by then is recorded as
-   * interrupted; it is cut short by the process ending.
+   * stop and given what is left of the shutdown's grace time to end and give back what they hold.
+   * Whatever has not ended by then is recorded as interrupted; it is cut short by the process
+   * ending. Recording that is part of the wrap-up, which is not drawn from the grace time.
    */
   override fun close() {
     val drained = CompletableFuture<Unit>()
@@ -161,13 +183,17 @@ class RunScheduler(
       return // closed before
     }
     try {
-      drained.get(config.shutdownGrace.toMillis(), TimeUnit.MILLISECONDS)
+      drained.get(shutdown.remaining().toMillis(), TimeUnit.MILLISECONDS)
     } catch (e: java.util.concurrent.TimeoutException) {
-      log.warn("Some runs did not stop within {}", config.shutdownGrace)
+      log.warn("Some runs did not stop within the grace time of the shutdown")
     }
     executor.execute { guarded { abandonRemaining() } }
     executor.shutdown()
-    executor.awaitTermination(config.shutdownGrace.toMillis(), TimeUnit.MILLISECONDS)
+    executor.awaitTermination(
+        (shutdown.remaining() + ShutdownBudget.WRAP_UP).toMillis(),
+        TimeUnit.MILLISECONDS,
+    )
+    releases.close()
   }
 
   // ---- on the scheduler thread ----
@@ -183,7 +209,7 @@ class RunScheduler(
   }
 
   private fun dispatch() {
-    while (!closing && active.size < config.maxConcurrentRuns) {
+    while (!closing && slotsTaken() < config.maxConcurrentRuns) {
       val next = nextStartable() ?: return
       start(next.plan)
     }
@@ -204,7 +230,7 @@ class RunScheduler(
             )
           } catch (t: Throwable) {
             queue.remove(candidate)
-            fail(candidate.plan.id, t)
+            fail(candidate.plan, t)
             continue
           }
       when (decision) {
@@ -220,7 +246,7 @@ class RunScheduler(
             }
         is GateDecision.Refused -> {
           queue.remove(candidate)
-          refuse(candidate.plan.id, decision.failure)
+          refuse(candidate.plan, decision.failure)
         }
       }
     }
@@ -248,7 +274,7 @@ class RunScheduler(
               ),
               recorder,
           )
-      active[plan.id] = Active(handle, jar, recorder)
+      active[plan.id] = Active(handle, jar, recorder, plan.resourceTypes.values)
       refreshStats()
       handle.result.whenComplete { result, error ->
         try {
@@ -260,22 +286,42 @@ class RunScheduler(
     } catch (t: Throwable) {
       recorder?.let { runCatching { it.close() } }
       jar?.let { runCatching { Files.deleteIfExists(it) } }
-      fail(plan.id, t)
+      fail(plan, t)
     }
   }
 
-  /** Ends a run that never got started: it is failed and gives back what it was granted. */
-  private fun fail(id: UUID, t: Throwable) {
+  /**
+   * Ends a run that never got started: it is failed once it has given back what it was granted,
+   * which goes on off this thread, as for a run that ran.
+   */
+  private fun fail(plan: RunPlan, t: Throwable) {
+    val id = plan.id
     log.error("Run {} could not be started", id, t)
-    runCatching { gate.release(id) }
-    runCatching { progress.finish(id, RunState.FAILED, failureOf(t)) }
-        .onFailure { log.error("Run {} could not be marked failed", id, it) }
+    releases.start(id, plan.resourceTypes.values).thenRun {
+      runCatching { progress.finish(id, RunState.FAILED, failureOf(t)) }
+          .onFailure { log.error("Run {} could not be marked failed", id, it) }
+    }
+  }
+
+  /**
+   * Gives back what a run that never started waits for or was granted, here: such a run has no
+   * accessor that was ever used, so nothing of it reaches an entity. A failure is said.
+   */
+  private fun releaseUnstarted(plan: RunPlan) {
+    val id = plan.id
+    try {
+      gate.release(id)
+    } catch (t: Throwable) {
+      log.error("Giving back the resources of run {}, which did not start, failed", id, t)
+      telemetry.releaseFailed(ReleaseOutcome.FAILED, plan.resourceTypes.values)
+    }
   }
 
   /** Ends a run the gate says can never start: it is failed with the gate's reason. */
-  private fun refuse(id: UUID, failure: FailureInfo) {
+  private fun refuse(plan: RunPlan, failure: FailureInfo) {
+    val id = plan.id
     log.warn("Run {} will not start: {}: {}", id, failure.type, failure.message)
-    runCatching { gate.release(id) }
+    releaseUnstarted(plan)
     runCatching { progress.finish(id, RunState.FAILED, failure) }
         .onFailure { log.error("Run {} could not be marked failed", id, it) }
     refreshStats()
@@ -289,17 +335,35 @@ class RunScheduler(
           else -> End(result!!.stateWhenClosing(), result.failureInfo(), result.residualThreads)
         }
     runCatching { run.recorder.close() }
+    // Given back before the end is recorded: whoever sees the run ended sees it holding nothing,
+    // unless the release failed or outlasted the release wait, which is logged and counted.
+    ending[id] = Ending(run.jar, ended)
+    releases.start(id, run.types).thenRun {
+      try {
+        executor.execute { guarded { released(id) } }
+      } catch (e: RejectedExecutionException) {
+        // The scheduler is gone; the run was recorded when it shut down.
+      }
+    }
+  }
+
+  /** The run that ended has given back what it held, or the release wait is over: it is ended. */
+  private fun released(id: UUID) {
+    val run = ending.remove(id) ?: return
+    record(id, run.end)
+    runCatching { Files.deleteIfExists(run.jar) }
+    if (closing) {
+      if (active.isEmpty() && ending.isEmpty()) drained?.complete(Unit)
+    } else {
+      dispatch()
+    }
+  }
+
+  private fun record(id: UUID, ended: End) {
     try {
       progress.finish(id, ended.state, ended.failure, ended.residualThreads)
     } catch (t: Throwable) {
       log.error("Run {} ended {} but that could not be recorded", id, ended.state, t)
-    }
-    runCatching { gate.release(id) }
-    runCatching { Files.deleteIfExists(run.jar) }
-    if (closing) {
-      if (active.isEmpty()) drained?.complete(Unit)
-    } else {
-      dispatch()
     }
   }
 
@@ -326,12 +390,14 @@ class RunScheduler(
     val waiting = queue.firstOrNull { it.plan.id == id }
     if (waiting != null) {
       queue.remove(waiting)
-      runCatching { gate.release(id) }
+      releaseUnstarted(waiting.plan)
       progress.finish(id, RunState.CANCELLED)
       refreshStats()
       dispatch() // what it waited for may now be free for another run
       return CancelOutcome.CANCELLED_BEFORE_START
     }
+    // A run that is giving back what it held has stopped already; it ends as it finished.
+    if (id in ending) return CancelOutcome.CANCELLATION_REQUESTED
     val running = active[id] ?: return CancelOutcome.NOT_ACTIVE
     running.handle.cancel()
     return CancelOutcome.CANCELLATION_REQUESTED
@@ -339,29 +405,46 @@ class RunScheduler(
 
   private fun beginShutdown(drained: CompletableFuture<Unit>) {
     closing = true
+    releases.shuttingDown()
     this.drained = drained
     for (queued in queue.toList()) {
-      runCatching { gate.release(queued.plan.id) }
+      releaseUnstarted(queued.plan)
       runCatching { progress.finish(queued.plan.id, RunState.INTERRUPTED) }
     }
     queue.clear()
     active.values.forEach { it.handle.cancel() }
-    if (active.isEmpty()) drained.complete(Unit)
+    if (active.isEmpty() && ending.isEmpty()) drained.complete(Unit)
   }
 
+  /**
+   * The grace is over. Runs that are still giving back what they held are recorded as they ended;
+   * runs that have not stopped are given what is left of the grace time, not the release wait, to
+   * give back what they hold, all at once, and are recorded as interrupted.
+   */
   private fun abandonRemaining() {
-    for ((id, run) in active) {
+    for ((id, run) in ending) {
+      record(id, run.end)
+      runCatching { Files.deleteIfExists(run.jar) }
+    }
+    ending.clear()
+    val releasing = active.map { (id, run) ->
       runCatching { run.recorder.close() }
-      runCatching { gate.release(id) }
-      runCatching { progress.finish(id, RunState.INTERRUPTED) }
+      id to releases.start(id, run.types)
     }
     active.clear()
+    runCatching {
+      CompletableFuture.allOf(*releasing.map { it.second }.toTypedArray())
+          .get(shutdown.remaining().toMillis(), TimeUnit.MILLISECONDS)
+    }
+    for ((id, _) in releasing) runCatching { progress.finish(id, RunState.INTERRUPTED) }
   }
+
+  private fun slotsTaken() = active.size + ending.size
 
   private fun refreshStats() {
     queuedCount.set(queue.size)
     waitingCount.set(queue.count { it.waiting })
-    activeCount.set(active.size)
+    activeCount.set(slotsTaken())
   }
 
   private fun failureOf(t: Throwable) =

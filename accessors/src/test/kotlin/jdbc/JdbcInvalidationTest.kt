@@ -132,7 +132,7 @@ class JdbcInvalidationTest {
   }
 
   @Test
-  fun `a connection whose reset fails is closed and not given to another run`() {
+  fun `a connection whose reset fails is closed and not given to another run, and the failure is said`() {
     val failing =
         object : JdbcProfile by PostgresProfile {
           override val resetStatements = listOf("SELECT no_such_function_for_reset()")
@@ -141,7 +141,9 @@ class JdbcInvalidationTest {
     JdbcRig(profiles).use { local ->
       val first = local.host()
       val pid = scalar2(local, first, "SELECT pg_backend_pid()")
-      first.invalidateAll(Invalidation.RUN_ENDED)
+      val failure =
+          assertFailsWith<RuntimeException> { first.invalidateAll(Invalidation.RUN_ENDED) }
+      assertTrue("42883" in failure.message.orEmpty(), "${failure.message}")
 
       assertEquals(0, local.db.sessions(), "the connection was kept")
       val next = local.host()

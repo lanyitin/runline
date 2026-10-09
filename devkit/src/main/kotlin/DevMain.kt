@@ -1,5 +1,6 @@
 package dev.lawlan.runline.devkit
 
+import dev.lawlan.runline.accessors.openai.UploadSendBuffer
 import java.io.PrintStream
 import java.nio.file.Path
 import java.time.LocalDateTime
@@ -13,6 +14,8 @@ object DevMain {
 
   /** Parses [args] and [env], runs the pipeline and returns the exit code. */
   fun run(args: List<String>, env: Map<String, String>, projectDir: Path, out: PrintStream): Int {
+    // The same bound on the JDK HTTP client's send buffer as the Engine's (WI-60).
+    UploadSendBuffer.install()
     val arguments: DevArguments
     val config: DevConfig
     try {

@@ -3,6 +3,7 @@ package dev.lawlan.runline.engine.support
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.core.Pipeline
+import dev.lawlan.runline.engine.ShutdownBudget
 import dev.lawlan.runline.engine.artifact.*
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
@@ -53,6 +54,8 @@ class RunHarness(
     retention: Duration = Duration.ofHours(1),
     unfinishedGrace: Duration = Duration.ofMillis(300),
     shutdownGrace: Duration = Duration.ofSeconds(5),
+    /** How long the end of a run waits for its resources to be given back (ADR-007). */
+    releaseWait: Duration = Duration.ofSeconds(30),
     jarDirectory: Path? = null,
     openTelemetry: OpenTelemetry = OpenTelemetry.noop(),
     maxReadBytes: Long = 10L * 1024 * 1024,
@@ -77,6 +80,10 @@ class RunHarness(
         dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
             listOf(dev.lawlan.runline.accessors.jdbc.PostgresProfile)
         ),
+    /**
+     * What the scheduler is given in place of the gate, made from it; the gate itself by default.
+     */
+    gateAround: (ResourceGate) -> ResourceGate = { it },
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -131,10 +138,11 @@ class RunHarness(
           definitions,
           progress,
           runStore,
-          gate ?: accessorGate ?: NoResources,
+          gateAround(gate ?: accessorGate ?: NoResources),
           telemetry,
           Clock.systemUTC(),
-          SchedulerConfig(maxConcurrent, runTimeout, shutdownGrace, jars),
+          SchedulerConfig(maxConcurrent, runTimeout, jars, releaseWait),
+          ShutdownBudget(shutdownGrace),
       )
   val service =
       RunService(

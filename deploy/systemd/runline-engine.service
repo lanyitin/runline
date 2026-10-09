@@ -25,7 +25,8 @@ ExecStart=/usr/bin/java -jar /opt/runline/engine.jar
 ExecStartPost=/opt/runline/bin/runline-wait-ready
 TimeoutStartSec=90
 # Graceful shutdown exits with 0, so no SuccessExitStatus is needed.
-# RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in runline.env) plus 15 seconds.
+# RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in runline.env), the budget of the whole shutdown,
+# plus 15 seconds, more than its wrap-up of at most 10.
 TimeoutStopSec=45
 Restart=on-failure
 RestartSec=5

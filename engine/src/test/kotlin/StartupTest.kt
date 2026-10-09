@@ -61,4 +61,16 @@ class StartupTest {
 
         assertEquals(HttpStatusCode.OK, client.get("/openapi").status)
       }
+
+  @Test
+  fun `bounds the send buffer of the JDK HTTP client for the whole JVM as it starts, whatever was set before`() {
+    System.setProperty("jdk.httpclient.sendBufferSize", "65536")
+
+    testApplication {
+      configureEngine()
+      startApplication()
+    }
+
+    assertEquals("262144", System.getProperty("jdk.httpclient.sendBufferSize"))
+  }
 }

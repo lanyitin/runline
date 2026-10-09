@@ -1,7 +1,6 @@
 package dev.lawlan.runline.engine
 
 import dev.lawlan.runline.engine.artifact.ErrorResponse
-import dev.lawlan.runline.engine.config.EngineConfig
 import dev.lawlan.runline.engine.health.EngineLifecycle
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -17,13 +16,14 @@ private val PROBE_PATHS = setOf("/api/v1/health/live", "/api/v1/health/ready")
 
 /**
  * When the Engine is told to stop, it stops admitting requests (answered 503 `shutting_down`, with
- * the connection closed) and waits, at most the grace time, for those in flight to finish; only
- * then does the server shut its connections. A WebSocket session is not a request in flight: it is
- * open for as long as its run, so waiting for it would make every shutdown last the grace time.
+ * the connection closed), begins the one budget of the shutdown ([ShutdownBudget]) and waits, at
+ * most for what is left of it, for those in flight to finish; only then does the server shut its
+ * connections. A WebSocket session is not a request in flight: it is open for as long as its run,
+ * so waiting for it would make every shutdown last the grace time.
  */
 fun Application.configureGracefulShutdown() {
-  val config: EngineConfig by dependencies
   val lifecycle: EngineLifecycle by dependencies
+  val shutdown: ShutdownBudget by dependencies
   val requests = InFlightRequests()
 
   intercept(ApplicationCallPipeline.Setup) {
@@ -50,15 +50,16 @@ fun Application.configureGracefulShutdown() {
   monitor.subscribe(ApplicationStopPreparing) {
     // First of all: the platform stops sending traffic before the wait for requests begins.
     lifecycle.beginShutdown()
-    val grace = config.runs.shutdownGrace
+    shutdown.start()
+    val left = shutdown.remaining()
     log.info(
         "Shutting down: no new requests are admitted; waiting up to {} for those in flight",
-        grace,
+        left,
     )
-    if (requests.drain(grace)) {
+    if (requests.drain(left)) {
       log.info("Shutting down: no request in flight")
     } else {
-      log.warn("Shutting down: requests still in flight after {} are cut off", grace)
+      log.warn("Shutting down: requests still in flight after {} are cut off", left)
     }
   }
 }

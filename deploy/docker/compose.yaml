@@ -56,8 +56,9 @@ services:
       # The files of `file` shared resources (ADR-019). Backup and capacity of this volume are the
       # operator's: the Engine only needs it to exist and be writable.
       - resources:/var/lib/runline/resources
-    # RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in .env) plus 15 seconds; Docker's default of
-    # 10 seconds would kill the Engine inside its grace time. Raise both together.
+    # RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in .env), the budget of the whole shutdown, plus
+    # 15 seconds, more than its wrap-up of at most 10; Docker's default of 10 seconds would kill the
+    # Engine inside its grace time. Raise both together.
     stop_grace_period: 45s
     healthcheck:
       # Readiness, in the Engine's own jar (no HTTP client in the image). Until the Engine has

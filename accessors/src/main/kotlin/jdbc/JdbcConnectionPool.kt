@@ -56,16 +56,19 @@ internal class JdbcConnectionPool(
 
   /**
    * Gives [connection] back. It is cleaned first, and kept for the next run only if that worked and
-   * showed it clean; otherwise (and when the pool is closed) it is closed.
+   * showed it clean; otherwise (and when the pool is closed) it is closed. A cleaning that failed
+   * is thrown once the connection is closed.
    */
   fun release(connection: Connection) {
-    val usable = !closed.get() && runCatching { clean(connection) }.getOrDefault(false)
+    val cleaned = if (closed.get()) Result.success(false) else runCatching { clean(connection) }
+    val usable = cleaned.getOrDefault(false)
     val keep =
         synchronized(lock) {
           out--
           if (usable && !closed.get()) idle.addFirst(connection).let { true } else false
         }
     if (!keep) forget(connection)
+    cleaned.exceptionOrNull()?.let { throw it }
   }
 
   private fun forget(connection: Connection) {

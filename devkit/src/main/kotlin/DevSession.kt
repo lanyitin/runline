@@ -45,13 +45,22 @@ class DevSession(private val config: DevConfig, private val out: PrintStream) {
     val workspaces = Workspaces(config.workspace, Clock.systemUTC()) {}.also { it.sweep() }
     return try {
       LocalResources(out, config.resources).holding(pipeline.metadata) { resources ->
-        runPipeline(arguments, runId, workspaces, pipeline.pipelineName, resources)
+        val code = runPipeline(arguments, runId, workspaces, pipeline.pipelineName, resources)
+        // A run that did not succeed is the failure that comes first, whatever else fails then.
+        if (code != EXIT_OK) throw RunNotSucceeded(code)
+        code
       }
     } catch (e: LocalResourceProblem) {
       out.println(e.message)
       EXIT_NOT_STARTED
+    } catch (e: RunNotSucceeded) {
+      e.suppressed.forEach { out.println("[resources] giving them back failed as well: $it") }
+      e.code
     }
   }
+
+  /** The run ended without success, with [code]; what failed after it is attached. */
+  private class RunNotSucceeded(val code: Int) : RuntimeException("exit code $code")
 
   private fun runPipeline(
       arguments: DevArguments,

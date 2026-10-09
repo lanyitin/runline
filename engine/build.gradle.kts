@@ -16,7 +16,6 @@ dependencies {
   implementation(ktorLibs.server.contentNegotiation)
   implementation(ktorLibs.server.core)
   implementation(ktorLibs.server.di)
-  implementation(ktorLibs.server.metrics)
   implementation(ktorLibs.server.netty)
   implementation(ktorLibs.server.routingOpenapi)
   implementation(ktorLibs.server.statusPages)
@@ -70,6 +69,9 @@ tasks.test {
   // waits for the exporter to time out.
   systemProperty("otel.traces.exporter", "none")
   systemProperty("otel.logs.exporter", "none")
+  systemProperty("otel.metrics.exporter", "none")
+  // The JVM's shutdown hooks are counted (MetricsOutputTest): the Engine registers none.
+  jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
   // The API documentation is checked against the routes (ApiDocumentationTest).
   systemProperty(
       "runline.apiDoc",

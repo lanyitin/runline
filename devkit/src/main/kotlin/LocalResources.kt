@@ -50,7 +50,8 @@ internal class LocalResources(
   /**
    * Holds the resources [metadata] declares while [run] executes, handing it the accessors (null
    * when the pipeline declared no type); says so on the console. Fails with [LocalResourceProblem]
-   * before anything runs when a typed resource cannot be provided.
+   * before anything runs when a typed resource cannot be provided. When giving them back fails,
+   * that failure is thrown, unless [run] failed: then the run's failure is thrown with it attached.
    */
   fun <T> holding(metadata: PipelineMetadata, run: (ResourceHost?) -> T): T {
     val declared = metadata.resources.toList()
@@ -75,12 +76,21 @@ internal class LocalResources(
         "[resources] acquired locally: ${declared.joinToString()} " +
             "(a development run does not compete and is not checked against the Engine's definitions)"
     )
+    var failure: Throwable? = null
     try {
       return run(host)
+    } catch (e: Throwable) {
+      failure = e
+      throw e
     } finally {
-      host?.invalidateAll(Invalidation.RUN_ENDED)
+      try {
+        host?.invalidateAll(Invalidation.RUN_ENDED)
+        out.println("[resources] released: ${declared.joinToString()}")
+      } catch (e: Throwable) {
+        // The run's own failure comes first; the failure to give back is attached to it (ADR-007).
+        failure?.addSuppressed(e) ?: throw e
+      }
       pools.close()
-      out.println("[resources] released: ${declared.joinToString()}")
     }
   }
 

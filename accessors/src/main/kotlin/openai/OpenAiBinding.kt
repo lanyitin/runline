@@ -490,7 +490,8 @@ class OpenAiBinding(
 
   /**
    * The bytes of a form as the client takes them: the idle limit runs from each taking to the next,
-   * so an upload that the service stops reading, or a client that stops sending, ends as idle.
+   * so an upload that the service stops reading, or a client that stops sending, ends as idle. With
+   * the send buffer bounded ([UploadSendBuffer]), a taking follows the service's reading closely.
    */
   private inner class Progress(private val call: Call, private val inner: InputStream) :
       InputStream(), Closeable {

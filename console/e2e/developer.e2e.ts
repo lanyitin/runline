@@ -4,7 +4,7 @@
 // while it goes on, cancelling it, a failure, an unsafe pipeline, and what a developer may not see.
 // Real clocks: the log is read as it is written, and the waits are for conditions on the page.
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -32,12 +32,16 @@ const jar = (name: string) => join(jars, `${name}.jar`);
 const screenshots = process.env.E2E_SCREENSHOTS;
 if (screenshots) mkdirSync(screenshots, { recursive: true });
 
+// The files the upload tests make, in a directory of this run that is deleted at the end (WI-57).
+const files = mkdtempSync(join(tmpdir(), 'runline-e2e-'));
+
 let browser: Browser;
 beforeAll(async () => {
   browser = await launchChrome();
 });
 afterAll(async () => {
   await browser?.close();
+  rmSync(files, { recursive: true, force: true });
 });
 
 const shot = async (page: Page, name: string) => {
@@ -114,8 +118,7 @@ describe('uploading a jar', () => {
   test('refusals are said in words, with what the Engine names: not a jar, no pipeline, over the limit', async () => {
     const context = await newContext(browser, 'en-US');
     const { page } = await signedIn(context, ada, '/upload');
-    const dir = join(tmpdir(), 'runline-e2e');
-    mkdirSync(dir, { recursive: true });
+    const dir = files;
 
     writeFileSync(join(dir, 'junk.jar'), 'this is not a jar');
     await page.setInputFiles('input[type="file"]', join(dir, 'junk.jar'));
@@ -146,8 +149,7 @@ describe('uploading a jar', () => {
   test('the progress of a large upload is seen as it goes, and the upload can be cancelled', async () => {
     const context = await newContext(browser, 'en-US');
     const { page } = await signedIn(context, ada, '/upload');
-    const dir = join(tmpdir(), 'runline-e2e');
-    mkdirSync(dir, { recursive: true });
+    const dir = files;
     writeFileSync(join(dir, 'slow.jar'), Buffer.alloc(40 * 1024 * 1024));
     // Make the network slow enough to look at: 4 MB a second for what is sent.
     const cdp = await context.newCDPSession(page);

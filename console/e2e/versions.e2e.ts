@@ -4,7 +4,7 @@
 // variables of the other browser tests (E2E_ENGINE_URL, E2E_TOKENS with two developers and an admin,
 // E2E_JARS).
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -31,6 +31,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await browser?.close();
+  // What the upload in the page took is deleted with the run (WI-57).
+  rmSync(dir, { recursive: true, force: true });
 });
 
 async function signedIn(context: BrowserContext, who: { token: string }, path = '/') {

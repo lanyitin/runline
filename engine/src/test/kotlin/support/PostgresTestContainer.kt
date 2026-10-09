@@ -70,6 +70,17 @@ object PostgresTestContainer {
   fun connect(database: DatabaseConfig): Connection =
       connect(database.url, database.user, database.password)
 
+  /**
+   * The whole of [database] as `pg_dump` of the server's own version writes it (schema and data, as
+   * SQL text), for a test that searches a database's backup (WI-51).
+   */
+  fun dump(database: DatabaseConfig): String {
+    val name = database.url.substringAfterLast('/').substringBefore('?')
+    val result = container.execInContainer("pg_dump", "-U", username, "-d", name)
+    check(result.exitCode == 0) { "pg_dump failed (${result.exitCode}): ${result.stderr}" }
+    return result.stdout
+  }
+
   /** A brand new, empty database on the shared instance, so a test starts from a known state. */
   fun newDatabase(): DatabaseConfig {
     val name = "t_" + UUID.randomUUID().toString().replace("-", "")

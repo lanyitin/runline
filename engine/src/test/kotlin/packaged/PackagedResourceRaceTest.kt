@@ -291,7 +291,7 @@ class PackagedResourceRaceTest {
   }
 
   @Test
-  fun `deletion, forced release, reload, changes and runs taking the resources interleave and no entity is used by two runs at once`() {
+  fun `deletion, forced release, reload, changes and runs taking the resources interleave, no entity is used by two runs at once and every action is logged with the administrator's name`() {
     val race = race()
     val served = race.served
     val target = race.target
@@ -323,10 +323,23 @@ class PackagedResourceRaceTest {
         }
     assertTrue(served.size > 3 && rows.size > 3, "served ${served.size}, statements ${rows.size}")
     assertEquals(emptyList(), overlaps(rows), "statements of two runs overlapped in the database")
+
+    // Every action of the administrator is in the log with the administrator's name.
+    val log = engine.engineOutput()
+    for (said in
+        listOf(
+            Regex("Shared resource spare deleted by root"),
+            Regex("released by force from run .* by root"),
+            Regex("Shared resource \\w+ \\([a-z-]+\\) checked by root"),
+            Regex("Secrets reloaded by root"),
+            Regex("Shared resource (llm|db) changed by root"),
+        )) {
+      assertTrue(log.lines().any { said.containsMatchIn(it) }, "$said is not in the log")
+    }
   }
 
   @Test
-  fun `after the same races every class loader of a run is reclaimed and every action is in the log with the administrator's name`() {
+  fun `after the same races every class loader of a run is reclaimed`() {
     val race = race()
     val collector = race.collector
     val ends = race.ends
@@ -349,19 +362,6 @@ class PackagedResourceRaceTest {
       created != null &&
           created >= ends.count { it["startedAt"] != null && it["startedAt"] !is JsonNull } &&
           created == lastValue(collector, "runline.runner.classloaders.reclaimed")
-    }
-
-    // Every action of the administrator is in the log with the administrator's name.
-    val log = engine.engineOutput()
-    for (said in
-        listOf(
-            Regex("Shared resource spare deleted by root"),
-            Regex("released by force from run .* by root"),
-            Regex("Shared resource \\w+ \\([a-z-]+\\) checked by root"),
-            Regex("Secrets reloaded by root"),
-            Regex("Shared resource (llm|db) changed by root"),
-        )) {
-      assertTrue(log.lines().any { said.containsMatchIn(it) }, "$said is not in the log")
     }
   }
 

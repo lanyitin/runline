@@ -1,6 +1,6 @@
 # WI-57 測試在開發容器中穩定通過，真實瀏覽器腳本的前置條件文件化
 
-本文回答：`./gradlew check` 在開發容器中有哪些既有失敗、要達到什麼狀態，以及手動腳本的前置條件記在哪裡。狀態：已核可（2026-10-08）。相依：WI-26。
+本文回答：`./gradlew check` 在開發容器中有哪些既有失敗、要達到什麼狀態，以及手動腳本的前置條件記在哪裡。狀態：已核可（2026-10-08）；重新驗收未完成（2026-10-09，磁碟空間不足，見文末）。相依：WI-26。
 
 ## 背景
 
@@ -49,3 +49,9 @@
 - 開發容器以 root 執行 `./gradlew cleanTest :engine:cleanPackagedTest :engine:cleanConsoleTest :engine:cleanConsoleTypecheck :engine:cleanConsoleApiDocCheck check` 連續 3 次：每次都只有 `OpenAiBindingMultipartTest`「a slow upload…」失敗（上述第 2 項）。其餘全部通過：accessors 349 個（21 個跳過：真實服務契約 18 個依設計不執行；`BlackHole` 3 個，因為本容器的網路對 TEST-NET-1 立即回應）、analyzer 133、core 88、devkit 181、runner 58、engine 1110（1 個跳過，同為 `BlackHole`）、packagedTest 63，Console 1093 與 API 文件檢查 9 個。
 - 以一般使用者（uid 30033，加入 docker 群組，使用獨立的 clone 與 Gradle 使用者目錄）執行同一指令 1 次，結果相同；權限相關的測試在兩種身分下都通過。
 - 真實瀏覽器腳本：照 [console/e2e/README.md](../../../../console/e2e/README.md) 的指令原文從零準備（新的資料庫與金鑰庫、兩個 Fake 服務行程、Engine），9 個腳本共 90 個測試全部通過。
+
+## 重新驗收（2026-10-09，WI-59 至 WI-64 完成後）：未完成，受阻於磁碟空間
+
+- 第 1 次（root，`./gradlew cleanTest :engine:cleanPackagedTest :engine:cleanConsoleTest :engine:cleanConsoleTypecheck :engine:cleanConsoleApiDocCheck check --continue`，1357 秒）：失敗，原因是磁碟已滿，不是測試或產品的行為。engine 的 41 個失敗全部是 `PSQLException: ... No space left on device`（Testcontainers 的 PostgreSQL 寫不進資料）；`:runner:test` 失敗於「Failed to create parent directory .../runner/build/test-results/test」；`:engine:test` 另以 Gradle daemon 的「Java heap space」結束（daemon 使用預設的 512 MiB；是否只是磁碟已滿的連帶結果，未能再驗證）。執行剛結束時根檔案系統可用約 4.1 GiB，測試容器移除後約 8.1 GiB（執行前的值未記錄）。
+- 空間的主要佔用者是先前各次執行留在 `/tmp` 的測試暫存目錄，共約 14 GiB、40,179 個（2026-10-07 起累積）。測試以 `Files.createTempDirectory` 建立後不刪除；其中 `ConsoleBuildTest` 每個測試留下約 120 MiB 的 `console-project*`（每次全量約 1.5 GiB），其餘（`run-harness`、`packaged-engine`、`keystores` 等約 1,300 個）每次合計約 130 MiB。所以每執行一次全量 check，可用空間就少約 1.6 GiB，累積到某一次執行時 PostgreSQL 寫不進資料。
+- 清除這些暫存目錄被本工作階段的權限設定拒絕，因此未清除，也未修改 `ConsoleBuildTest`；第 2、3 次、一般使用者的那一次與真實瀏覽器腳本都未執行。需要使用者決定：允許清除 `/tmp` 中的測試暫存目錄，及是否讓測試在結束時刪除自己的暫存目錄（只改測試）。

@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.TestTimeouts
 import java.nio.file.Files
@@ -18,9 +19,9 @@ import kotlin.test.*
 class BuildInfoBuildTest {
   private val script = Path.of(System.getProperty("runline.buildInfoScript"))
   private val gradlew = System.getProperty("runline.gradlew")
-  private val dir: Path = Files.createTempDirectory("build-info-project")
+  private val dir: Path = TestDirectories.forThisTest("build-info-project")
   // Outside the project: a log in it would be an untracked file, and make every tree dirty.
-  private val logs: Path = Files.createTempDirectory("build-info-logs")
+  private val logs: Path = TestDirectories.forThisTest("build-info-logs")
   private val commitDate = "2026-03-04T05:06:07+09:00"
 
   private fun write(name: String, text: String) {

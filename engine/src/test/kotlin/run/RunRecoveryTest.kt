@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.artifact.Visibility
@@ -18,7 +19,7 @@ import java.util.UUID
 import kotlin.test.*
 
 class RunRecoveryTest {
-  private val dir: Path = Files.createTempDirectory("recovery")
+  private val dir: Path = TestDirectories.forThisTest("recovery")
   private val dataSource = dataSourceOf(migratedDatabase())
   private val pipelines = StoredPipelines(PostgresArtifactStore(dataSource), dir)
   private val definitions = PostgresDefinitionStore(dataSource)

@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.TestTimeouts
 import java.nio.file.Files
@@ -20,8 +21,8 @@ class ConsoleBuildTest {
   private val script = Path.of(System.getProperty("runline.consoleScript"))
   private val consoleSources = Path.of(System.getProperty("runline.consoleDir"))
   private val gradlew = System.getProperty("runline.gradlew")
-  private val dir: Path = Files.createTempDirectory("console-project")
-  private val logs: Path = Files.createTempDirectory("console-logs")
+  private val dir: Path = TestDirectories.forThisTest("console-project")
+  private val logs: Path = TestDirectories.forThisTest("console-logs")
 
   private fun write(name: String, text: String) {
     val file = dir.resolve(name)
@@ -108,7 +109,7 @@ class ConsoleBuildTest {
   @Test
   fun `a Node of another version fails the build and says what is needed and where to read more`() {
     project(nodeVersion = "1.2.3")
-    val bin = Files.createTempDirectory("real-node-bin")
+    val bin = TestDirectories.forThisTest("real-node-bin")
     Files.createSymbolicLink(bin.resolve("node"), realNodeBinary())
     Files.createSymbolicLink(bin.resolve("npm"), realNodeBinary().resolveSibling("npm"))
 

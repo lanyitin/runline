@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.ComposeProject
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.RunHarness
@@ -24,7 +25,7 @@ import kotlinx.serialization.json.*
 class DockerResourceVolumeTest {
   private val repo = Path.of(System.getProperty("runline.repoRoot"))
   private val dist = Path.of(System.getProperty("runline.dist"))
-  private val work: Path = Files.createTempDirectory("docker-resource-volume")
+  private val work: Path = TestDirectories.forThisTest("docker-resource-volume")
   private val project = "wi43" + System.nanoTime().toString(36)
   private val port = ServerSocket(0).use { it.localPort }
   private val http = TimedHttp()

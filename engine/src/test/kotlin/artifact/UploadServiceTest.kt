@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.analyzer.ClassEntry
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
@@ -26,7 +27,7 @@ class UploadServiceTest {
   private val database = PostgresTestContainer.newDatabase().also { DatabaseMigrator(it).migrate() }
   private val dataSource = dataSourceOf(database)
   private val store = PostgresArtifactStore(dataSource)
-  private val dir: Path = Files.createTempDirectory("upload-service")
+  private val dir: Path = TestDirectories.forThisTest("upload-service")
   private val staging = UploadStaging(Files.createTempDirectory(dir, "staging"))
 
   private val metricReader = InMemoryMetricReader.create()

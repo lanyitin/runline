@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.support.PermissionsEnforced
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.config.ResourceSettings
@@ -32,7 +33,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * a named pipe nobody is at the other end of, which really blocks (WI-43).
  */
 class ResourceCheckerTest {
-  private val root: Path = Files.createTempDirectory("check-root")
+  private val root: Path = TestDirectories.forThisTest("check-root")
   private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
   private val behaviors =
       ResourceBehaviors.forEngine(ResourceSettings(root, Duration.ofSeconds(1), 1024L * 1024))
@@ -133,7 +134,7 @@ class ResourceCheckerTest {
         check(!Files.isWritable(root.resolve("c.txt"))) {
           "permissions are not enforced for this user"
         }
-        val outside = Files.createTempDirectory("check-outside")
+        val outside = TestDirectories.forThisTest("check-outside")
         root.resolve("d").createSymbolicLinkPointingTo(outside)
 
         assertEquals(CheckFailure.PARENT_NOT_CREATABLE, outcome("b").failure)

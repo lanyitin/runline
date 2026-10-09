@@ -11,11 +11,11 @@ import demo.defaults.DefaultsStdioPipeline
 import demo.defaults.DefaultsTypicalPipeline
 import demo.defaults.DefaultsUseFilePipeline
 import demo.defaults.DefaultsUseResourcePipeline
-import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.io.TempDir
 
 /**
  * WI-10: the default allow list, checked on pipelines that were really compiled: typical Kotlin
@@ -223,7 +223,8 @@ class DefaultAllowListTest {
   private fun safeSamples(): List<Path> = SAFE_SAMPLES.value
 
   private companion object {
-    val workDir: Path = Files.createTempDirectory("default-allow-list")
+    /** Where the samples are compiled, for all tests of the class; JUnit deletes it after them. */
+    @TempDir lateinit var workDir: Path
 
     val IO_PACKAGES =
         listOf(

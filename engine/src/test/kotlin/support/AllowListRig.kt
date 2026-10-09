@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.support
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.engine.allowlist.*
@@ -21,7 +22,7 @@ class AllowListRig(
     initial: List<AllowListEntry>,
     openTelemetry: OpenTelemetry = OpenTelemetry.noop(),
 ) {
-  val dir: Path = Files.createTempDirectory("allowlist-rig")
+  val dir: Path = TestDirectories.forThisTest("allowlist-rig")
   val database = migratedDatabase()
   val dataSource = dataSourceOf(database)
   val clock = MutableClock()

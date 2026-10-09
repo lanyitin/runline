@@ -1,5 +1,6 @@
 package dev.lawlan.runline.accessors.suite
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
@@ -178,7 +179,7 @@ abstract class AccessorBehaviorSuite {
   @Test
   fun `a link to somewhere else in place of a directory is never followed and nothing lands outside`() {
     rig.defineFile("log", "d/out.txt")
-    val outside = Files.createTempDirectory("outside")
+    val outside = TestDirectories.forThisTest("outside")
     val d = rig.resourceRoot.resolve("d").createDirectories()
     Files.delete(d)
     d.createSymbolicLinkPointingTo(outside)

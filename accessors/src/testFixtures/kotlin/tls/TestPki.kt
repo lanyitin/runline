@@ -1,7 +1,7 @@
 package dev.lawlan.runline.accessors.tls
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import java.io.ByteArrayInputStream
-import java.nio.file.Files
 import java.nio.file.Path
 import java.security.KeyStore
 import java.security.PrivateKey
@@ -22,7 +22,7 @@ import kotlin.io.path.writeText
  * validity and the dates a test asks for) and self-signed ones. Nothing here is a stand-in: every
  * certificate is a real X.509 certificate a real handshake checks.
  */
-class TestPki(val dir: Path = Files.createTempDirectory("pki")) {
+class TestPki(val dir: Path = TestDirectories.forThisTest("pki")) {
   private val passwordFile: Path = dir.resolve("pki.pw").also { it.writeText("$PASSWORD\n") }
 
   /** A private key with its chain, the first certificate being its own, and the file it is in. */

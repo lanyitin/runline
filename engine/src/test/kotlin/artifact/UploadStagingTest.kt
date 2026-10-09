@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.security.MessageDigest
@@ -7,7 +8,7 @@ import kotlin.io.path.exists
 import kotlin.test.*
 
 class UploadStagingTest {
-  private val staging = UploadStaging(Files.createTempDirectory("staging"))
+  private val staging = UploadStaging(TestDirectories.forThisTest("staging"))
 
   @Test
   fun `stages the bytes with their size and SHA-256`() {

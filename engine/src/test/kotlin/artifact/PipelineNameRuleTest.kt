@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.runner.WorkspaceConfig
 import dev.lawlan.runline.runner.WorkspaceObserver
 import dev.lawlan.runline.runner.Workspaces
@@ -14,7 +15,7 @@ import kotlin.test.*
  * names against a real [Workspaces] on a real directory.
  */
 class PipelineNameRuleTest {
-  private val root = Files.createTempDirectory("name-rule")
+  private val root = TestDirectories.forThisTest("name-rule")
   private val workspaces =
       Workspaces(
           WorkspaceConfig(root.resolve("shared"), root.resolve("runs"), 1_000, Duration.ZERO),

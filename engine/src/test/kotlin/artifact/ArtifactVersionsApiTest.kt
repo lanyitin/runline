@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.PipelineJars
@@ -22,7 +23,7 @@ import kotlinx.serialization.json.*
  * with real compiled jars, through the whole Engine.
  */
 class ArtifactVersionsApiTest {
-  private val dir: Path = Files.createTempDirectory("artifact-versions")
+  private val dir: Path = TestDirectories.forThisTest("artifact-versions")
   private val database: DatabaseConfig = migratedDatabase()
 
   private fun jar(name: String = "p", body: String = ""): ByteArray =

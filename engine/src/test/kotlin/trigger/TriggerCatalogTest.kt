@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.artifact.VersionResolver
@@ -9,13 +10,12 @@ import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.MutableClock
 import dev.lawlan.runline.engine.support.StoredPipelines
 import dev.lawlan.runline.engine.support.migratedDatabase
-import java.nio.file.Files
 import kotlin.test.*
 
 class TriggerCatalogTest {
   private val dataSource = dataSourceOf(migratedDatabase())
   private val pipelines =
-      StoredPipelines(PostgresArtifactStore(dataSource), Files.createTempDirectory("catalog"))
+      StoredPipelines(PostgresArtifactStore(dataSource), TestDirectories.forThisTest("catalog"))
   private val definitions = PostgresDefinitionStore(dataSource)
   private val store = PostgresTriggerStore(dataSource)
   private val clock = MutableClock()

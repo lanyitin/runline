@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.ResourceApiSupport
 import dev.lawlan.runline.engine.support.TestTokens
 import io.ktor.client.request.*
@@ -18,7 +19,7 @@ import kotlinx.serialization.json.*
 
 /** Checking a resource through the whole Engine: real PostgreSQL, real files (WI-43, ADR-019). */
 class ResourceCheckApiTest : ResourceApiSupport() {
-  private val root: Path = Files.createTempDirectory("check-api-root")
+  private val root: Path = TestDirectories.forThisTest("check-api-root")
   private val pipes = mutableListOf<Path>()
 
   @AfterTest

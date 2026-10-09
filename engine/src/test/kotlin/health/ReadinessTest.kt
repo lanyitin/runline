@@ -1,12 +1,12 @@
 package dev.lawlan.runline.engine.health
 
 import ch.qos.logback.classic.Level
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.CapturedLogs
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.metrics.SdkMeterProvider
 import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader
-import java.nio.file.Files
 import kotlin.test.*
 
 /** What a failed check leaves behind: a reason in the log and a count, nothing in the report. */
@@ -18,7 +18,7 @@ class ReadinessTest {
           .build()
   private val logs = CapturedLogs()
   private val lifecycle = EngineLifecycle().also { it.completeStartup() }
-  private val missingDirectory = Files.createTempDirectory("readiness").resolve("gone")
+  private val missingDirectory = TestDirectories.forThisTest("readiness").resolve("gone")
   private val readiness =
       Readiness(
           listOf(RuntimeCheck(missingDirectory, emptyList()), ShutdownCheck(lifecycle)),

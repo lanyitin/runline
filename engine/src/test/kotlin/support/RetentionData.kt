@@ -1,11 +1,11 @@
 package dev.lawlan.runline.engine.support
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.artifact.Visibility
 import dev.lawlan.runline.engine.run.*
 import dev.lawlan.runline.engine.trigger.*
-import java.nio.file.Files
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -20,7 +20,7 @@ class RetentionData(val dataSource: DataSource, val now: Instant) {
   val definitions = PostgresDefinitionStore(dataSource)
   val runs = PostgresRunStore(dataSource)
   val triggers = PostgresTriggerStore(dataSource)
-  private val pipelines = StoredPipelines(artifacts, Files.createTempDirectory("retention-data"))
+  private val pipelines = StoredPipelines(artifacts, TestDirectories.forThisTest("retention-data"))
 
   /** The content hash of the one pipeline version everything here is bound to. */
   val hash: String = pipelines.save("v1", "nightly")

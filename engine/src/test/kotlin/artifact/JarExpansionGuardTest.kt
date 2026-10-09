@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.PipelineJars
 import java.nio.file.Files
 import java.nio.file.Path
@@ -7,7 +8,7 @@ import kotlin.test.*
 
 /** The guard is exercised with real compiled jars that are really compressed. */
 class JarExpansionGuardTest {
-  private val dir: Path = Files.createTempDirectory("jar-guard")
+  private val dir: Path = TestDirectories.forThisTest("jar-guard")
 
   private fun jar(extra: Map<String, ByteArray> = emptyMap()): Path =
       PipelineJars.build(

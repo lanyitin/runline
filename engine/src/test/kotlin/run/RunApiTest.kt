@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.run
 
 import ch.qos.logback.classic.Logger
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.artifact.Visibility
@@ -31,7 +32,7 @@ import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
 class RunApiTest {
-  private val dir: Path = Files.createTempDirectory("run-api")
+  private val dir: Path = TestDirectories.forThisTest("run-api")
   private val database: DatabaseConfig = migratedDatabase()
   private val safeList = "java.lang,java.util,java.io,kotlin,org.jetbrains.annotations"
   private var counter = 0

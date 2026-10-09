@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.analyzer.Verdict
 import dev.lawlan.runline.engine.db.DatabaseMigrator
 import dev.lawlan.runline.engine.db.dataSourceOf
@@ -17,7 +18,7 @@ class PostgresArtifactStoreTest {
   private val database = PostgresTestContainer.newDatabase().also { DatabaseMigrator(it).migrate() }
   private val dataSource = dataSourceOf(database)
   private val store = PostgresArtifactStore(dataSource)
-  private val dir: Path = Files.createTempDirectory("store-test")
+  private val dir: Path = TestDirectories.forThisTest("store-test")
 
   private val metadata =
       MetadataDoc(

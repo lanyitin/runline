@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors.openai
 
 import dev.lawlan.runline.accessors.ResourceOperationFailure
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.accessors.tls.ClientCertificate
 import dev.lawlan.runline.accessors.tls.ResourceTls
 import dev.lawlan.runline.accessors.tls.TestPki
@@ -100,7 +101,7 @@ class OpenAiBindingTlsTest {
   }
 
   private companion object {
-    val pki = TestPki()
+    val pki = TestPki(TestDirectories.forAllTests("pki"))
     val authority = pki.authority("Service CA")
     val serviceIdentity = pki.issue(authority, "localhost", listOf("dns:localhost"))
     val clientIdentity = pki.issue(authority, "runline")

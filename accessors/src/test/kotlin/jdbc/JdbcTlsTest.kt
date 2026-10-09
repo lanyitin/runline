@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.BoundResources
 import dev.lawlan.runline.accessors.Invalidation
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.accessors.tls.ClientCertificate
 import dev.lawlan.runline.accessors.tls.ResourceTls
 import dev.lawlan.runline.accessors.tls.TestPki
@@ -177,7 +178,7 @@ class JdbcTlsTest {
   }
 
   private companion object {
-    val pki = TestPki()
+    val pki = TestPki(TestDirectories.forAllTests("pki"))
     val authority = pki.authority("Database CA")
     val otherAuthority = pki.authority("Other CA")
     val clientIdentity = pki.issue(authority, "runline-client")

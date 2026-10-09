@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.DeleteResult
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
@@ -7,7 +8,6 @@ import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.StoredPipelines
 import dev.lawlan.runline.engine.support.getWithin
 import dev.lawlan.runline.engine.support.migratedDatabase
-import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -18,7 +18,7 @@ import kotlin.test.*
 
 class PostgresTriggerStoreTest {
   private val dataSource = dataSourceOf(migratedDatabase())
-  private val dir: Path = Files.createTempDirectory("trigger-store")
+  private val dir: Path = TestDirectories.forThisTest("trigger-store")
   private val artifacts = PostgresArtifactStore(dataSource)
   private val pipelines = StoredPipelines(artifacts, dir)
   private val definitions = PostgresDefinitionStore(dataSource)

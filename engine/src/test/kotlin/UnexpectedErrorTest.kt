@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.PipelineJars
@@ -28,7 +29,7 @@ import org.slf4j.LoggerFactory
  * must not reach the caller.
  */
 class UnexpectedErrorTest {
-  private val dir = Files.createTempDirectory("unexpected-error")
+  private val dir = TestDirectories.forThisTest("unexpected-error")
   private val database: DatabaseConfig = migratedDatabase()
   private val appender = SnapshotListAppender().also { it.start() }
   private val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as Logger

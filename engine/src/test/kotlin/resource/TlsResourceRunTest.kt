@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.accessors.tls.TestPki
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.engine.run.RunState
@@ -131,7 +132,7 @@ class TlsResourceRunTest {
   }
 
   private companion object {
-    val pki = TestPki()
+    val pki = TestPki(TestDirectories.forAllTests("pki"))
     val authority = pki.authority("Internal CA")
     val serviceIdentity = pki.issue(authority, "localhost", listOf("dns:localhost"))
     val firstClient = pki.issue(authority, "runline-client-1")

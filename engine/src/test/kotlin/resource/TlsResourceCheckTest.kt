@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
 import dev.lawlan.runline.accessors.jdbc.TlsPostgres
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.accessors.tls.TestPki
 import dev.lawlan.runline.engine.support.Keystores
 import dev.lawlan.runline.engine.support.ResourceApiSupport
@@ -206,7 +207,7 @@ class TlsResourceCheckTest : ResourceApiSupport() {
       }
 
   private companion object {
-    val pki = TestPki()
+    val pki = TestPki(TestDirectories.forAllTests("pki"))
     val authority = pki.authority("Internal CA")
     val otherAuthority = pki.authority("Other CA")
     val expiredAuthority = pki.issue(authority, "Expired CA", days = 30, startDate = "-400d")

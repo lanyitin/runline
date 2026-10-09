@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.packaged
 
 import dev.lawlan.runline.accessors.fake.FreezableForward
 import dev.lawlan.runline.accessors.jdbc.RealPostgres
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.Keystores
 import dev.lawlan.runline.engine.support.ManagedProcess
@@ -34,7 +35,7 @@ import kotlinx.serialization.json.*
 class PackagedEngineTest {
   private val dist = Path.of(System.getProperty("runline.dist"))
   private val javaBin = System.getProperty("runline.java")
-  private val work: Path = Files.createTempDirectory("packaged-engine")
+  private val work: Path = TestDirectories.forThisTest("packaged-engine")
   private val http = TimedHttp()
   // Asking whether the Engine is up: an Engine that is still starting may take a connection and
   // not answer it, so each try is short and the start as a whole has the limit.

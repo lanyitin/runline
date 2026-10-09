@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.analyzer.Verdict
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.StoredPipelines
@@ -12,7 +13,7 @@ import kotlin.test.*
 
 class PostgresDefinitionStoreTest {
   private val dataSource = dataSourceOf(migratedDatabase())
-  private val dir: Path = Files.createTempDirectory("definition-store")
+  private val dir: Path = TestDirectories.forThisTest("definition-store")
   private val pipelines = StoredPipelines(PostgresArtifactStore(dataSource), dir)
   private val store = PostgresDefinitionStore(dataSource)
 

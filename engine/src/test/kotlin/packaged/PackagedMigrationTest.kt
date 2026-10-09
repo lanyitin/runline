@@ -1,12 +1,12 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.DatabaseMigrator
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.PostgresTestContainer
 import dev.lawlan.runline.engine.support.TestTimeouts
 import java.net.ServerSocket
-import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.*
 
@@ -18,7 +18,7 @@ import kotlin.test.*
 class PackagedMigrationTest {
   private val dist = Path.of(System.getProperty("runline.dist"))
   private val javaBin = System.getProperty("runline.java")
-  private val work: Path = Files.createTempDirectory("packaged-migration")
+  private val work: Path = TestDirectories.forThisTest("packaged-migration")
   private val processes = mutableListOf<ManagedProcess>()
 
   @AfterTest

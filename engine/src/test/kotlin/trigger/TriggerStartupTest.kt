@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.db.dataSourceOf
@@ -8,7 +9,6 @@ import dev.lawlan.runline.engine.support.configureEngine
 import dev.lawlan.runline.engine.support.migratedDatabase
 import io.ktor.client.request.*
 import io.ktor.server.testing.*
-import java.nio.file.Files
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -33,7 +33,7 @@ class TriggerStartupTest {
   @Test
   fun `firings a previous process left pending are marked interrupted and not repeated`() {
     val pipelines =
-        StoredPipelines(PostgresArtifactStore(dataSource), Files.createTempDirectory("startup"))
+        StoredPipelines(PostgresArtifactStore(dataSource), TestDirectories.forThisTest("startup"))
     val hash = pipelines.save("v1", "nightly")
     val now = Instant.now().truncatedTo(ChronoUnit.MICROS)
     val trigger =

@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.artifact
 
 import ch.qos.logback.classic.Logger
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.PipelineJars
@@ -19,7 +20,7 @@ import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
 class ArtifactApiTest {
-  private val dir: Path = Files.createTempDirectory("artifact-api")
+  private val dir: Path = TestDirectories.forThisTest("artifact-api")
   private val database: DatabaseConfig = migratedDatabase()
 
   private fun jar(name: String = "p", body: String = ""): ByteArray =

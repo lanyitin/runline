@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.health
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.StoppablePostgres
 import dev.lawlan.runline.engine.support.TestRuntime
 import dev.lawlan.runline.engine.support.awaitConditionSuspending
@@ -84,7 +85,7 @@ class HealthRoutesTest {
   @Test
   fun `a run runtime that has lost a jar makes ready 503 and not live, and ready recovers when it is back`() =
       testApplication {
-        val runtime = Files.createTempDirectory("run-runtime")
+        val runtime = TestDirectories.forThisTest("run-runtime")
         TestRuntime.jars.forEach { Files.copy(it, runtime.resolve(it.fileName.toString())) }
         configureEngine(overrides = mapOf("runs.runtimeDir" to runtime.toString()))
         startApplication()
@@ -108,7 +109,7 @@ class HealthRoutesTest {
 
   @Test
   fun `a run runtime directory that is gone makes ready 503`() = testApplication {
-    val runtime = Files.createTempDirectory("run-runtime")
+    val runtime = TestDirectories.forThisTest("run-runtime")
     TestRuntime.jars.forEach { Files.copy(it, runtime.resolve(it.fileName.toString())) }
     configureEngine(overrides = mapOf("runs.runtimeDir" to runtime.toString()))
     startApplication()
@@ -160,7 +161,7 @@ class HealthRoutesTest {
 
   @Test
   fun `an Engine that is not ready still takes requests`() = testApplication {
-    val runtime = Files.createTempDirectory("run-runtime")
+    val runtime = TestDirectories.forThisTest("run-runtime")
     TestRuntime.jars.forEach { Files.copy(it, runtime.resolve(it.fileName.toString())) }
     configureEngine(overrides = mapOf("runs.runtimeDir" to runtime.toString()))
     startApplication()

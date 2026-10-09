@@ -1,10 +1,10 @@
 package dev.lawlan.runline.engine
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.db.SchemaOutOfDateException
 import dev.lawlan.runline.engine.support.PostgresTestContainer
 import dev.lawlan.runline.engine.support.configureEngine
 import io.ktor.server.testing.*
-import java.nio.file.Files
 import kotlin.test.*
 import org.flywaydb.core.Flyway
 
@@ -38,7 +38,7 @@ class RunStartupTest {
 
   @Test
   fun `refuses to start when the run runtime directory lacks the jars a run needs`() {
-    val empty = Files.createTempDirectory("empty-runtime")
+    val empty = TestDirectories.forThisTest("empty-runtime")
 
     val e = assertFails {
       testApplication {

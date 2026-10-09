@@ -1,6 +1,6 @@
 package dev.lawlan.runline.engine.support
 
-import java.nio.file.Files
+import dev.lawlan.runline.accessors.support.TestDirectories
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.writeText
@@ -39,7 +39,7 @@ object Keytool {
  * file is in a password file next to it, passed to the tool as `-storepass:file`, as the operating
  * manual says (WI-42), never on a command line.
  */
-class Keystores(val dir: Path = Files.createTempDirectory("keystores")) {
+class Keystores(val dir: Path = TestDirectories.forThisTest("keystores")) {
   /** A password file holding [password]; the tool reads the first line of it. */
   fun passwordFile(password: String = DEFAULT_PASSWORD, name: String = "storepass"): Path =
       dir.resolve(name).also { it.writeText(password + "\n") }

@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.support
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.DatabaseMigrator
 import io.ktor.server.testing.*
@@ -18,7 +19,7 @@ object TestTokens {
  */
 object TestRuntimeDir {
   val path: java.nio.file.Path by lazy {
-    val dir = java.nio.file.Files.createTempDirectory("run-runtime")
+    val dir = TestDirectories.forAllTests("run-runtime")
     TestRuntime.jars.forEach { java.nio.file.Files.copy(it, dir.resolve(it.fileName.toString())) }
     dir
   }
@@ -42,7 +43,7 @@ fun ApplicationTestBuilder.configureEngine(
     put("postgres.user", database.user)
     put("postgres.password", database.password)
     put("auth.tokens", TestTokens.API_TOKENS)
-    val work = java.nio.file.Files.createTempDirectory("engine-work")
+    val work = TestDirectories.forThisTest("engine-work")
     put("workspace.sharedRoot", work.resolve("shared").toString())
     put("workspace.runRoot", work.resolve("runs").toString())
     put("workspace.maxBytes", "1000000")

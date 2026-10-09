@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.*
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
@@ -9,14 +10,16 @@ import dev.lawlan.runline.engine.run.ParameterProblemKind
 import dev.lawlan.runline.engine.support.MutableClock
 import dev.lawlan.runline.engine.support.StoredPipelines
 import dev.lawlan.runline.engine.support.migratedDatabase
-import java.nio.file.Files
 import java.time.Duration
 import kotlin.test.*
 
 class TriggerAdminTest {
   private val dataSource = dataSourceOf(migratedDatabase())
   private val pipelines =
-      StoredPipelines(PostgresArtifactStore(dataSource), Files.createTempDirectory("trigger-admin"))
+      StoredPipelines(
+          PostgresArtifactStore(dataSource),
+          TestDirectories.forThisTest("trigger-admin"),
+      )
   private val definitions = PostgresDefinitionStore(dataSource)
   private val store = PostgresTriggerStore(dataSource)
   private val clock = MutableClock()

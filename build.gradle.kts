@@ -20,5 +20,8 @@ subprojects {
     tasks.withType<Test>().configureEach {
         systemProperty("junit.jupiter.execution.timeout.default", "5m")
         timeout = java.time.Duration.ofMinutes(30)
+        // 測試的暫存目錄在測試結束時刪除（WI-57）：由 accessors test fixtures 的
+        // TestDirectories.Cleanup 經 META-INF/services 註冊，須開啟擴充的自動偵測。
+        systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
     }
 }

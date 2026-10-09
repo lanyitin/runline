@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.allowlist
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.analyzer.DefaultAllowList
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.CapturedLogs
@@ -18,7 +19,7 @@ import kotlinx.serialization.json.*
 
 /** The allow list administration API, on the real application with a real PostgreSQL (WI-10). */
 class AllowListApiTest {
-  private val dir: Path = Files.createTempDirectory("allowlist-api")
+  private val dir: Path = TestDirectories.forThisTest("allowlist-api")
   private val database: DatabaseConfig = migratedDatabase()
   private var counter = 0
 

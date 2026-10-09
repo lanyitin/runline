@@ -1,6 +1,7 @@
 package dev.lawlan.runline.accessors.tls
 
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
+import dev.lawlan.runline.accessors.support.TestDirectories
 import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
@@ -196,7 +197,7 @@ class ResourceTlsTest {
   }
 
   private companion object {
-    val pki = TestPki()
+    val pki = TestPki(TestDirectories.forAllTests("pki"))
     val authority = pki.authority("Internal CA")
     val otherAuthority = pki.authority("Other CA")
     val serviceIdentity = pki.issue(authority, "localhost", listOf("dns:localhost"))

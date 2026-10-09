@@ -3,6 +3,7 @@ package dev.lawlan.runline.accessors.openai
 import dev.lawlan.runline.accessors.fake.ContractTarget
 import dev.lawlan.runline.accessors.fake.FakeOpenAiServer
 import dev.lawlan.runline.accessors.fake.OpenAiServerContract
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.accessors.tls.TestPki
 import java.security.KeyStore
 import javax.net.ssl.KeyManagerFactory
@@ -34,7 +35,7 @@ class FakeOpenAiServerTlsContractTest : OpenAiServerContract() {
   @AfterTest fun stop() = server.close()
 
   private companion object {
-    val pki = TestPki()
+    val pki = TestPki(TestDirectories.forAllTests("pki"))
     val authority = pki.authority("Contract CA")
     val serverIdentity = pki.issue(authority, "localhost", listOf("dns:localhost"))
     val clientIdentity = pki.issue(authority, "contract-client")

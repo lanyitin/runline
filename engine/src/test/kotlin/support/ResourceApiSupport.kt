@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.support
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -18,7 +19,7 @@ import kotlinx.serialization.json.*
  * uploaded through the real endpoint.
  */
 abstract class ResourceApiSupport {
-  protected val dir: Path = Files.createTempDirectory("resource-api")
+  protected val dir: Path = TestDirectories.forThisTest("resource-api")
   protected val database: DatabaseConfig = migratedDatabase()
   protected val ops = "tok-ops-0123456789"
   private var counter = 0

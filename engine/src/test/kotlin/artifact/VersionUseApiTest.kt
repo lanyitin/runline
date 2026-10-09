@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.artifact
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.dataSourceOf
 import dev.lawlan.runline.engine.support.PipelineJars
@@ -23,7 +24,7 @@ import kotlinx.serialization.json.*
  * administrator names and a developer cannot use to reach another's version.
  */
 class VersionUseApiTest {
-  private val dir: Path = Files.createTempDirectory("version-use")
+  private val dir: Path = TestDirectories.forThisTest("version-use")
   private val database: DatabaseConfig = migratedDatabase()
   private val safeList = "java.lang,java.util,java.io,kotlin,org.jetbrains.annotations"
   private val unsafeBody = "java.nio.file.Files.exists(java.nio.file.Path.of(\"x\"));"

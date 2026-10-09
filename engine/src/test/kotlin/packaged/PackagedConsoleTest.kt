@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.PostgresTestContainer
@@ -20,7 +21,7 @@ import kotlin.test.*
 class PackagedConsoleTest {
   private val dist = Path.of(System.getProperty("runline.dist"))
   private val javaBin = System.getProperty("runline.java")
-  private val work: Path = Files.createTempDirectory("packaged-console")
+  private val work: Path = TestDirectories.forThisTest("packaged-console")
   private val http = TimedHttp()
   private val probe = TimedHttp(requestTimeout = TestTimeouts.readinessProbe)
   private val processes = mutableListOf<ManagedProcess>()

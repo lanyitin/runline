@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.config
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.core.Pipeline
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.runner.isolated.RunEntry
@@ -8,7 +9,7 @@ import java.nio.file.Path
 import kotlin.test.*
 
 class RunRuntimeTest {
-  private val dir: Path = Files.createTempDirectory("run-runtime")
+  private val dir: Path = TestDirectories.forThisTest("run-runtime")
 
   /** The jar a class of the Runner, core or the Kotlin library was loaded from. */
   private fun jarOf(type: Class<*>): Path =

@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.PostgresArtifactStore
 import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.db.dataSourceOf
@@ -8,7 +9,6 @@ import dev.lawlan.runline.engine.support.migratedDatabase
 import dev.lawlan.runline.engine.trigger.NewTrigger
 import dev.lawlan.runline.engine.trigger.PostgresTriggerStore
 import dev.lawlan.runline.engine.trigger.TriggerKind
-import java.nio.file.Files
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.test.*
@@ -16,7 +16,10 @@ import kotlin.test.*
 class PostgresResourceDeclarationStoreTest {
   private val dataSource = dataSourceOf(migratedDatabase())
   private val pipelines =
-      StoredPipelines(PostgresArtifactStore(dataSource), Files.createTempDirectory("declarations"))
+      StoredPipelines(
+          PostgresArtifactStore(dataSource),
+          TestDirectories.forThisTest("declarations"),
+      )
   private val definitions = PostgresDefinitionStore(dataSource)
   private val triggers = PostgresTriggerStore(dataSource)
   private val store = PostgresResourceDeclarationStore(dataSource)

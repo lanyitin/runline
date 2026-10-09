@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.config.ResourceSettings
@@ -254,7 +255,7 @@ class ResourceAdminTest {
 
   // ---- the file type (WI-43) ----
 
-  private val resourceRoot = java.nio.file.Files.createTempDirectory("resource-root")
+  private val resourceRoot = TestDirectories.forThisTest("resource-root")
   private val fileAdmin =
       ResourceAdmin(
           store,
@@ -336,7 +337,7 @@ class ResourceAdminTest {
 
   @Test
   fun `a path that leads out of the root through a link is refused as outside, when defined and when changed`() {
-    val outside = java.nio.file.Files.createTempDirectory("outside")
+    val outside = TestDirectories.forThisTest("outside")
     resourceRoot.resolve("link").also { java.nio.file.Files.createSymbolicLink(it, outside) }
 
     assertEquals(

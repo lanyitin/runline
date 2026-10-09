@@ -1,6 +1,6 @@
 package dev.lawlan.runline.engine.support
 
-import java.nio.file.Files
+import dev.lawlan.runline.accessors.support.TestDirectories
 import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Timeout
  */
 @Timeout(60, unit = TimeUnit.SECONDS)
 class ManagedProcessTest {
-  private val dir: Path = Files.createTempDirectory("managed-process")
+  private val dir: Path = TestDirectories.forThisTest("managed-process")
   private val started = mutableListOf<ManagedProcess>()
 
   private fun start(script: String, name: String = "a test process"): ManagedProcess =

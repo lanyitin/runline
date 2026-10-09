@@ -4,6 +4,7 @@ import dev.lawlan.runline.accessors.suite.AccessorBehaviorSuite
 import dev.lawlan.runline.accessors.suite.AccessorRig
 import dev.lawlan.runline.accessors.suite.RigKey
 import dev.lawlan.runline.accessors.suite.RigOutcome
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.devkit.support.PipelineJars
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
@@ -23,7 +24,7 @@ class DevAccessorRecordingBehaviorTest : AccessorBehaviorSuite() {
 }
 
 internal class DevRig(private val record: Boolean) : AccessorRig {
-  private val tmp: Path = Files.createTempDirectory("dev-rig")
+  private val tmp: Path = TestDirectories.forThisTest("dev-rig")
   private val project = tmp.resolve("project")
   private val definitions = LinkedHashMap<String, String>()
   private val secretEnv = LinkedHashMap<String, String>()

@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.artifact.Visibility
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
@@ -230,7 +231,7 @@ class ResourceRunIntegrationTest {
 
   @Test
   fun `a run that cannot even be started frees what it was granted`() {
-    val missing = Files.createTempDirectory("jars").resolve("does-not-exist")
+    val missing = TestDirectories.forThisTest("jars").resolve("does-not-exist")
     val h = harness(jarDirectory = missing)
     h.defineResource("lemonade", 1)
     val hash = h.upload("p", "", declaration = using("lemonade"))

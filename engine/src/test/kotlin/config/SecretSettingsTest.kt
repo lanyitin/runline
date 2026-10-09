@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.config
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import io.ktor.server.config.*
 import java.nio.file.Files
 import java.nio.file.Path
@@ -7,7 +8,7 @@ import kotlin.test.*
 
 /** Where the keystore and its password come from (WI-41, ADR-019 decision 6; 12-factor config). */
 class SecretSettingsTest {
-  private val dir: Path = Files.createTempDirectory("secret-settings")
+  private val dir: Path = TestDirectories.forThisTest("secret-settings")
   private val sharedRoot = dir.resolve("shared")
   private val runRoot = dir.resolve("runs")
   private val resourceRoot = dir.resolve("resources")

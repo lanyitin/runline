@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.packaged
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.TestTimeouts
 import java.nio.file.Files
@@ -17,8 +18,8 @@ import kotlin.test.*
 class ReproducibleReleaseCompareTest {
   private val script = Path.of(System.getProperty("runline.reproducibleReleaseScript"))
   private val gradlew = System.getProperty("runline.gradlew")
-  private val dir: Path = Files.createTempDirectory("reproducible-release-project")
-  private val logs: Path = Files.createTempDirectory("reproducible-release-logs")
+  private val dir: Path = TestDirectories.forThisTest("reproducible-release-project")
+  private val logs: Path = TestDirectories.forThisTest("reproducible-release-logs")
   private var builds = 0
 
   init {

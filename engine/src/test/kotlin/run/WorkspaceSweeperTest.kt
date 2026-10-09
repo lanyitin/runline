@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.run
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.runner.RunOutcome
 import dev.lawlan.runline.runner.WorkspaceConfig
 import dev.lawlan.runline.runner.Workspaces
@@ -12,7 +13,7 @@ import java.time.Instant
 import kotlin.test.*
 
 class WorkspaceSweeperTest {
-  private val dir: Path = Files.createTempDirectory("sweeper")
+  private val dir: Path = TestDirectories.forThisTest("sweeper")
   private val workspaces =
       Workspaces(
           WorkspaceConfig(dir.resolve("shared"), dir.resolve("runs"), 1000, Duration.ofHours(1)),

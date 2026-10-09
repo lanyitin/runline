@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.allowlist
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.TestTokens
@@ -19,7 +20,7 @@ import kotlinx.serialization.json.*
  * the same bytes (WI-54, ADR-020), on the real application with a real PostgreSQL.
  */
 class AllowListVersionsApiTest {
-  private val dir: Path = Files.createTempDirectory("allowlist-versions")
+  private val dir: Path = TestDirectories.forThisTest("allowlist-versions")
   private val database: DatabaseConfig = migratedDatabase()
 
   private fun ApplicationTestBuilder.engine() =

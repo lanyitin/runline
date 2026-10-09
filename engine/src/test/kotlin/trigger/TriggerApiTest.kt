@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.trigger
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.fixtures.DefaultsPipeline
 import dev.lawlan.runline.engine.support.CapturedLogs
@@ -23,7 +24,7 @@ import kotlinx.serialization.json.*
 
 /** The trigger management API and the webhook entry, against the real application. */
 class TriggerApiTest {
-  private val dir: Path = Files.createTempDirectory("trigger-api")
+  private val dir: Path = TestDirectories.forThisTest("trigger-api")
   private val database: DatabaseConfig = migratedDatabase()
   private val safeList = "java.lang,java.util,java.io,kotlin,org.jetbrains.annotations"
   private val ops = "tok-ops-0123456789"

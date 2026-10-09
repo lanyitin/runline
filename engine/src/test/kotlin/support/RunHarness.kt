@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.support
 
+import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.core.Pipeline
@@ -85,7 +86,7 @@ class RunHarness(
      */
     gateAround: (ResourceGate) -> ResourceGate = { it },
 ) : AutoCloseable {
-  val dir: Path = Files.createTempDirectory("run-harness")
+  val dir: Path = TestDirectories.forThisTest("run-harness")
   val database = migratedDatabase()
   val dataSource = dataSourceOf(database)
   val artifacts = PostgresArtifactStore(dataSource)

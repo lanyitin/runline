@@ -71,5 +71,5 @@ flowchart LR
 | 6 資料模型 | [06-data-model.md](06-data-model.md) | 已核可 |
 | 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
 | 8 API | [08-api.md](08-api.md) | 已核可 |
-| 決策記錄（ADR-001 至 020） | [adr/](adr/) | 已核可 |
+| 決策記錄（ADR-001 至 021） | [adr/](adr/) | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |

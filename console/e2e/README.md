@@ -15,10 +15,10 @@ made with keytool and two Fake OpenAI compatible services as processes of their 
 | A new, empty database (PostgreSQL 17), migrated | every script | Not one a contract run (`npm run test:contract`) or an earlier `npm run e2e` has used: what they leave behind (versions, triggers, resources) makes tests fail |
 | `API_TOKENS` with two developers and an admin | every script | the same text in `E2E_TOKENS` |
 | `RUNLINE_MAX_CONCURRENT_RUNS` of 8 | every script that makes runs | the value the scripts are verified with (several tests keep runs going side by side; the contract tests need 8 or more) |
-| The sample jars, `dev/sample-pipelines/build/pipelines` | `admin`, `developer`, `resources`, `security`, `typed-forms`, `versions` | `./gradlew -p dev/sample-pipelines pipelineJars`; in `E2E_JARS` |
-| A PKCS12 keystore the Engine opens, writable by the tests | `resources`, `resource-types`, `typed-forms`, `certificates` | its entries are below; `resources` changes it with keytool and puts it back |
-| A database `orders` owned by an account `reader` | `typed-forms` | the password is the secret `db-pass` |
-| The Fake OpenAI compatible service over HTTP, asking for the key | `typed-forms` | `FAKE_OPENAI_KEY_FILE` (the value of `llm-key`), `FAKE_OPENAI_CHAT_DELAY_MS=15000`; in `E2E_OPENAI_URL` |
+| The sample jars, `dev/sample-pipelines/build/pipelines` | `admin`, `developer`, `resources`, `secrets`, `security`, `typed-forms`, `versions` | `./gradlew -p dev/sample-pipelines pipelineJars`; in `E2E_JARS` |
+| A PKCS12 keystore the Engine opens, writable by the tests | `resources`, `resource-types`, `typed-forms`, `certificates`, `secrets` | its entries are below; `resources` changes it with keytool and puts it back |
+| A database `orders` owned by an account `reader` | `typed-forms`, `secrets` | the password is the secret `db-pass` |
+| The Fake OpenAI compatible service over HTTP, asking for the key | `typed-forms`, `secrets` | `FAKE_OPENAI_KEY_FILE` (the value of `llm-key`), `FAKE_OPENAI_CHAT_DELAY_MS=15000`; in `E2E_OPENAI_URL` |
 | The Fake OpenAI compatible service over TLS, requiring a client certificate | `certificates` | issued by `internal-ca`; in `E2E_TLS_OPENAI_URL` |
 | A network address of the machine besides loopback | `console` | for the test of the warning on a page that is not HTTPS |
 | `keytool` of JDK 25, `openssl` | preparing the keystore; `resources` runs keytool | `E2E_KEYTOOL` names keytool (default `keytool`) |
@@ -27,13 +27,13 @@ made with keytool and two Fake OpenAI compatible services as processes of their 
 
 | Alias | Kind of entry | What it is | Needed by |
 |---|---|---|---|
-| `llm-key` | secret (`keytool -importpass`) | a marker: any text that occurs nowhere else; it is `E2E_SECRET_MARKER` and the key the HTTP Fake asks for | `resources`, `resource-types`, `typed-forms` |
-| `db-pass` | secret | the password of the database account `reader`; it is `E2E_DB_PASSWORD` | `typed-forms` |
+| `llm-key` | secret (`keytool -importpass`) | a marker: any text that occurs nowhere else; it is `E2E_SECRET_MARKER` and the key the HTTP Fake asks for | `resources`, `resource-types`, `typed-forms`, `secrets` |
+| `db-pass` | secret | the password of the database account `reader`; it is `E2E_DB_PASSWORD` | `typed-forms`, `secrets` |
 | `other-pass` | secret | any other text | `typed-forms` |
 | `corporate-ca` | trusted certificate (`keytool -importcert`) | any certificate authority | `resources` |
 | `internal-ca` | trusted certificate | the authority that issued the TLS Fake's certificate and the two client certificates | `certificates` |
-| `app-client` | private key (`keytool -genkeypair`, then the certificate `internal-ca` issued) | a client certificate | `certificates` |
-| `soon-client` | private key, as `app-client` | a client certificate that ends within `RUNLINE_CERTIFICATE_WARNING_DAYS` (30 by default) | `certificates` |
+| `app-client` | private key (`keytool -genkeypair`, then the certificate `internal-ca` issued) | a client certificate | `certificates`, `secrets` (its key must be nowhere) |
+| `soon-client` | private key, as `app-client` | a client certificate that ends within `RUNLINE_CERTIFICATE_WARNING_DAYS` (30 by default) | `certificates`, `secrets` (its key must be nowhere) |
 
 More entries do no harm. `E2E_PRIVATE_KEY_MARKERS` is the base64 of the private keys of
 `app-client` and `soon-client` (PKCS#8, as one line each), separated by a comma; with

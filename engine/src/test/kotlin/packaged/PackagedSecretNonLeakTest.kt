@@ -399,6 +399,171 @@ class PackagedSecretNonLeakTest {
     assertTrue(surfaces.getValue("the Engine's output").contains("***"))
   }
 
+  // ---- the limits of an unsafe pipeline (ADR-019 decisions 6 and 7) ----
+
+  /**
+   * What an unsafe pipeline holding both resources finds: the process environment, the system
+   * properties, and everything every method of the contract returns (the accessors, the answers,
+   * the rows), written to its shared directory.
+   */
+  private val snoop =
+      """
+      StringBuilder found = new StringBuilder();
+      found.append("environment ").append(System.getenv()).append('\n');
+      found.append("properties ").append(System.getProperties()).append('\n');
+      OpenAiAccessor llm = context.getAccessors().openAiCompatible("llm");
+      JdbcAccessor db = context.getAccessors().jdbcPool("db");
+      OpenAiResponse answer = llm.call(new OpenAiRequest("chat.completions", "{\"model\":\"m\"}"));
+      JdbcRows rows = db.query("SELECT current_user, inet_server_port()");
+      Object[][] contract = {
+        {OpenAiAccessor.class, llm}, {JdbcAccessor.class, db}, {Accessors.class, context.getAccessors()},
+        {OpenAiResponse.class, answer}, {JdbcRows.class, rows}
+      };
+      for (Object[] pair : contract) {
+        found.append(pair[1]).append('\n');
+        for (java.lang.reflect.Method m : ((Class<?>) pair[0]).getMethods()) {
+          if (m.getParameterCount() != 0 || m.getDeclaringClass() == Object.class) continue;
+          try { found.append(m.getName()).append(" = ").append(m.invoke(pair[1])).append('\n'); }
+          catch (Throwable t) { found.append(m.getName()).append(" ! ").append(t.getCause()).append('\n'); }
+        }
+      }
+      context.getFiles().writeText(FileScope.PIPELINE_SHARED, "found", found.toString());
+      """
+          .trimIndent()
+
+  /**
+   * Starts the Engine with [password] given as the environment or the file says, and both
+   * resources.
+   */
+  private fun startWithBothResources(password: Map<String, String>): FakeOpenAiServer {
+    val service = FakeOpenAiServer(requiredKey = apiKey).also { closeable += it }
+    val target = RealPostgres.newDatabase().also { closeable += it }
+    val role = "app_" + UUID.randomUUID().toString().replace("-", "").take(10)
+    target.createRole(role, dbPassword)
+    engine.migrate()
+    engine.start(mapOf("RUNLINE_KEYSTORE_PATH" to keystore().toString()) + password)
+    define(
+        "llm",
+        "openai-compatible",
+        "api-key",
+        """{"baseUrl":"${service.baseUrl}","endpoints":["chat.completions"]}""",
+    )
+    define("db", "jdbc-pool", "db-pw", jdbcSettings(target.name, role))
+    return service
+  }
+
+  private val both = PackagedEngine.typed("llm" to "openai-compatible", "db" to "jdbc-pool")
+
+  @Test
+  fun `an unsafe pipeline can read a keystore password given in the environment, and no secret of a resource anywhere it can ask`() {
+    startWithBothResources(mapOf("RUNLINE_KEYSTORE_PASSWORD" to storePassword))
+
+    val run = engine.runToEnd("snoop", both, snoop)
+
+    assertEquals("SUCCEEDED", run["state"]!!.jsonPrimitive.content, "$run")
+    val found = engine.shared("snoop", "found").text()
+    // The accepted limit (ADR-019 decision 6): the password given in the environment is readable.
+    assertTrue(found.contains("RUNLINE_KEYSTORE_PASSWORD=$storePassword"), found)
+    // The secrets of the resources are nowhere a pipeline can ask, though both were used.
+    assertTrue(found.contains("getBody = {"), found)
+    assertTrue(found.contains("getRows = [["), found)
+    for (secret in listOf(apiKey, dbPassword, wrongKey, wrongDbPassword)) {
+      assertFalse(found.contains(secret), "$secret is in what the pipeline found:\n$found")
+    }
+  }
+
+  @Test
+  fun `with the keystore password in a file the environment has the file's place and not the password`() {
+    val passwordFile = keystores.passwordFile(storePassword, "engine.pw")
+    startWithBothResources(mapOf("RUNLINE_KEYSTORE_PASSWORD_FILE" to passwordFile.toString()))
+
+    val run =
+        engine.runToEnd(
+            "snoop",
+            both,
+            snoop +
+                """
+
+                String place = System.getenv("RUNLINE_KEYSTORE_PASSWORD_FILE");
+                String read;
+                try { read = java.nio.file.Files.readString(java.nio.file.Path.of(place)); }
+                catch (Exception e) { read = "unreadable " + e; }
+                context.getFiles().writeText(FileScope.PIPELINE_SHARED, "file", read);
+                """
+                    .trimIndent(),
+        )
+
+    assertEquals("SUCCEEDED", run["state"]!!.jsonPrimitive.content, "$run")
+    val found = engine.shared("snoop", "found").text()
+    assertTrue(found.contains("RUNLINE_KEYSTORE_PASSWORD_FILE=$passwordFile"), found)
+    for (secret in markers) {
+      assertFalse(found.contains(secret), "$secret is in what the pipeline found:\n$found")
+    }
+    // A limit ADR-019 does not name (reported by WI-51): the process may read its password file,
+    // and so may an unsafe pipeline in the same process, which finds its place in the environment.
+    assertEquals(storePassword, engine.shared("snoop", "file").text().trim())
+  }
+
+  @Test
+  fun `an unsafe pipeline reaches the service with the JDK past the capacity and the Engine, without the key`() {
+    val service = startWithBothResources(mapOf("RUNLINE_KEYSTORE_PASSWORD" to storePassword))
+    // A run holds `llm` (capacity 1) until it is told to let go.
+    val holder =
+        engine.startRun(
+            engine.upload(
+                "holder",
+                PackagedEngine.typed("llm" to "openai-compatible"),
+                """
+                context.getFiles().writeText(FileScope.PIPELINE_SHARED, "holding", "x");
+                try {
+                  while (!context.getFiles().exists(FileScope.PIPELINE_SHARED, "release")) Thread.sleep(10);
+                } catch (InterruptedException e) { throw new RuntimeException(e); }
+                """
+                    .trimIndent(),
+            ),
+            "holder",
+        )
+    awaitCondition("the holder to hold llm", diagnostics = { engine.tail() }) {
+      Files.exists(engine.shared("holder", "holding"))
+    }
+
+    // Another pipeline, which declares no resource, calls the same service with the JDK.
+    val direct =
+        engine.runToEnd(
+            "direct",
+            PackagedEngine.FILES.replace(
+                "network = @AccessLimit(allow = {})",
+                "network = @AccessLimit(allow = {\"127.0.0.1\"})",
+            ),
+            """
+            try {
+              java.net.http.HttpResponse<String> r = java.net.http.HttpClient.newHttpClient().send(
+                  java.net.http.HttpRequest.newBuilder(java.net.URI.create("${service.baseUrl}/chat/completions"))
+                      .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{}")).build(),
+                  java.net.http.HttpResponse.BodyHandlers.ofString());
+              context.getFiles().writeText(FileScope.PIPELINE_SHARED, "status", "" + r.statusCode());
+            } catch (Exception e) { throw new RuntimeException(e); }
+            """
+                .trimIndent(),
+        )
+
+    assertEquals("SUCCEEDED", direct["state"]!!.jsonPrimitive.content, "$direct")
+    val verdict =
+        engine.json(engine.call("GET", "/api/v1/definitions"))["definitions"]!!.jsonArray.single {
+          it.jsonObject["name"]!!.jsonPrimitive.content == "direct"
+        }
+    assertEquals("UNSAFE", verdict.jsonObject["verdict"]!!.jsonPrimitive.content)
+    // It got there while llm was held, and it got no key: the service refused it.
+    assertEquals("401", engine.shared("direct", "status").text())
+    assertEquals(
+        "RUNNING",
+        engine.json(engine.call("GET", "/api/v1/runs/$holder"))["state"]!!.jsonPrimitive.content,
+    )
+    assertTrue(service.requests.any { it.header("authorization") == null })
+    Files.writeString(engine.shared("holder", "release"), "x")
+    assertEquals("SUCCEEDED", engine.awaitEnd(holder)["state"]!!.jsonPrimitive.content)
+  }
+
   /** Every row of every table of the Engine's database, as text. */
   private fun databaseText(): String =
       PostgresTestContainer.connect(engine.database).use { c ->

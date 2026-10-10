@@ -96,7 +96,9 @@ abstract class ResourceApiSupport {
       token: String = TestTokens.ALICE,
       /** Hosts the pipeline says it may connect to (`network`); none by default. */
       network: List<String> = emptyList(),
-  ): HttpResponse = uploadBytes(jarBytes(name, names, types, body, network), token)
+      /** What a typed role is for, by role name (ADR-025). */
+      purposes: Map<String, String> = emptyMap(),
+  ): HttpResponse = uploadBytes(jarBytes(name, names, types, body, network, purposes), token)
 
   /** The bytes of a compiled pipeline, to upload more than once (as different uploaders). */
   protected fun jarBytes(
@@ -105,6 +107,7 @@ abstract class ResourceApiSupport {
       types: Map<String, String> = emptyMap(),
       body: String = "",
       network: List<String> = emptyList(),
+      purposes: Map<String, String> = emptyMap(),
   ): ByteArray {
     val fqcn = "demo.R${counter++}"
     var declaration =
@@ -119,7 +122,9 @@ abstract class ResourceApiSupport {
       declaration +=
           ", typedResources = {" +
               types.entries.joinToString {
-                "@TypedResource(name = \"${it.key}\", type = \"${it.value}\")"
+                "@TypedResource(name = \"${it.key}\", type = \"${it.value}\"" +
+                    (purposes[it.key]?.let { p -> ", purpose = \"$p\"" } ?: "") +
+                    ")"
               } +
               "}"
     }
@@ -147,8 +152,9 @@ abstract class ResourceApiSupport {
       names: List<String> = emptyList(),
       types: Map<String, String> = emptyMap(),
       body: String = "",
+      purposes: Map<String, String> = emptyMap(),
   ): String {
-    val response = upload(name, names, types, body)
+    val response = upload(name, names, types, body, purposes = purposes)
     assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
     return response.json().text("contentHash")
   }

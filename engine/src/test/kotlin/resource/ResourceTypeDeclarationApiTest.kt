@@ -91,7 +91,7 @@ class ResourceTypeDeclarationApiTest : ResourceApiSupport() {
       }
 
   @Test
-  fun `unknown, disabled and mismatched resources are all reported together, unknown and disabled as before`() =
+  fun `unbound, disabled and mismatched resources are all reported together, unbound and disabled before the mismatch`() =
       testApplication {
         engine()
         define("off")
@@ -109,7 +109,7 @@ class ResourceTypeDeclarationApiTest : ResourceApiSupport() {
 
         assertEquals(HttpStatusCode.Conflict, response.status)
         assertEquals(
-            mapOf("ghost" to "unknown", "off" to "disabled", "count" to "type_mismatch"),
+            mapOf("ghost" to "unbound", "off" to "disabled", "count" to "type_mismatch"),
             response.json().problems(),
         )
         noRuns()

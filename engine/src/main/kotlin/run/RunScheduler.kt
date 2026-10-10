@@ -28,8 +28,11 @@ data class RunPlan(
     val className: String,
     val pipelineName: String,
     val parameters: Map<String, String>,
-    val resources: List<String>,
-    val resourceTypes: Map<String, String> = emptyMap(),
+    /** The resource roles the pipeline declares (ADR-025). */
+    val roles: List<String>,
+    val roleTypes: Map<String, String> = emptyMap(),
+    /** Whose version of the pipeline this is; its bindings are the uploader's (ADR-025). */
+    val uploader: String = "",
 )
 
 data class SchedulerConfig(
@@ -198,8 +201,9 @@ class RunScheduler(
                 PendingRun(
                     candidate.plan.id,
                     candidate.plan.pipelineName,
-                    candidate.plan.resources,
-                    candidate.plan.resourceTypes,
+                    candidate.plan.roles,
+                    candidate.plan.roleTypes,
+                    candidate.plan.uploader,
                 )
             )
           } catch (t: Throwable) {

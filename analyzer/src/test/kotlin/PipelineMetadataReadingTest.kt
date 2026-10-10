@@ -55,6 +55,34 @@ class PipelineMetadataReadingTest {
   }
 
   @Test
+  fun `reads the purpose of a role, and a jar written without purposes reads as having none`() {
+    val withPurpose =
+        jar(
+            "demo.Roles" to
+                CompiledJars.pipeline(
+                    "demo.Roles",
+                    limits =
+                        "typedResources = { " +
+                            "@TypedResource(name = \"db\", type = ResourceTypes.JDBC_POOL, purpose = \"Stores articles\"), " +
+                            "@TypedResource(name = \"llm\", type = ResourceTypes.OPENAI_COMPATIBLE), " +
+                            "@TypedResource(name = \"blank\", type = \"counter\", purpose = \"\") }",
+                )
+        )
+    val without =
+        jar(
+            "demo.Old" to
+                CompiledJars.pipeline(
+                    "demo.Old",
+                    limits =
+                        "resources = {\"plain\"}, typedResources = { @TypedResource(name = \"data\", type = \"file\") }",
+                )
+        )
+
+    assertEquals(mapOf("db" to "Stores articles"), metadataOf(withPurpose).resourcePurposes)
+    assertEquals(mapOf<String, String>(), metadataOf(without).resourcePurposes)
+  }
+
+  @Test
   fun `reads parameters, files, limits and resources without running anything`() {
     val path =
         jar(

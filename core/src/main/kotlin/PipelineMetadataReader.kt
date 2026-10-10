@@ -19,6 +19,10 @@ object PipelineMetadataReader {
         processes = def.processes.toPolicy(),
         resources = (def.resources.asList() + def.typedResources.map { it.name }).toSet(),
         resourceTypes = def.typedResources.associate { it.name to it.type },
+        resourcePurposes =
+            def.typedResources
+                .filter { it.purpose.isNotEmpty() }
+                .associate { it.name to it.purpose },
     )
   }
 

@@ -26,6 +26,8 @@ data class PipelineMetadata(
     val resources: List<String>,
     /** The type expected for some of [resources], as the type name written; others need none. */
     val resourceTypes: Map<String, String> = mapOf(),
+    /** What some of [resources] are for (ADR-025); only the roles that say it, as written. */
+    val resourcePurposes: Map<String, String> = mapOf(),
 )
 
 /** A class annotated as a pipeline whose declaration could not be read. */

@@ -187,6 +187,64 @@ class UploadServiceTest {
   }
 
   @Test
+  fun `stores the purpose of a role without it deciding anything, and a jar without purposes has none`() {
+    val path =
+        jar(
+            "demo.Roles" to
+                PipelineJars.pipeline(
+                    "demo.Roles",
+                    "roles",
+                    definition =
+                        "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+                            "typedResources = { " +
+                            "@TypedResource(name = \"db\", type = ResourceTypes.JDBC_POOL, purpose = \"Stores articles\"), " +
+                            "@TypedResource(name = \"llm\", type = ResourceTypes.OPENAI_COMPATIBLE) }",
+                ),
+            "demo.Old" to
+                PipelineJars.pipeline(
+                    "demo.Old",
+                    "old",
+                    definition =
+                        "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+                            "resources = {\"db-lock\"}, typedResources = { " +
+                            "@TypedResource(name = \"data\", type = ResourceTypes.FILE) }",
+                ),
+        )
+
+    val created = assertIs<UploadResult.Created>(upload(path)).artifact
+    val roles = created.definitions.single { it.name == "roles" }
+    val old = created.definitions.single { it.name == "old" }
+
+    assertEquals(mapOf("db" to "Stores articles"), roles.metadata.resourcePurposes)
+    assertEquals(Verdict.SAFE, roles.verdict)
+    assertEquals(emptyMap(), old.metadata.resourcePurposes)
+    assertEquals(created, store.find(created.contentHash, "alice"))
+  }
+
+  @Test
+  fun `a purpose of the longest length is accepted and a longer one rejects the whole upload`() {
+    val longest = "用".repeat(MetadataDoc.MAX_PURPOSE_LENGTH)
+    fun roles(purpose: String) =
+        jar(
+            "demo.Good" to PipelineJars.pipeline("demo.Good", "good"),
+            "demo.Roles" to
+                PipelineJars.pipeline(
+                    "demo.Roles",
+                    "roles",
+                    definition =
+                        "typedResources = { @TypedResource(name = \"db\", type = \"file\", purpose = \"$purpose\") }",
+                ),
+        )
+
+    assertIs<UploadResult.Created>(upload(roles(longest)))
+    val r = rejected(upload(roles(longest + "x"), uploader = "bob"))
+
+    assertEquals(RejectionReason.RESOURCE_PURPOSE_TOO_LONG, r.reason)
+    assertTrue(r.message.contains("roles") && r.message.contains("db"), r.message)
+    assertEquals(1, count("pipeline_artifact"), "only the first upload is stored")
+  }
+
+  @Test
   fun `stores unrestricted limits and empty lists for members that are not declared`() {
     val path = jar("demo.Bare" to PipelineJars.pipeline("demo.Bare", "bare", definition = ""))
 

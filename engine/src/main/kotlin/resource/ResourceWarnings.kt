@@ -23,8 +23,17 @@ class ResourceWarnings(
 ) {
   /** A function giving the warnings of any definition of [artifacts], from one lookup. */
   fun lookup(artifacts: List<ArtifactRecord>): (DefinitionRecord) -> List<WarningDoc> {
-    val names = artifacts.flatMap { a -> a.definitions.flatMap { it.metadata.resources } }
-    val inspection = availability.inspect(names)
+    // Whose a definition is: by identity, since two uploaders' definitions can be equal in content.
+    val owners = java.util.IdentityHashMap<DefinitionRecord, PipelineKey>()
+    artifacts.forEach { a ->
+      a.definitions.forEach { owners[it] = PipelineKey(a.uploadedBy, it.name) }
+    }
+    val roles =
+        owners.entries.groupBy({ it.value }, { it.key.metadata.resources }).mapValues {
+            (_, declared) ->
+          declared.flatten().distinct()
+        }
+    val inspection = availability.inspect(roles)
     val hosts = resourceHosts()
     return { definition ->
       val metadata = definition.metadata
@@ -32,8 +41,8 @@ class ResourceWarnings(
       val outsideTheSet = types.filterValues { ResourceType.fromWireName(it) == null }
       // A type outside the closed set has a warning of its own; it is not also a mismatch.
       inspection
-          .problemsFor(metadata.resources, types)
-          .filterNot { it.kind == ResourceProblemKind.TYPE_MISMATCH && it.name in outsideTheSet }
+          .problemsFor(owners.getValue(definition), metadata.resources, types)
+          .filterNot { it.kind == ResourceProblemKind.TYPE_MISMATCH && it.role in outsideTheSet }
           .map { it.toWarning() } +
           outsideTheSet.map { (name, type) -> unknownType(name, type) } +
           networkHostsOfResources(metadata.network, hosts)
@@ -71,25 +80,32 @@ class ResourceWarnings(
               "建立 run 時會視為型別不符。",
       )
 
-  private fun ResourceProblem.toWarning() =
-      when (kind) {
-        ResourceProblemKind.UNKNOWN ->
-            WarningDoc(
-                "resource_unknown",
-                name,
-                "宣告的共享資源「$name」尚未定義；在管理員定義它之前，這個 pipeline 無法建立 run。",
-            )
-        ResourceProblemKind.DISABLED ->
-            WarningDoc(
-                "resource_disabled",
-                name,
-                "宣告的共享資源「$name」已停用；在管理員啟用它之前，這個 pipeline 無法建立 run。",
-            )
-        ResourceProblemKind.TYPE_MISMATCH ->
-            WarningDoc(
-                "resource_type_mismatch",
-                name,
-                "共享資源「$name」的型別與 pipeline 宣告的不符；在兩者一致之前，這個 pipeline 無法建立 run。",
-            )
-      }
+  /**
+   * The warning for a role that cannot be used. Its [WarningDoc.resource] is the resource the role
+   * leads to; the message says the role when that is a resource of another name (ADR-025).
+   */
+  private fun ResourceProblem.toWarning(): WarningDoc {
+    val of = if (resource == role) "共享資源「$resource」" else "資源角色「$role」所綁定的共享資源「$resource」"
+    return when (kind) {
+      ResourceProblemKind.UNKNOWN,
+      ResourceProblemKind.UNBOUND ->
+          WarningDoc(
+              "resource_unknown",
+              resource,
+              "宣告的$of" + "尚未定義；在管理員定義它之前，這個 pipeline 無法建立 run。",
+          )
+      ResourceProblemKind.DISABLED ->
+          WarningDoc(
+              "resource_disabled",
+              resource,
+              "宣告的$of" + "已停用；在管理員啟用它之前，這個 pipeline 無法建立 run。",
+          )
+      ResourceProblemKind.TYPE_MISMATCH ->
+          WarningDoc(
+              "resource_type_mismatch",
+              resource,
+              "${of}的型別與 pipeline 宣告的不符；在兩者一致之前，這個 pipeline 無法建立 run。",
+          )
+    }
+  }
 }

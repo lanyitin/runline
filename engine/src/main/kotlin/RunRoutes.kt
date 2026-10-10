@@ -259,9 +259,9 @@ private fun CreateRunResult.ResourcesUnavailable.toResponse() =
     ResourcesUnavailableResponse(
         "resources_unavailable",
         "pipeline 宣告的共享資源目前無法使用：" +
-            problems.joinToString("；") { "${it.name}（${it.kind.label}）" } +
-            "。請管理員定義或啟用後再建立 run。",
-        problems.map { ResourceProblemDoc(it.name, it.kind.wire) },
+            problems.joinToString("；") { it.describe() } +
+            "。請管理員定義或啟用資源，或在 pipeline 設定中綁定到可用的資源後再建立 run。",
+        problems.map { ResourceProblemDoc(it.resource, it.kind.wire, it.role) },
     )
 
 private fun CreateRunResult.InvalidParameters.toResponse() =

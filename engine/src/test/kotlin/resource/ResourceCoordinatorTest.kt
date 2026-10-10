@@ -16,7 +16,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
 class ResourceCoordinatorTest {
-  private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
+  private val dataSource = dataSourceOf(migratedDatabase())
+  private val store = PostgresResourceStore(dataSource)
+  private val bindings = PostgresResourceBindingStore(dataSource)
   private val admin = ResourceAdmin(store, MutableClock(), ResourceBehaviors.countersOnly()) {}
   private val root = ApiIdentity("root", Role.ADMIN)
   private val clock = MutableClock()
@@ -25,7 +27,7 @@ class ResourceCoordinatorTest {
 
   private fun coordinator(timeout: Duration = Duration.ofHours(1)) =
       ResourceCoordinator(
-              ResourceAvailability(store),
+              ResourceAvailability(store, bindings),
               clock,
               timeout,
               ResourceTelemetry(OpenTelemetry.noop()),
@@ -41,8 +43,11 @@ class ResourceCoordinatorTest {
     assertIs<CreateResourceResult.Created>(admin.create(name, capacity, root))
   }
 
-  private fun run(vararg resources: String, pipeline: String = "p") =
-      PendingRun(UUID.randomUUID(), pipeline, resources.toList())
+  private fun run(vararg roles: String, pipeline: String = "p") =
+      PendingRun(UUID.randomUUID(), pipeline, roles.toList(), uploader = "alice")
+
+  private fun bind(role: String, resource: String, pipeline: String = "p") =
+      bindings.put(RoleBinding("alice", pipeline, role, resource, "alice", java.time.Instant.now()))
 
   private fun ResourceCoordinator.granted(run: PendingRun) =
       assertEquals(GateDecision.GRANTED, tryAcquire(run), "run ${run.id} should be granted")
@@ -689,5 +694,109 @@ class ResourceCoordinatorTest {
 
   private companion object {
     const val RACES = 300
+  }
+
+  // ---- roles bound to resources (WI-1012, ADR-025) ----
+
+  @Test
+  fun `a bound role holds the resource it is bound to and nothing of its own name`() {
+    define("prod-lock")
+    define("lock")
+    bind("lock", "prod-lock")
+    val c = coordinator()
+    val r = run("lock")
+
+    c.granted(r)
+
+    assertEquals(listOf(r.id), c.activity("prod-lock").holders.map { it.runId })
+    assertEquals(emptyList(), c.activity("lock").holders)
+  }
+
+  @Test
+  fun `two roles bound to one resource of capacity one take its capacity once`() {
+    define("only", 1)
+    bind("reader", "only")
+    bind("writer", "only")
+    val c = coordinator()
+    val both = run("reader", "writer")
+    val other = run("reader")
+
+    c.granted(both)
+
+    assertEquals(1, c.activity("only").holders.size)
+    c.waits(other)
+    c.release(both.id)
+    c.granted(other)
+  }
+
+  @Test
+  fun `a role of its own name and a role bound to that same resource also share one hold`() {
+    define("only", 1)
+    bind("alias", "only")
+    val c = coordinator()
+
+    c.granted(run("only", "alias"))
+
+    assertEquals(1, c.activity("only").holders.size)
+  }
+
+  @Test
+  fun `the capacity of a resource is shared by runs through whichever role they reach it`() {
+    define("gpu", 2)
+    bind("x", "gpu")
+    bind("y", "gpu")
+    val c = coordinator()
+
+    c.granted(run("x"))
+    c.granted(run("y"))
+    c.waits(run("gpu"))
+  }
+
+  @Test
+  fun `which resource a role gets is told for the run that holds it, by role`() {
+    define("one")
+    define("two")
+    bind("a", "two")
+    val c = coordinator()
+    val r = run("a", "one")
+
+    c.granted(r)
+
+    assertEquals(
+        mapOf("a" to "two", "one" to "one"),
+        c.grantedRoles(r.id).mapValues { it.value.name },
+    )
+  }
+
+  @Test
+  fun `a run whose role is bound to a missing resource is refused, saying the role and the resource`() {
+    define("lock")
+    bind("lock", "gone")
+    val c = coordinator()
+
+    val failure = assertIs<GateDecision.Refused>(c.tryAcquire(run("lock"))).failure
+
+    assertEquals(ResourceFailures.UNAVAILABLE, failure.type)
+    assertTrue(
+        failure.message!!.contains("lock") && failure.message!!.contains("gone"),
+        failure.message,
+    )
+    assertEquals(emptyList(), c.activity("lock").holders)
+  }
+
+  @Test
+  fun `a binding changed while a run waits applies the next time the run is looked at`() {
+    define("busy")
+    define("free")
+    bind("r", "busy")
+    val c = coordinator()
+    c.granted(run("busy"))
+    val waiting = run("r")
+    c.waits(waiting)
+
+    bind("r", "free")
+
+    c.granted(waiting)
+    assertEquals(listOf(waiting.id), c.activity("free").holders.map { it.runId })
   }
 }

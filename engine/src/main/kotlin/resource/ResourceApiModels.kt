@@ -124,11 +124,13 @@ data class DeclaringDefinitionDoc(
     val contentHash: String,
     val uploader: String,
     val pipeline: String,
+    /** The role of the pipeline that leads to the resource (ADR-025). */
+    val role: String,
     val declaredType: String?,
     val triggers: Int,
 )
 
-/** The pipeline definitions that declare a resource; [triggers] are bound to those definitions. */
+/** The pipeline roles that lead to a resource; [triggers] are bound to those definitions. */
 @Serializable
 data class DeclaredByDoc(
     val count: Int,
@@ -205,7 +207,12 @@ data class ForceReleaseResponse(
     val heldSince: String,
 )
 
-@Serializable data class ResourceProblemDoc(val resource: String, val problem: String)
+/**
+ * One role that cannot be used: [resource] is the resource it leads to (the one it is bound to,
+ * else the one of its own name) and [role] the name the pipeline uses (ADR-025).
+ */
+@Serializable
+data class ResourceProblemDoc(val resource: String, val problem: String, val role: String)
 
 /** Refusal to create a run because of the shared resources its pipeline declares. */
 @Serializable
@@ -255,13 +262,14 @@ fun ResourceView.toResponse(clock: Clock): ResourceResponse {
           },
       declaredBy =
           DeclaredByDoc(
-              declarations.definitions.size,
+              declarations.definitionCount,
               declarations.triggerCount,
               declarations.definitions.map {
                 DeclaringDefinitionDoc(
                     it.contentHash,
                     it.uploader,
                     it.pipeline,
+                    it.role,
                     it.declaredType,
                     it.triggers,
                 )

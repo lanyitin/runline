@@ -12,7 +12,8 @@ import java.lang.classfile.AnnotationValue
  */
 internal fun Annotation.toMetadata(): PipelineMetadata {
   val named = strings("resources")
-  val typed = annotations("typedResources").map { it.string("name") to it.string("type") }
+  val roles = annotations("typedResources")
+  val typed = roles.map { it.string("name") to it.string("type") }
   return PipelineMetadata(
       name = string("name"),
       parameters = annotations("parameters").map { it.toParameter() },
@@ -21,6 +22,12 @@ internal fun Annotation.toMetadata(): PipelineMetadata {
       processes = limit("processes"),
       resources = named + typed.map { it.first }.filterNot { it in named }.distinct(),
       resourceTypes = typed.toMap(),
+      // The default of an element left out is the empty text, as on the annotation in core.
+      resourcePurposes =
+          roles
+              .map { it.string("name") to it.string("purpose", "") }
+              .filter { it.second.isNotEmpty() }
+              .toMap(),
   )
 }
 

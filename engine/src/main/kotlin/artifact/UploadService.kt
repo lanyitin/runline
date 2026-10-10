@@ -14,6 +14,7 @@ enum class RejectionReason {
   METADATA_UNREADABLE,
   DUPLICATE_PIPELINE_NAME,
   INVALID_PIPELINE_NAME,
+  RESOURCE_PURPOSE_TOO_LONG,
   JAR_TOO_MANY_ENTRIES,
   JAR_ENTRY_TOO_LARGE,
   JAR_EXPANDED_TOO_LARGE,
@@ -94,6 +95,22 @@ class UploadService(
           "pipeline 名稱不合規，整個 jar 不接受：" +
               badNames.joinToString("；") { (name, why) -> "「$name」（$why）" } +
               "。pipeline 名稱會成為 run 的目錄名稱，請改用字母、數字、'.'、'_'、'-'（'.' 與 '..' 除外）。",
+      )
+    }
+    val longPurposes = definitions.flatMap { d ->
+      d.metadata.resourcePurposes
+          .filterValues { it.codePointCount(0, it.length) > MetadataDoc.MAX_PURPOSE_LENGTH }
+          .keys
+          .map { role -> d.name to role }
+    }
+    if (longPurposes.isNotEmpty()) {
+      return rejected(
+          RejectionReason.RESOURCE_PURPOSE_TOO_LONG,
+          "資源角色的用途說明超過 ${MetadataDoc.MAX_PURPOSE_LENGTH} 個字元，整個 jar 不接受：" +
+              longPurposes.joinToString("；") { (pipeline, role) ->
+                "pipeline「$pipeline」的角色「$role」"
+              } +
+              "。用途說明是給人看的短文字，請縮短後重新上傳。",
       )
     }
     definitions
@@ -186,6 +203,7 @@ class UploadService(
           processes = processes.toDoc(),
           resources = resources,
           resourceTypes = resourceTypes,
+          resourcePurposes = resourcePurposes,
       )
 
   private fun AccessLimitMetadata.toDoc() = AccessLimitDoc(unrestricted, allow)

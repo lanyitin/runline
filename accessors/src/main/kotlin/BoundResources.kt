@@ -10,12 +10,15 @@ import kotlin.concurrent.read
 import kotlin.concurrent.write
 
 /**
- * The accessors of one run, by resource name. Fail closed: once [invalidate] (or [invalidateAll])
- * has returned, every later call on that resource fails with the reason before the entity is
- * touched, and no operation that was already running can still complete. Operations on a resource
- * run under its read lock and an invalidation takes the write lock (after asking the binding to
- * [ResourceBinding.abort] what it is doing, so a long operation cannot hold the invalidation up),
- * so the two never overlap. The reason is kept per resource and per run, not per call.
+ * The accessors of one run, by the name the pipeline uses (its role, ADR-025). Roles that are given
+ * the same binding are one resource to the run: they share its state, so invalidating one
+ * invalidates all of them, and the binding is closed once. Fail closed: once [invalidate] (or
+ * [invalidateAll]) has returned, every later call on that resource fails with the reason before the
+ * entity is touched, and no operation that was already running can still complete. Operations on a
+ * resource run under its read lock and an invalidation takes the write lock (after asking the
+ * binding to [ResourceBinding.abort] what it is doing, so a long operation cannot hold the
+ * invalidation up), so the two never overlap. The reason is kept per resource and per run, not per
+ * call.
  */
 class BoundResources(
     private val bindings: Map<String, ResourceBinding>,
@@ -33,7 +36,10 @@ class BoundResources(
       get() = claimed.get()
   }
 
-  private val states = bindings.keys.associateWith { State() }
+  private val states: Map<String, State> =
+      java.util.IdentityHashMap<ResourceBinding, State>().let { byBinding ->
+        bindings.mapValues { (_, binding) -> byBinding.getOrPut(binding) { State() } }
+      }
 
   @Volatile private var runInvalidation: Invalidation? = null
 

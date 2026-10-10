@@ -43,6 +43,10 @@ data class PipelineMetadata(
     val resources: Set<String>,
     /** The type expected for some of [resources]; a name that is not here only needs capacity. */
     val resourceTypes: Map<String, String> = emptyMap(),
+    /**
+     * What some of [resources] are for, by role name (ADR-025); only roles that say it are here.
+     */
+    val resourcePurposes: Map<String, String> = emptyMap(),
 )
 
 /** Applies defaults and validates [supplied] against the declared parameters. */

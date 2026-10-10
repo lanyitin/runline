@@ -33,7 +33,8 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 class ResourceCheckerTest {
   private val root: Path = Files.createTempDirectory("check-root")
-  private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
+  private val dataSource = dataSourceOf(migratedDatabase())
+  private val store = PostgresResourceStore(dataSource)
   private val behaviors =
       ResourceBehaviors.forEngine(ResourceSettings(root, Duration.ofSeconds(1), 1024L * 1024))
   private val admin = ResourceAdmin(store, Clock.systemUTC(), behaviors) {}
@@ -233,7 +234,7 @@ class ResourceCheckerTest {
     defineFile("log", "out.txt")
     val coordinator =
         ResourceCoordinator(
-            ResourceAvailability(store),
+            ResourceAvailability(store, PostgresResourceBindingStore(dataSource)),
             Clock.systemUTC(),
             Duration.ofHours(1),
             ResourceTelemetry(otel),

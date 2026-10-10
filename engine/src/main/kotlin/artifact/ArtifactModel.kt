@@ -19,7 +19,14 @@ data class MetadataDoc(
     val resources: List<String>,
     /** The type the pipeline expects for some of [resources], by name (ADR-019). */
     val resourceTypes: Map<String, String> = emptyMap(),
-)
+    /** What some roles are for, by role name (ADR-025); only roles that say it. For people only. */
+    val resourcePurposes: Map<String, String> = emptyMap(),
+) {
+  companion object {
+    /** The longest purpose of a role, in characters; a longer one is refused at upload. */
+    const val MAX_PURPOSE_LENGTH = 200
+  }
+}
 
 @Serializable
 data class ParameterDoc(val name: String, val required: Boolean, val default: String? = null)

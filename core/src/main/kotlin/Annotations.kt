@@ -31,10 +31,16 @@ annotation class PipelineDefinition(
     val typedResources: Array<TypedResource> = [],
 )
 
-/** A shared resource name with the type the pipeline expects it to be; see [ResourceTypes]. */
+/**
+ * A resource role: the name the pipeline uses to reach a resource (ADR-025), with the type the
+ * pipeline expects it to be (see [ResourceTypes]) and, optionally, what the resource is for. Which
+ * resource is behind the role is decided outside the pipeline; with no binding it is the resource
+ * of the same name. The [purpose] is a short text for people, never read by the Engine to decide
+ * anything; empty means none.
+ */
 @Target()
 @Retention(AnnotationRetention.RUNTIME)
-annotation class TypedResource(val name: String, val type: String)
+annotation class TypedResource(val name: String, val type: String, val purpose: String = "")
 
 @Target()
 @Retention(AnnotationRetention.RUNTIME)

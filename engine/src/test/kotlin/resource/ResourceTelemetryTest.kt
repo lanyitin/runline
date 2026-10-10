@@ -25,13 +25,14 @@ class ResourceTelemetryTest {
       OpenTelemetrySdk.builder()
           .setMeterProvider(SdkMeterProvider.builder().registerMetricReader(reader).build())
           .build()
-  private val store = PostgresResourceStore(dataSourceOf(migratedDatabase()))
+  private val dataSource = dataSourceOf(migratedDatabase())
+  private val store = PostgresResourceStore(dataSource)
   private val clock = MutableClock()
   private val admin = ResourceAdmin(store, clock, ResourceBehaviors.countersOnly()) {}
   private val root = ApiIdentity("root", Role.ADMIN)
   private val coordinator =
       ResourceCoordinator(
-          ResourceAvailability(store),
+          ResourceAvailability(store, PostgresResourceBindingStore(dataSource)),
           clock,
           Duration.ofHours(1),
           ResourceTelemetry(otel),

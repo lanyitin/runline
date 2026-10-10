@@ -105,7 +105,7 @@ class ResourceDeletionApiTest : ResourceApiSupport() {
       }
 
   @Test
-  fun `a resource still declared by pipelines and triggers can be deleted, and their runs are then refused as unknown`() =
+  fun `a resource still declared by pipelines and triggers can be deleted, and their runs are then refused as unbound`() =
       testApplication {
         engine()
         define("lemonade")
@@ -126,7 +126,7 @@ class ResourceDeletionApiTest : ResourceApiSupport() {
         assertEquals(HttpStatusCode.Conflict, response.status)
         assertEquals("resources_unavailable", response.json().text("error"))
         assertEquals(
-            mapOf("lemonade" to "unknown"),
+            mapOf("lemonade" to "unbound"),
             response.json().array("problems").associate {
               it.text("resource") to it.text("problem")
             },

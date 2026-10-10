@@ -108,8 +108,7 @@ class TriggerFirer(
         is CreateRunResult.ResourcesUnavailable ->
             Refusal(
                 "resources_unavailable",
-                "pipeline 宣告的共享資源目前無法使用：" +
-                    result.problems.joinToString("；") { "${it.name}（${it.kind.label}）" },
+                "pipeline 宣告的共享資源目前無法使用：" + result.problems.joinToString("；") { it.describe() },
             )
       }
 

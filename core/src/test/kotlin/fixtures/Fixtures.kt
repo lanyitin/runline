@@ -53,3 +53,16 @@ class StaticInitPipeline : Pipeline {
 class TypedResourcesPipeline : Pipeline {
   override fun run(context: PipelineContext) = Unit
 }
+
+@PipelineDefinition(
+    name = "roles",
+    typedResources =
+        [
+            TypedResource("feed-db", ResourceTypes.JDBC_POOL, purpose = "Stores the articles"),
+            TypedResource("summarizer", ResourceTypes.OPENAI_COMPATIBLE),
+            TypedResource("blank", ResourceTypes.COUNTER, purpose = ""),
+        ],
+)
+class RolesPipeline : Pipeline {
+  override fun run(context: PipelineContext) = Unit
+}

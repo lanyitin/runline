@@ -4,14 +4,17 @@ import dev.lawlan.runline.runner.ResourceHost
 import java.util.UUID
 
 /**
- * A run waiting to start, with the shared resources its pipeline declares (ADR-007) and the types
- * it expects some of them to have (ADR-019).
+ * A run waiting to start, with the resource roles its pipeline declares (ADR-007, ADR-025) and the
+ * types it expects some of them to have (ADR-019). The resource each role gets is decided by the
+ * gate, from the bindings of [uploader]'s pipeline [pipelineName], each time the run is looked at.
  */
 data class PendingRun(
     val id: UUID,
     val pipelineName: String,
-    val resources: List<String>,
-    val resourceTypes: Map<String, String> = emptyMap(),
+    val roles: List<String>,
+    val roleTypes: Map<String, String> = emptyMap(),
+    /** Whose version the run is of: bindings are the uploader's (ADR-025). */
+    val uploader: String = "",
 )
 
 sealed interface GateDecision {

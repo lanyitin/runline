@@ -19,6 +19,11 @@ internal class EngineResourceObserver(
     private val pipeline: String,
     private val traces: RunTelemetry,
     private val telemetry: ResourceTelemetry,
+    /**
+     * The resource behind each role. The accessors know a resource by the role the pipeline uses;
+     * what the Engine records (spans, metrics, logs) is the resource, never the role.
+     */
+    private val resourceOf: Map<String, String> = emptyMap(),
 ) : ResourceObserver {
   private val log = LoggerFactory.getLogger(EngineResourceObserver::class.java)
 
@@ -26,12 +31,13 @@ internal class EngineResourceObserver(
   @Volatile var runLog: (String) -> Unit = {}
 
   override fun <T> operation(resource: String, type: String, operation: String, body: () -> T): T {
+    val actual = resourceOf[resource] ?: resource
     if (type == ResourceType.FILE.wireName) {
-      telemetry.fileOperation(ResourceLabel(resource, type))
+      telemetry.fileOperation(ResourceLabel(actual, type))
     }
     // A pull of a stream is no span: the stream has one of its own, from its opening to its end.
     if (operation == "openai.stream.next") return body()
-    val span = traces.resourceOperation(runId, resource, type, operation)
+    val span = traces.resourceOperation(runId, actual, type, operation)
     // Current for as long as the operation runs, so that what the type reports about it (the time
     // a request waited, the time to its first byte) lands on this span.
     val scope = span?.makeCurrent()
@@ -54,37 +60,37 @@ internal class EngineResourceObserver(
       errorId: String?,
       cause: Throwable?,
   ) {
+    val actual = resourceOf[resource] ?: resource
     if (type == ResourceType.FILE.wireName && failure == ResourceFailure.PATH_REJECTED) {
-      telemetry.pathCheckFailed(ResourceLabel(resource, type))
+      telemetry.pathCheckFailed(ResourceLabel(actual, type))
     }
     log.warn(
         "Run {} (pipeline {}): {} on shared resource {} ({}) failed: {}{}",
         runId,
         pipeline,
         operation,
-        resource,
+        actual,
         type,
         failure,
         errorId?.let { " errorId=$it" } ?: "",
         cause,
     )
-    runLog(
-        "[資源] $resource（$type）的 $operation 失敗：$failure" + (errorId?.let { "（errorId $it）" } ?: "")
-    )
+    runLog("[資源] $actual（$type）的 $operation 失敗：$failure" + (errorId?.let { "（errorId $it）" } ?: ""))
   }
 
   override fun invalidated(resource: String, type: String, reason: Invalidation) {
+    val actual = resourceOf[resource] ?: resource
     log.info(
         "Run {} (pipeline {}): the accessor of shared resource {} ({}) is invalid: {}",
         runId,
         pipeline,
-        resource,
+        actual,
         type,
         reason,
     )
     // The run's log is closed when the run has ended; only what happens during it is written there.
     if (reason == Invalidation.FORCE_RELEASED) {
-      runLog("[資源] $resource（$type）的存取端已失效：管理員強制釋放，之後的操作都會失敗。")
+      runLog("[資源] $actual（$type）的存取端已失效：管理員強制釋放，之後的操作都會失敗。")
     }
   }
 }

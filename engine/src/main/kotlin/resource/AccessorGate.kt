@@ -25,13 +25,18 @@ class AccessorGate(
     private val runTelemetry: RunTelemetry,
     private val telemetry: ResourceTelemetry,
 ) : ResourceGate {
-  private class Prepared(val host: BoundResources, val observer: EngineResourceObserver)
+  private class Prepared(
+      val host: BoundResources,
+      val observer: EngineResourceObserver,
+      /** The roles that got each resource, by resource name. */
+      val rolesOf: Map<String, List<String>>,
+  )
 
   private val prepared = ConcurrentHashMap<UUID, Prepared>()
 
   override fun tryAcquire(run: PendingRun): GateDecision {
     val decision = coordinator.tryAcquire(run)
-    if (decision != GateDecision.GRANTED || run.resourceTypes.isEmpty()) return decision
+    if (decision != GateDecision.GRANTED || run.roleTypes.isEmpty()) return decision
     if (prepared.containsKey(run.id)) return decision
     return try {
       prepared[run.id] = prepare(run)
@@ -53,7 +58,12 @@ class AccessorGate(
 
   init {
     coordinator.beforeForcedRelease { runId, resource ->
-      prepared[runId]?.host?.invalidate(resource, Invalidation.FORCE_RELEASED)
+      prepared[runId]?.let { ready ->
+        // Every role that got the resource: the pipeline knows it by its roles only.
+        ready.rolesOf[resource].orEmpty().forEach {
+          ready.host.invalidate(it, Invalidation.FORCE_RELEASED)
+        }
+      }
     }
   }
 
@@ -67,27 +77,47 @@ class AccessorGate(
 
   override fun accessors(runId: UUID, log: (String) -> Unit): ResourceHost? {
     val held = coordinator.granted(runId)
-    held.forEach { (name, resource) -> log("[資源] 已取得 $name（${resource.type.wireName}）") }
+    val roles = coordinator.grantedRoles(runId).entries.groupBy({ it.value.name }, { it.key })
+    held.forEach { (name, resource) ->
+      val by = roles[name].orEmpty().filter { it != name }
+      log(
+          "[資源] 已取得 $name（${resource.type.wireName}）" +
+              if (by.isEmpty()) "" else "，供角色 ${by.joinToString("、")} 使用"
+      )
+    }
     val ready = prepared[runId] ?: return null
     ready.observer.runLog = log
     return ready.host
   }
 
   private fun prepare(run: PendingRun): Prepared {
-    val granted = coordinator.granted(run.id)
+    val granted = coordinator.grantedRoles(run.id)
+    // One binding for each resource, shared by every role that got it: the run's share of the
+    // resource (its connections, its requests) is the run's, not each role's (ADR-025).
+    val byResource = LinkedHashMap<String, ResourceBinding>()
     val bindings = LinkedHashMap<String, ResourceBinding>()
+    val rolesOf = LinkedHashMap<String, MutableList<String>>()
     try {
-      for (name in run.resourceTypes.keys) {
-        val resource = granted[name] ?: continue
-        behaviors.of(resource.type)?.bind(resource)?.let { bindings[name] = it }
+      for (role in run.roleTypes.keys) {
+        val resource = granted[role] ?: continue
+        val binding =
+            byResource[resource.name]
+                ?: behaviors.of(resource.type)?.bind(resource)?.also {
+                  byResource[resource.name] = it
+                }
+                ?: continue
+        bindings[role] = binding
+        rolesOf.getOrPut(resource.name) { ArrayList() } += role
       }
     } catch (e: Throwable) {
       // What was bound before the refusal is let go of: a binding that is never closed holds its
       // resource's pool for good (a generation of connections that can then never be closed).
-      bindings.values.forEach { runCatching { it.close() } }
+      byResource.values.forEach { runCatching { it.close() } }
       throw e
     }
-    val observer = EngineResourceObserver(run.id, run.pipelineName, runTelemetry, telemetry)
-    return Prepared(BoundResources(bindings, observer), observer)
+    val resourceOf = granted.mapValues { it.value.name }
+    val observer =
+        EngineResourceObserver(run.id, run.pipelineName, runTelemetry, telemetry, resourceOf)
+    return Prepared(BoundResources(bindings, observer), observer, rolesOf)
   }
 }

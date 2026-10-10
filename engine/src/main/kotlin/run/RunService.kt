@@ -5,6 +5,7 @@ import dev.lawlan.runline.engine.artifact.DefinitionStore
 import dev.lawlan.runline.engine.artifact.VersionOutcome
 import dev.lawlan.runline.engine.artifact.VersionResolver
 import dev.lawlan.runline.engine.artifact.Visibility
+import dev.lawlan.runline.engine.resource.PipelineKey
 import dev.lawlan.runline.engine.resource.ResourceAvailability
 import dev.lawlan.runline.engine.resource.ResourceProblem
 import java.time.Clock
@@ -120,14 +121,18 @@ class RunService(
       )
     }
     val unavailable =
-        resources.problems(definition.metadata.resources, definition.metadata.resourceTypes)
+        resources.problems(
+            PipelineKey(owner, definition.name),
+            definition.metadata.resources,
+            definition.metadata.resourceTypes,
+        )
     if (unavailable.isNotEmpty()) {
       log.warn(
           "Run of {} (version {}) refused for {}: shared resources {} cannot be used",
           definition.name,
           definition.contentHash,
           request.source.name,
-          unavailable.map { "${it.name} (${it.kind})" },
+          unavailable.map { "${it.role}->${it.resource} (${it.kind})" },
       )
       return refused(
           "resources_unavailable",
@@ -157,6 +162,7 @@ class RunService(
             parameters,
             definition.metadata.resources,
             definition.metadata.resourceTypes,
+            owner,
         )
     )
     return CreateRunResult.Accepted(run)

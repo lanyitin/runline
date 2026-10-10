@@ -442,7 +442,7 @@ class RunServiceTest {
 
     assertEquals(
         CreateRunResult.ResourcesUnavailable(
-            listOf(ResourceProblem("ghost", ResourceProblemKind.UNKNOWN))
+            listOf(ResourceProblem("ghost", ResourceProblemKind.UNBOUND))
         ),
         result,
     )
@@ -462,7 +462,7 @@ class RunServiceTest {
         CreateRunResult.ResourcesUnavailable(
             listOf(
                 ResourceProblem("off", ResourceProblemKind.DISABLED),
-                ResourceProblem("ghost", ResourceProblemKind.UNKNOWN),
+                ResourceProblem("ghost", ResourceProblemKind.UNBOUND),
             )
         ),
         result,
@@ -512,10 +512,10 @@ class RunServiceTest {
     val released = java.util.concurrent.CopyOnWriteArrayList<UUID>()
 
     override fun tryAcquire(run: PendingRun): GateDecision {
-      if (run.resources.any { holders[it]?.let { h -> h != run.id } == true }) {
+      if (run.roles.any { holders[it]?.let { h -> h != run.id } == true }) {
         return GateDecision.WAIT
       }
-      run.resources.forEach { holders[it] = run.id }
+      run.roles.forEach { holders[it] = run.id }
       return GateDecision.GRANTED
     }
 

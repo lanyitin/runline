@@ -20,6 +20,10 @@ class PostgresResourceDeclarationStoreTest {
   private val definitions = PostgresDefinitionStore(dataSource)
   private val triggers = PostgresTriggerStore(dataSource)
   private val store = PostgresResourceDeclarationStore(dataSource)
+  private val bindings = PostgresResourceBindingStore(dataSource)
+
+  private fun bind(pipeline: String, role: String, resource: String) =
+      bindings.put(RoleBinding("alice", pipeline, role, resource, "alice", Instant.now()))
 
   private fun save(
       label: String,
@@ -71,15 +75,15 @@ class PostgresResourceDeclarationStoreTest {
 
     assertEquals(
         setOf(
-            DeclaringDefinition(v1, "alice", "nightly", null, 0),
-            DeclaringDefinition(v2, "alice", "nightly", "file", 0),
+            DeclaringDefinition(v1, "alice", "nightly", "lemonade", null, 0),
+            DeclaringDefinition(v2, "alice", "nightly", "lemonade", "file", 0),
         ),
         declared.getValue("lemonade").definitions.toSet(),
     )
     assertEquals(
         setOf(
-            DeclaringDefinition(v2, "alice", "nightly", null, 0),
-            DeclaringDefinition(other, "alice", "other", null, 0),
+            DeclaringDefinition(v2, "alice", "nightly", "gpu", null, 0),
+            DeclaringDefinition(other, "alice", "other", "gpu", null, 0),
         ),
         declared.getValue("gpu").definitions.toSet(),
     )
@@ -117,5 +121,59 @@ class PostgresResourceDeclarationStoreTest {
   @Test
   fun `no names ask for nothing`() {
     assertEquals(emptyMap(), store.declaredBy(emptyList()))
+  }
+
+  // ---- roles bound to resources (WI-1012, ADR-025) ----
+
+  @Test
+  fun `a role bound to a resource declares that resource and no longer the one of its own name`() {
+    val v1 = save("v1", "nightly", listOf("db"), mapOf("db" to "file"))
+    bind("nightly", "db", "prod-db")
+
+    val bound = store.declaredBy(listOf("prod-db", "db"))
+
+    assertEquals(
+        listOf(DeclaringDefinition(v1, "alice", "nightly", "db", "file", 0)),
+        bound.getValue("prod-db").definitions,
+    )
+    assertEquals(emptyList(), bound.getValue("db").definitions)
+  }
+
+  @Test
+  fun `a binding applies to every version of the pipeline and to no other pipeline`() {
+    val v1 = save("v1", "nightly", listOf("db"))
+    val v2 = save("v2", "nightly", listOf("db"))
+    val other = save("v3", "other", listOf("db"))
+    bind("nightly", "db", "prod-db")
+
+    val declared = store.declaredBy(listOf("prod-db", "db"))
+
+    assertEquals(
+        setOf(v1, v2),
+        declared.getValue("prod-db").definitions.map { it.contentHash }.toSet(),
+    )
+    assertEquals(listOf(other), declared.getValue("db").definitions.map { it.contentHash })
+  }
+
+  @Test
+  fun `two roles of one definition that lead to one resource are two entries and one definition`() {
+    val v1 = save("v1", "nightly", listOf("a", "b"))
+    bind("nightly", "a", "shared")
+    bind("nightly", "b", "shared")
+    bindTrigger("t1", v1, "nightly")
+
+    val declared = store.declaredBy(listOf("shared")).getValue("shared")
+
+    assertEquals(listOf("a", "b"), declared.definitions.map { it.role }.sorted())
+    assertEquals(1, declared.definitionCount)
+    assertEquals(1, declared.triggerCount)
+  }
+
+  @Test
+  fun `a binding to a resource that nobody defined is still found by that name`() {
+    save("v1", "nightly", listOf("db"))
+    bind("nightly", "db", "later")
+
+    assertEquals(1, store.declaredBy(listOf("later")).getValue("later").definitions.size)
   }
 }

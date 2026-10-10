@@ -20,6 +20,7 @@ class PostgresResourceDeclarationStore(private val dataSource: DataSource) :
                         rows.getString("content_hash"),
                         rows.getString("uploaded_by"),
                         rows.getString("pipeline"),
+                        rows.getString("role"),
                         rows.getString("declared_type"),
                         rows.getInt("triggers"),
                     )
@@ -33,13 +34,19 @@ class PostgresResourceDeclarationStore(private val dataSource: DataSource) :
 
   private companion object {
     // jsonb_exists is the function behind the `?` operator, which a JDBC statement cannot carry.
+    // A role leads to the resource its uploader bound it to for the pipeline, else to the resource
+    // of its own name (ADR-025).
     const val QUERY =
-        "SELECT r.name AS resource, a.content_hash, a.uploaded_by, d.name AS pipeline, " +
-            "d.metadata -> 'resourceTypes' ->> r.name AS declared_type, " +
+        "SELECT r.name AS resource, role.value AS role, a.content_hash, a.uploaded_by, " +
+            "d.name AS pipeline, d.metadata -> 'resourceTypes' ->> role.value AS declared_type, " +
             "(SELECT count(*) FROM pipeline_trigger t WHERE t.definition_id = d.id) AS triggers " +
             "FROM unnest(?::text[]) AS r(name) " +
-            "JOIN pipeline_definition d ON jsonb_exists(d.metadata -> 'resources', r.name) " +
+            "CROSS JOIN pipeline_definition d " +
+            "CROSS JOIN LATERAL jsonb_array_elements_text(d.metadata -> 'resources') AS role(value) " +
             "JOIN pipeline_artifact a ON a.id = d.artifact_id " +
-            "ORDER BY r.name, a.uploaded_at, a.content_hash, a.uploaded_by, d.name"
+            "LEFT JOIN resource_binding b ON b.uploader = a.uploaded_by AND b.pipeline = d.name " +
+            "AND b.role = role.value " +
+            "WHERE COALESCE(b.resource, role.value) = r.name " +
+            "ORDER BY r.name, a.uploaded_at, a.content_hash, a.uploaded_by, d.name, role.value"
   }
 }

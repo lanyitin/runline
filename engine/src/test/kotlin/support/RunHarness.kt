@@ -72,11 +72,15 @@ class RunHarness(
         {
           dev.lawlan.runline.accessors.jdbc.JdbcObserver.NONE
         },
-    /** The databases the Engine carries a profile for. */
-    jdbcProfiles: dev.lawlan.runline.accessors.jdbc.JdbcProfiles =
-        dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
-            listOf(dev.lawlan.runline.accessors.jdbc.PostgresProfile)
-        ),
+    /** The databases the Engine carries a profile for, given the directory of the resources. */
+    jdbcProfilesFor: (Path) -> dev.lawlan.runline.accessors.jdbc.JdbcProfiles = {
+      dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
+          listOf(
+              dev.lawlan.runline.accessors.jdbc.PostgresProfile,
+              dev.lawlan.runline.accessors.jdbc.SqliteProfile(it),
+          )
+      )
+    },
 ) : AutoCloseable {
   val dir: Path = Files.createTempDirectory("run-harness")
   val database = migratedDatabase()
@@ -85,9 +89,11 @@ class RunHarness(
   val definitions = PostgresDefinitionStore(dataSource)
   val runStore = PostgresRunStore(dataSource)
   val resourceStore = PostgresResourceStore(dataSource)
-  val resourceAvailability = ResourceAvailability(resourceStore)
+  val bindingStore = PostgresResourceBindingStore(dataSource)
+  val resourceAvailability = ResourceAvailability(resourceStore, bindingStore)
   /** Where the files of `file` resources live; a directory of its own, apart from the others. */
   val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
+  val jdbcProfiles = jdbcProfilesFor(resourceRoot)
   val jdbcPools = dev.lawlan.runline.accessors.jdbc.JdbcPools(jdbcProfiles)
   val behaviors =
       ResourceBehaviors.forEngine(
@@ -198,6 +204,12 @@ class RunHarness(
     assertIs<CreateResourceResult.Created>(resourceAdmin.create(name, capacity, root))
     if (!enabled) resourceAdmin.update(name, null, false, root)
   }
+
+  /** Binds [role] of [pipeline] to [resource], as `alice` (ADR-025). */
+  fun bind(pipeline: String, role: String, resource: String) =
+      bindingStore.put(
+          RoleBinding("alice", pipeline, role, resource, "alice", java.time.Instant.now())
+      )
 
   /** Defines a `file` resource whose file is [path] below [resourceRoot]. */
   fun defineFile(name: String, path: String, capacity: Int = 1) {

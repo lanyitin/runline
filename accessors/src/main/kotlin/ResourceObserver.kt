@@ -4,7 +4,8 @@ import dev.lawlan.runline.core.ResourceFailure
 
 /**
  * What the host learns about the operations on its accessors: where it traces, counts and logs
- * them. Nothing here is passed on to the run.
+ * them. Nothing here is passed on to the run. The `resource` of a call is the name the pipeline
+ * uses for it (its role, ADR-025); the host that observes knows which resource that is.
  */
 interface ResourceObserver {
   /** Wraps one operation; [operation] is its category (`file.read`), never a path or content. */

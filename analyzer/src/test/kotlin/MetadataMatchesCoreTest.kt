@@ -48,6 +48,7 @@ class MetadataMatchesCoreTest {
     assertLimit(fromCore.processes, fromAnalyzer.processes, "processes")
     assertEquals(fromCore.resources.toList(), fromAnalyzer.resources, "resources")
     assertEquals(fromCore.resourceTypes, fromAnalyzer.resourceTypes, "resource types")
+    assertEquals(fromCore.resourcePurposes, fromAnalyzer.resourcePurposes, "resource purposes")
   }
 
   /** An unrestricted limit has no allow list in core; only a restricted one carries entries. */
@@ -128,6 +129,9 @@ class MetadataMatchesCoreTest {
             "typedResources = { @TypedResource(name = \"x\", type = \"not-a-type\"), " +
                 "@TypedResource(name = \"c\", type = ResourceTypes.COUNTER) }",
             "resources = {\"r\"}, typedResources = { @TypedResource(name = \"r\", type = \"jdbc-pool\") }",
+            "typedResources = { @TypedResource(name = \"p\", type = \"file\", purpose = \"What it is for\"), " +
+                "@TypedResource(name = \"q\", type = \"file\", purpose = \"\"), " +
+                "@TypedResource(name = \"s\", type = \"counter\") }",
         )
         .forEach { assertDeclaration(it) }
   }

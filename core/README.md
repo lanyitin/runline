@@ -18,7 +18,7 @@ static initializers.
 | Network | `network = AccessLimit(allow = [hosts])` | Allowed hosts, or `AccessLimit(unrestricted = true)`. Not provided means unrestricted |
 | External processes | `processes = AccessLimit(allow = [commands])` | Allowed executables (matched against the first command element), or unrestricted. Not provided means unrestricted |
 | Shared resources | `resources = [names]` | Names only; acquired by the Engine in the initialization phase, never through the context. Does not affect safe/unsafe |
-| Expected resource types | `typedResources = [TypedResource(name, type)]` | A name together with the type the pipeline expects (`ResourceTypes.COUNTER`, `FILE`, `JDBC_POOL`, `OPENAI_COMPATIBLE`; the set is closed). The name is also a declared resource name, so it is acquired like any other; a run is refused when the resource has another type. A name declared without a type fits any type. Does not affect safe/unsafe |
+| Expected resource types | `typedResources = [TypedResource(name, type, purpose = "")]` | A resource role: the name the pipeline uses together with the type it expects (`ResourceTypes.COUNTER`, `FILE`, `JDBC_POOL`, `OPENAI_COMPATIBLE`; the set is closed) and an optional short `purpose` (at most 200 characters, for people only). The name is also a declared resource name, so it is acquired like any other; a run is refused when the resource it resolves to has another type. Which resource a role gets is decided by a binding outside the pipeline, else it is the resource of the same name; the pipeline only ever sees the role (ADR-025). A name declared without a type fits any type. Does not affect safe/unsafe |
 
 Triggers are not part of the metadata; administrators bind them in the Engine.
 

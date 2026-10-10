@@ -408,7 +408,7 @@ class ResourceApiTest {
         assertEquals("resources_unavailable", body.text("error"))
         val problems =
             body.array("problems").associate { it.text("resource") to it.text("problem") }
-        assertEquals(mapOf("ghost" to "unknown", "off" to "disabled"), problems)
+        assertEquals(mapOf("ghost" to "unbound", "off" to "disabled"), problems)
         assertTrue(body.text("message").contains("ghost"))
         assertTrue(body.text("message").contains("off"))
         val runs = get("/api/v1/runs", TestTokens.ROOT).json().array("runs")

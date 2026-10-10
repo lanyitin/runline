@@ -38,6 +38,23 @@ class PipelineMetadataTest {
   }
 
   @Test
+  fun `a role carries the purpose written for it, and only a role that has one`() {
+    val meta = PipelineMetadataReader.read(RolesPipeline::class.java)
+
+    assertEquals(mapOf("feed-db" to "Stores the articles"), meta.resourcePurposes)
+    assertEquals(listOf("feed-db", "summarizer", "blank"), meta.resources.toList())
+  }
+
+  @Test
+  fun `a pipeline that declares no purpose has none`() {
+    assertEquals(
+        emptyMap(),
+        PipelineMetadataReader.read(TypedResourcesPipeline::class.java).resourcePurposes,
+    )
+    assertEquals(emptyMap(), PipelineMetadataReader.read(FullPipeline::class.java).resourcePurposes)
+  }
+
+  @Test
   fun `a pipeline that declares only names declares no type`() {
     assertEquals(emptyMap(), PipelineMetadataReader.read(FullPipeline::class.java).resourceTypes)
   }

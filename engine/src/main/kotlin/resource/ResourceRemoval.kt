@@ -39,7 +39,7 @@ class ResourceRemoval(
     val activity = coordinator.activity(name)
     return RemovalPreview(
         name,
-        declared.definitions.size,
+        declared.definitionCount,
         declared.triggerCount,
         activity.holders.size,
         activity.waiters.size,

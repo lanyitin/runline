@@ -28,6 +28,7 @@ ktor:
       - dev.lawlan.runline.engine.ArtifactRoutesKt.configureArtifactRoutes
       - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
       - dev.lawlan.runline.engine.ResourceRoutesKt.configureResourceRoutes
+      - dev.lawlan.runline.engine.ResourceBindingRoutesKt.configureResourceBindingRoutes
       - dev.lawlan.runline.engine.SecretRoutesKt.configureSecretRoutes
       - dev.lawlan.runline.engine.AllowListRoutesKt.configureAllowListRoutes
       - dev.lawlan.runline.engine.TriggerRoutesKt.configureTriggerRoutes

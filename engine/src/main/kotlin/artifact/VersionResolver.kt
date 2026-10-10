@@ -54,4 +54,8 @@ class VersionResolver(private val store: ArtifactStore) {
       else -> VersionOutcome.Ambiguous(candidates)
     }
   }
+
+  /** The uploaders of [contentHash] whose versions [visibility] lets the caller see. */
+  fun visibleUploaders(contentHash: String, visibility: Visibility): List<String> =
+      store.uploadersOf(contentHash).filter { visibility.permitsUploader(it) }
 }

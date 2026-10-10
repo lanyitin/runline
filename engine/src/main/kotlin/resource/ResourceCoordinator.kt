@@ -72,8 +72,10 @@ class ResourceCoordinator(
       val since: Instant,
       /** The type each held resource had when it was acquired. */
       val types: Map<String, String>,
-      /** The definitions as they were when the run was granted them. */
+      /** The definitions as they were when the run was granted them, by resource name. */
       val definitions: Map<String, SharedResource>,
+      /** The resource each role of the run got, by role (ADR-025). */
+      val roles: Map<String, String>,
   ) {
     val resources = LinkedHashSet<String>()
   }
@@ -81,7 +83,8 @@ class ResourceCoordinator(
   private class Waiting(
       val runId: UUID,
       val pipeline: String,
-      val names: List<String>,
+      /** The resources the run waits for; follows the bindings each time the run is looked at. */
+      var names: List<String>,
       val since: Instant,
       val types: Map<String, String>,
   ) {
@@ -115,27 +118,34 @@ class ResourceCoordinator(
   fun wake() = wakeScheduler()
 
   override fun tryAcquire(run: PendingRun): GateDecision {
-    val names = run.resources.distinct()
-    if (names.isEmpty()) return GateDecision.GRANTED
+    val roles = run.roles.distinct()
+    if (roles.isEmpty()) return GateDecision.GRANTED
     while (true) {
       // The definitions are read before the lock is taken. A resource removed in between must not
       // be granted on the strength of that reading, so a removal is counted and, when one
       // happened meanwhile, the definitions are read again.
       val removalsSeen = removals
-      val inspection = availability.inspect(names, run.resourceTypes)
+      val pipeline = PipelineKey(run.uploader, run.pipelineName)
+      val inspection = availability.inspect(pipeline, roles)
       synchronized(lock) {
         if (removals != removalsSeen) return@synchronized
-        if (inspection.problems.isNotEmpty()) return refuse(run, inspection)
+        val problems = inspection.problemsFor(pipeline, roles, run.roleTypes)
+        if (problems.isNotEmpty()) return refuse(run, inspection, problems)
+        // Roles that lead to the same resource take its capacity once (ADR-025).
+        val byRole = roles.associateWith { inspection.resolve(pipeline, it).resource }
+        val names = byRole.values.distinct()
         if (holds[run.id]?.resources?.containsAll(names) == true) return GateDecision.GRANTED
         val grantable = names.all { name ->
           holders(name) < inspection.defined.getValue(name).capacity && !waiterAhead(name, run.id)
         }
-        if (grantable) return grant(run, names, inspection.defined)
+        if (grantable) return grant(run, byRole, inspection.defined)
         val waiter = waiting[run.id]
         if (waiter == null) {
           register(run, names, inspection.defined)
         } else if (waiter.expired) {
           return timeOut(waiter)
+        } else {
+          waiter.names = names
         }
         return GateDecision.WAIT
       }
@@ -213,6 +223,17 @@ class ResourceCoordinator(
   fun granted(runId: UUID): Map<String, SharedResource> =
       synchronized(lock) { holds[runId]?.definitions.orEmpty() }
 
+  /**
+   * The definition each role of [runId] was granted, by role, as it was then (ADR-025); empty if
+   * the run holds nothing. Roles that got the same resource have the same definition.
+   */
+  fun grantedRoles(runId: UUID): Map<String, SharedResource> =
+      synchronized(lock) {
+        holds[runId]
+            ?.let { hold -> hold.roles.mapValues { hold.definitions.getValue(it.value) } }
+            .orEmpty()
+      }
+
   fun activity(resource: String): ResourceActivity =
       synchronized(lock) {
         ResourceActivity(
@@ -246,14 +267,22 @@ class ResourceCoordinator(
 
   private fun grant(
       run: PendingRun,
-      names: List<String>,
+      byRole: Map<String, String>,
       defined: Map<String, SharedResource>,
   ): GateDecision {
+    val names = byRole.values.distinct()
     val waited = removeWaiting(run.id)
     val now = clock.instant()
     val types = typesOf(names, defined)
     val hold =
-        Hold(run.id, run.pipelineName, now, types, names.associateWith { defined.getValue(it) })
+        Hold(
+                run.id,
+                run.pipelineName,
+                now,
+                types,
+                names.associateWith { defined.getValue(it) },
+                byRole,
+            )
             .also { it.resources += names }
     holds[run.id] = hold
     known += types
@@ -319,15 +348,18 @@ class ResourceCoordinator(
     )
   }
 
-  private fun refuse(run: PendingRun, inspection: ResourceInspection): GateDecision {
-    val problems = inspection.problems
+  private fun refuse(
+      run: PendingRun,
+      inspection: ResourceInspection,
+      problems: List<ResourceProblem>,
+  ): GateDecision {
     val waited = removeWaiting(run.id)
     val seconds = waited?.let { secondsSince(it.since) } ?: 0.0
     problems.forEach {
-      val type = inspection.defined[it.name]?.type?.wireName ?: ResourceTelemetry.UNDEFINED_TYPE
-      telemetry.waited(ResourceLabel(it.name, type), WaitOutcome.REFUSED, seconds)
+      val type = inspection.defined[it.resource]?.type?.wireName ?: ResourceTelemetry.UNDEFINED_TYPE
+      telemetry.waited(ResourceLabel(it.resource, type), WaitOutcome.REFUSED, seconds)
     }
-    val text = problems.joinToString("、") { "${it.name}（${it.kind.label}）" }
+    val text = problems.joinToString("、") { it.describe() }
     log.warn("Run {} (pipeline {}) cannot get resources: {}", run.id, run.pipelineName, text)
     return GateDecision.Refused(
         FailureInfo(ResourceFailures.UNAVAILABLE, "無法取得資源：$text；run 未開始。", "")

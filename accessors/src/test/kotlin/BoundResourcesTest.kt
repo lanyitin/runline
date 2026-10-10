@@ -60,6 +60,38 @@ class BoundResourcesTest {
     assertFalse(root.resolve("b.txt").toFile().exists())
   }
 
+  /** Counts how often it is closed; otherwise a file binding. */
+  private class CountingFile(entity: FileEntity) : ResourceBinding {
+    private val inner = FileBinding(entity)
+    val closed = AtomicInteger()
+    override val type = inner.type
+
+    override fun execute(operation: String, arguments: Map<String, Any?>) =
+        inner.execute(operation, arguments)
+
+    override fun close() {
+      closed.incrementAndGet()
+    }
+  }
+
+  @Test
+  fun `two roles that share a binding are one resource, so invalidating one fails both and it is closed once`() {
+    val shared = CountingFile(FileEntity(root, "shared.txt"))
+    val other = FileBinding(FileEntity(root, "o.txt"))
+    val host = BoundResources(mapOf("reader" to shared, "writer" to shared, "other" to other))
+    assertEquals(null, failure(write(host, "reader", "before")))
+    assertEquals(null, failure(write(host, "writer", "before")))
+
+    host.invalidate("reader", Invalidation.FORCE_RELEASED)
+
+    assertEquals("FORCE_RELEASED", failure(write(host, "reader", "after")))
+    assertEquals("FORCE_RELEASED", failure(write(host, "writer", "after")))
+    assertEquals(null, failure(write(host, "other", "still")), "another resource is not affected")
+    host.invalidateAll(Invalidation.RUN_ENDED)
+    assertEquals(1, shared.closed.get(), "closed once however many roles name it")
+    assertEquals("before", root.resolve("shared.txt").readText())
+  }
+
   @Test
   fun `the first reason stays`() {
     val host = files("a")

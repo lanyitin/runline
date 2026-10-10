@@ -30,6 +30,7 @@
 | [WI-1019](WI-1019-none-condition-summary.md) | `condition=none` 時摘要：有給 `readerModel` 就用於摘要，沒給只產出事實；手冊定稿 | WI-1018、WI-1011 | 已完成（`ktfmtCheck test` 與 `endToEndTest` 通過；新增 `summary_status` 值 `not_made`；手冊定稿） |
 | [WI-1020](WI-1020-runline-doc-corrections.md) | runline 側文件更正（WI-48 末節、`deploy/browser.md`） | WI-1016、WI-1011 | 已完成（WI-48 末節與 `deploy/browser.md` 更正；`deploy/browser.md` 是未追蹤檔案，需納入提交） |
 | [WI-1021](WI-1021-runbook-relocation.md) | 手冊由使用者搬到 stable 後，修正測試與連結的路徑 | WI-1019、使用者搬移手冊 | 已完成（`ktfmtCheck test` 通過；測試改讀新路徑，找不到手冊時明確失敗；舊路徑全專案搜尋無殘留） |
+| [WI-1022](WI-1022-model-identity-file-path.md) | 模型身分比對接受以檔案路徑回報的模型（[ADR-028](../adr/ADR-028-model-identity-file-path.md)；工作的儲存庫是 `runline-digest-rss`） | 無 | 未開始 |
 
 剩餘順序：WI-1019 → WI-1020 → 手冊晉升 → WI-1017（使用者執行），一次派一項。WI-1000 至 WI-1016、WI-1018 皆已完成（WI-1001 與 WI-1007 另有待辦的真實環境驗證，見各自狀態與 WI-1017）。
 

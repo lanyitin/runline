@@ -48,7 +48,7 @@ flowchart LR
 | 5 IPC 模型 | [05-ipc.md](05-ipc.md) | 已核可 |
 | 6 資料模型 | [06-data-model.md](06-data-model.md) | 已核可 |
 | 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
-| 8 決策記錄（ADR-022 至 025） | [adr/](adr/) | 已核可 |
+| 8 決策記錄（ADR-022 至 025、028） | [adr/](adr/) | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |
 | 上線手冊 | [runbook.md](runbook.md)（管理員的上線、第一次執行、查詢、維運與排錯） | 已核可 |
 

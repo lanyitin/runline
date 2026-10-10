@@ -5,6 +5,7 @@ import dev.lawlan.runline.accessors.jdbc.JdbcObserver
 import dev.lawlan.runline.accessors.jdbc.JdbcPools
 import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
 import dev.lawlan.runline.accessors.jdbc.PostgresProfile
+import dev.lawlan.runline.accessors.jdbc.SqliteProfile
 import dev.lawlan.runline.accessors.openai.OpenAiObserver
 import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.engine.config.ResourceSettings
@@ -116,7 +117,8 @@ class ResourceBehaviors(private val byType: Map<ResourceType, ResourceBehavior>)
         settings: ResourceSettings,
         secrets: SecretStore = NoSecretStore,
         openAiObserver: OpenAiObserver = OpenAiObserver.NONE,
-        jdbcProfiles: JdbcProfiles = JdbcProfiles(listOf(PostgresProfile)),
+        jdbcProfiles: JdbcProfiles =
+            JdbcProfiles(listOf(PostgresProfile, SqliteProfile(settings.root))),
         jdbcPools: JdbcPools = JdbcPools(jdbcProfiles),
         jdbcObserver: JdbcObserver = JdbcObserver.NONE,
     ) =

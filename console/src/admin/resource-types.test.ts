@@ -42,6 +42,13 @@ describe('the summary of the settings of a resource', () => {
     ]);
   });
 
+  test('of a jdbc-pool that is a file is the kind of database and the path', () => {
+    expect(settingsSummary('jdbc-pool', { kind: 'sqlite', path: 'runs/digest.db', connectionsPerRun: 2 })).toEqual([
+      { field: 'kind', value: 'sqlite' },
+      { field: 'path', value: 'runs/digest.db' },
+    ]);
+  });
+
   test('leaves out a field that is not there or not a plain value, and knows nothing of a type it does not know', () => {
     expect(settingsSummary('file', {})).toEqual([]);
     expect(settingsSummary('file', { path: { nested: true } })).toEqual([]);

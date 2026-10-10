@@ -43,6 +43,13 @@ dependencies {
   testImplementation(libs.testcontainers.postgresql)
 }
 
+// The Engine loads native libraries (Netty's transport, the SQLite driver's). Since JDK 24 the JVM
+// warns at the first load, and a future release blocks it, unless native access is enabled for the
+// caller. The artifact declares it, so that `java -jar engine.jar` needs no flag wherever it starts
+// (WI-1001, docs/stable/digest-rss/04-deployment.md). The scope is the one of the command-line flag
+// --enable-native-access=ALL-UNNAMED: no narrower form exists for code on the class path.
+tasks.named<Jar>("shadowJar") { manifest { attributes("Enable-Native-Access" to "ALL-UNNAMED") } }
+
 // What the Engine knows about its own build, in a resource of the jar (WI-28). The release flag is
 // `-Prunline.release=true` (see the README).
 apply(from = rootProject.file("gradle/build-info.gradle.kts"))
@@ -62,7 +69,7 @@ tasks.processResources { from(consoleAssets) { into("console") } }
 tasks.test {
   useJUnitPlatform()
   // Runs against the packaged Engine have their own task (packagedTest).
-  exclude("**/packaged/**")
+  exclude("**/packaged/**", "**/browserdeploy/**")
   // PermissionsEnforced (test fixtures of accessors) calls the C library to give up root's
   // capabilities on a thread of its own (WI-57).
   jvmArgs("--enable-native-access=ALL-UNNAMED")
@@ -165,6 +172,24 @@ val packagedTest by
         systemProperty("runline.dist", dist.get().asFile.absolutePath)
         systemProperty("runline.java", launcher.get().executablePath.asFile.absolutePath)
       }
+    }
+
+// The Engine as deployed for pipelines that drive a browser (WI-1001): the browser image of
+// deploy/docker, linux/amd64 only, built from Google's package. Not part of check: it downloads
+// Chrome and needs an amd64 Docker host (on arm64, Rosetta emulation).
+val browserDeploymentTest by
+    tasks.registering(Test::class) {
+      group = "verification"
+      description = "Tests the browser image and its compose overlay on real Docker (WI-1001)"
+      testClassesDirs = sourceSets.test.get().output.classesDirs
+      classpath = sourceSets.test.get().runtimeClasspath
+      useJUnitPlatform()
+      filter { includeTestsMatching("*.browserdeploy.*") }
+      dependsOn(engineDistribution)
+      systemProperty("runline.repoRoot", rootProject.projectDir.absolutePath)
+      inputs.dir(rootProject.file("deploy")).withPropertyName("deployFiles")
+      val dist = layout.buildDirectory.dir("engine-dist")
+      doFirst { systemProperty("runline.dist", dist.get().asFile.absolutePath) }
     }
 
 tasks.check { dependsOn(packagedTest) }

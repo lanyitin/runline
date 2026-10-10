@@ -102,6 +102,7 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
               connection.rollback()
               connection.autoCommit = true
             }
+            if (!profile.keepsConnections) return@run false
             connection.createStatement().use { statement ->
               profile.resetStatements.forEach { statement.execute(it) }
             }

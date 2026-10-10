@@ -9,6 +9,7 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Types
 import java.util.Properties
+import kotlinx.serialization.json.JsonObject
 
 /** PostgreSQL, the first database (WI-48). */
 object PostgresProfile : JdbcProfile {
@@ -16,7 +17,8 @@ object PostgresProfile : JdbcProfile {
 
   /** The property that tells the Engine's socket factory which pool's context to use (WI-52). */
   const val TLS_CONTEXT_PROPERTY = "runlineTlsContext"
-  override val defaultPort = 5432
+  private const val DEFAULT_PORT = 5432L
+  override val locationMembers = listOf("host", "port", "database", "username")
 
   /**
    * What an administrator may set besides the structured fields. Nothing here loads a class (the
@@ -46,36 +48,59 @@ object PostgresProfile : JdbcProfile {
    * the server the time zone of the Engine's machine. The application name and the schemas the
    * administrator set are set again too, because `DISCARD ALL` returns them to the server's.
    */
-  override fun startStatements(extra: Map<String, String>): List<String> =
-      listOf(
-          "SET TIME ZONE 'UTC'",
-          "SET application_name TO ${literal(extra["ApplicationName"] ?: DEFAULT_APPLICATION)}",
-      ) +
-          listOfNotNull(
-              extra["currentSchema"]?.let { schemas ->
-                "SET search_path TO " + schemas.split(',').joinToString(",") { literal(it) }
-              }
-          )
+  override fun startStatements(settings: JdbcSettings): List<String> {
+    val extra = settings.properties
+    return listOf(
+        "SET TIME ZONE 'UTC'",
+        "SET application_name TO ${literal(extra["ApplicationName"] ?: DEFAULT_APPLICATION)}",
+    ) +
+        listOfNotNull(
+            extra["currentSchema"]?.let { schemas ->
+              "SET search_path TO " + schemas.split(',').joinToString(",") { literal(it) }
+            }
+        )
+  }
 
   private fun literal(text: String) = "'" + text.replace("'", "''") + "'"
 
   override val values: JdbcValues = PostgresValues
 
-  override fun acceptsAddress(host: String, database: String) =
-      HOST.matches(host) && DATABASE.matches(database)
+  override fun locationOf(settings: JsonObject): JdbcLocationResult {
+    val host =
+        SettingsValues.text(settings["host"]) ?: return JdbcLocationResult.Rejected.INVALID_SETTINGS
+    val database =
+        SettingsValues.text(settings["database"])
+            ?: return JdbcLocationResult.Rejected.INVALID_SETTINGS
+    val username =
+        SettingsValues.text(settings["username"])?.takeIf { isPlainName(it) }
+            ?: return JdbcLocationResult.Rejected.INVALID_SETTINGS
+    if (!HOST.matches(host) || !DATABASE.matches(database)) {
+      return JdbcLocationResult.Rejected.INVALID_SETTINGS
+    }
+    val port =
+        SettingsValues.boundedLong(settings["port"], 1, 65535, DEFAULT_PORT)
+            ?: return JdbcLocationResult.Rejected.INVALID_SETTINGS
+    return JdbcLocationResult.Found(JdbcLocation.Network(host, port.toInt(), database, username))
+  }
 
-  override fun url(host: String, port: Int, database: String) =
-      "jdbc:postgresql://$host:$port/$database"
+  /** A name of an account: printable, without a control character, not longer than it need be. */
+  private fun isPlainName(name: String) =
+      name.length <= LONGEST_NAME && name.none { it.isISOControl() }
+
+  override fun url(location: JdbcLocation): String {
+    val network = location as JdbcLocation.Network
+    return "jdbc:postgresql://${network.host}:${network.port}/${network.database}"
+  }
 
   override fun properties(
-      username: String,
+      location: JdbcLocation,
       password: String?,
       connectTimeoutMillis: Long,
       extra: Map<String, String>,
   ): Properties {
     val properties = Properties()
     properties.setProperty("ApplicationName", DEFAULT_APPLICATION)
-    properties.setProperty("user", username)
+    properties.setProperty("user", (location as JdbcLocation.Network).username)
     // An empty password, not none: with none the driver would look for one in the files and the
     // environment of the Engine's host, which is nobody's decision about this resource.
     properties.setProperty("password", password.orEmpty())
@@ -148,6 +173,7 @@ object PostgresProfile : JdbcProfile {
   /** Up to eight schema names, separated by commas. */
   private const val IDENTIFIERS =
       "[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}"
+  private const val LONGEST_NAME = 128
   private const val CANCEL_SIGNAL_SECONDS = 2
   private const val DEFAULT_APPLICATION = "runline"
   private const val LOGIN_MARGIN_SECONDS = 5L

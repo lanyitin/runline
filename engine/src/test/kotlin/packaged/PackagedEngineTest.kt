@@ -449,6 +449,76 @@ class PackagedEngineTest {
   }
 
   @Test
+  fun `in the packaged Engine run after run, each in a class loader of its own, uses the same sqlite file`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    Files.createDirectories(work.resolve("resources"))
+    startEngine(database, runtime)
+    val define =
+        send(
+            "POST",
+            "/api/v1/resources",
+            ROOT,
+            """{"name":"db","capacity":1,"type":"jdbc-pool","settings":{"kind":"sqlite","path":"digest.db"}}"""
+                .toByteArray(),
+            "application/json",
+        )
+    assertEquals(201, define.statusCode(), define.body())
+    val definition =
+        "files = {@FileAccess(scope = FileScope.PIPELINE_SHARED, mode = FileMode.READ_WRITE)}, " +
+            "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+            "typedResources = {@TypedResource(name = \"db\", type = \"jdbc-pool\")}"
+    val hash =
+        uploadAllowed(
+            "demo.Digest",
+            "digest",
+            definition,
+            """
+            JdbcAccessor db = context.getAccessors().jdbcPool("db");
+            db.update("CREATE TABLE IF NOT EXISTS runs (n INTEGER PRIMARY KEY AUTOINCREMENT, loader TEXT)");
+            db.begin();
+            db.update("INSERT INTO runs (loader) VALUES (?)",
+                java.util.Arrays.<Object>asList(String.valueOf(System.identityHashCode(getClass().getClassLoader()))));
+            db.commit();
+            context.getFiles().writeText(FileScope.PIPELINE_SHARED, "count",
+                String.valueOf(db.query("SELECT count(*) AS c FROM runs").maps().get(0).get("c")));
+            """
+                .trimIndent(),
+        )
+
+    val counts =
+        (1..4).map { n ->
+          val run = startRun(hash, "digest")
+          val ended = awaitState(run, "SUCCEEDED", "FAILED")
+          assertEquals(
+              "SUCCEEDED",
+              ended["state"]!!.jsonPrimitive.content,
+              "run $n:\n${tail("engine.log")}",
+          )
+          Files.readString(work.resolve("shared").resolve("digest").resolve("count"))
+        }
+
+    assertEquals(listOf("1", "2", "3", "4"), counts)
+    java.sql.DriverManager.getConnection("jdbc:sqlite:" + work.resolve("resources/digest.db")).use {
+      it.createStatement().use { s ->
+        s.executeQuery("SELECT count(DISTINCT loader), count(*) FROM runs").use { rows ->
+          rows.next()
+          assertEquals(4, rows.getInt(2))
+          assertEquals(4, rows.getInt(1), "the runs did not each have a class loader of their own")
+        }
+      }
+    }
+    // The run's own class path never held the driver, nor its native library.
+    assertEquals(
+        emptyList(),
+        Files.list(runtime).use { jars ->
+          jars.map { it.fileName.toString() }.filter { "sqlite" in it }.toList()
+        },
+    )
+  }
+
+  @Test
   fun `in the packaged Engine two runs in different class loaders do not hold the same resource together`() {
     val database = PostgresTestContainer.newDatabase()
     val runtime = dist.resolve("run-runtime")

@@ -53,6 +53,7 @@ describe('the form of a jdbc-pool', () => {
     port: '6543',
     database: 'orders',
     username: 'reader',
+    path: '',
     connectionsPerRun: '2',
     connectMs: '2000',
     statementMs: '30000',
@@ -65,13 +66,14 @@ describe('the form of a jdbc-pool', () => {
     clientCertAlias: '',
   };
 
-  test('a new one is of PostgreSQL, the only kind there is, and leaves the rest to be filled or to the defaults', () => {
+  test('a new one is of the first kind the Engine tells, PostgreSQL, and leaves the rest to be filled or to the defaults', () => {
     expect(form.empty()).toEqual({
       kind: 'postgresql',
       host: '',
       port: '',
       database: '',
       username: '',
+      path: '',
       connectionsPerRun: '',
       connectMs: '',
       statementMs: '',
@@ -293,6 +295,51 @@ describe('the form of an openai-compatible service', () => {
   });
 });
 
+describe('the form of a jdbc-pool, for a database that is a file', () => {
+  const form = formOf('jdbc-pool', CATALOG)!;
+  const stored = {
+    kind: 'sqlite',
+    path: 'runs/digest.db',
+    connectionsPerRun: 2,
+    timeouts: { statementMs: 30000 },
+    maxRows: 500,
+  };
+
+  test('makes the settings of the kind and the path only, whatever the fields of a database over a network hold', () => {
+    const typed = { ...form.empty(), kind: 'sqlite', path: ' runs/digest.db ', host: 'left-over', username: 'left-over', port: 'x' };
+
+    expect(form.toSettings(typed, {})).toEqual({ settings: { kind: 'sqlite', path: 'runs/digest.db' } });
+  });
+
+  test('asks for the path, and not for a host, a database or an account', () => {
+    expect(form.toSettings({ ...form.empty(), kind: 'sqlite' }, {})).toEqual({ errors: { 'jdbc-path': 'required' } });
+  });
+
+  test('one that exists has its path in the field, and keeps what has no field', () => {
+    const fields = form.fromSettings(stored);
+
+    expect(fields).toMatchObject({ kind: 'sqlite', path: 'runs/digest.db', connectionsPerRun: '2', statementMs: '30000' });
+    expect(form.toSettings(fields, stored)).toEqual({ settings: stored });
+  });
+
+  test('takes the host, the database and the account of a stored database off when the kind is changed to a file', () => {
+    const before = { kind: 'postgresql', host: 'db', database: 'orders', username: 'reader', maxRows: 7 };
+
+    expect(form.toSettings({ ...form.fromSettings(before), kind: 'sqlite', path: 'a.db' }, before)).toEqual({
+      settings: { kind: 'sqlite', path: 'a.db', maxRows: 7 },
+    });
+  });
+
+  test('says what the Engine refused about the path at the path', () => {
+    expect(form.fieldOf('path_outside_root')).toBe('jdbc-path');
+  });
+
+  test('takes neither a password nor certificates for a file, and both for a database over a network', () => {
+    expect(form.networked!({ ...form.empty(), kind: 'sqlite' })).toBe(false);
+    expect(form.networked!({ ...form.empty(), kind: 'postgresql' })).toBe(true);
+  });
+});
+
 describe('the forms there are', () => {
   test('a counter has no fields of its own, and a type the Console does not know has no form', () => {
     expect(formOf('counter', CATALOG)!.toSettings(formOf('counter', CATALOG)!.empty(), {})).toEqual({ settings: undefined });
@@ -359,7 +406,12 @@ describe('the forms and the catalog of the Engine (WI-55)', () => {
         { name: 'words', kind: 'textOrList', ceiling: false },
       ],
     },
-    jdbc: { databases: [{ kind: 'otherdb', properties: [] }, { kind: 'postgresql', properties: [] }] },
+    jdbc: {
+      databases: [
+        { kind: 'otherdb', fields: ['host', 'port', 'database', 'username'], properties: [] },
+        { kind: 'postgresql', fields: ['host', 'port', 'database', 'username'], properties: [] },
+      ],
+    },
   };
 
   test('a new resource starts from what the catalog says: its default entries, its parameters, its first database kind', () => {

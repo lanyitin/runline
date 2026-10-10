@@ -14,10 +14,9 @@ internal object JdbcConnector {
       tls: PoolTls? = null,
   ): Connection {
     val properties =
-        profile.properties(settings.username, password, connectTimeoutMillis, settings.properties)
+        profile.properties(settings.location, password, connectTimeoutMillis, settings.properties)
     tls?.let { properties.putAll(profile.tlsProperties(it.id)) }
-    val connection =
-        profile.connect(profile.url(settings.host, settings.port, settings.database), properties)
+    val connection = profile.connect(profile.url(settings.location), properties)
     try {
       start(profile, settings, connection)
     } catch (e: Throwable) {
@@ -30,7 +29,7 @@ internal object JdbcConnector {
   /** The session settings of a connection, run when it is opened and after each reset. */
   fun start(profile: JdbcProfile, settings: JdbcSettings, connection: Connection) {
     connection.createStatement().use { statement ->
-      profile.startStatements(settings.properties).forEach { statement.execute(it) }
+      profile.startStatements(settings).forEach { statement.execute(it) }
     }
   }
 }

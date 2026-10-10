@@ -59,6 +59,10 @@
   let fields = $state<any>(
     resource === undefined ? undefined : formOf(resource.type, catalog)?.fromSettings(resource.settings),
   );
+  /** Whether the resource names the secret of an account: not a database that is a file, which has none. */
+  const usesSecret = $derived(
+    form?.takesSecret === true && (fields === undefined || (form.networked?.(fields) ?? true)),
+  );
   let errors = $state<Record<string, string>>({});
   let failure = $state.raw<ApiFailure | null>(null);
   let busy = $state(false);
@@ -122,7 +126,7 @@
       for (const [id, code] of Object.entries(made.errors)) found[id] = i18n.translate(`resources.form.error.${code}`);
     }
     const settings = 'settings' in made ? made.settings : undefined;
-    const alias = form?.takesSecret && secretAlias !== '' ? secretAlias : undefined;
+    const alias = usesSecret && secretAlias !== '' ? secretAlias : undefined;
     const change = editing
       ? {
           ...(count !== resource!.capacity ? { capacity: count } : {}),
@@ -267,7 +271,7 @@
           <OpenAiFields bind:fields catalog={catalog!.openAi!} {errors} {capacity} onchange={cleared} />
         {/if}
       {/if}
-      {#if form?.takesSecret}
+      {#if usesSecret}
         <SecretAliasField
           bind:value={secretAlias}
           current={resource?.secretAlias ?? null}
@@ -276,7 +280,7 @@
           onchange={() => cleared('resource-secret')}
         />
       {/if}
-      {#if fields !== undefined && (type === 'jdbc-pool' || type === 'openai-compatible')}
+      {#if fields !== undefined && (type === 'jdbc-pool' || type === 'openai-compatible') && (form?.networked?.(fields) ?? true)}
         <CertificateAliasesField
           bind:trustAliases={fields.trustAliases}
           bind:clientCertAlias={fields.clientCertAlias}

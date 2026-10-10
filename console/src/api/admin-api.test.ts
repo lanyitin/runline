@@ -469,7 +469,8 @@ describe('typed resources, checks, deleting and secrets', () => {
       stateful: true,
     });
     expect(catalog.openAi?.requestParameters.find((p) => p.name === 'stop')).toEqual({ name: 'stop', kind: 'textOrList', ceiling: false });
-    expect(catalog.jdbc?.databases.map((d) => d.kind)).toEqual(['postgresql']);
+    expect(catalog.jdbc?.databases.map((d) => d.kind)).toEqual(['postgresql', 'sqlite']);
+    expect(catalog.jdbc?.databases.map((d) => d.fields)).toEqual([['host', 'port', 'database', 'username'], ['path']]);
     expect(catalog.jdbc?.databases[0].properties.find((p) => p.name === 'tcpKeepAlive')).toEqual({
       name: 'tcpKeepAlive',
       rule: 'oneOf',

@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.resource
 
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.jdbc.JdbcCredential
+import dev.lawlan.runline.accessors.jdbc.JdbcLocation
 import dev.lawlan.runline.accessors.jdbc.JdbcObserver
 import dev.lawlan.runline.accessors.jdbc.JdbcPools
 import dev.lawlan.runline.accessors.jdbc.JdbcProbe
@@ -50,6 +51,10 @@ internal class JdbcPoolBehavior(
     if (secretAlias != null && !ALIAS.matches(secretAlias)) {
       return InvalidResource.INVALID_SECRET_ALIAS
     }
+    // A database that is a file has no account and so no password to name.
+    if (secretAlias != null && profiles.find(parsed.kind)?.networked == false) {
+      return InvalidResource.INVALID_SECRET_ALIAS
+    }
     if (aliases.wrongType(parsed.tls, secretAlias)) return InvalidResource.ALIAS_WRONG_TYPE
     return null
   }
@@ -63,6 +68,7 @@ internal class JdbcPoolBehavior(
       for (profile in profiles.all) {
         addJsonObject {
           put("kind", profile.kind)
+          putJsonArray("fields") { profile.locationMembers.forEach { add(it) } }
           putJsonArray("properties") {
             for ((name, rule) in profile.allowedProperties) {
               addJsonObject {
@@ -96,7 +102,8 @@ internal class JdbcPoolBehavior(
   override fun tlsAliasesOf(resource: SharedResource): TlsAliases =
       settingsOf(resource)?.tls ?: TlsAliases.NONE
 
-  override fun hostOf(resource: SharedResource): String? = settingsOf(resource)?.host
+  override fun hostOf(resource: SharedResource): String? =
+      (settingsOf(resource)?.location as? JdbcLocation.Network)?.host
 
   override fun certificatesOf(resource: SharedResource): List<Pair<String, X509Certificate>> =
       aliases.certificates(tlsAliasesOf(resource))
@@ -139,6 +146,9 @@ internal class JdbcPoolBehavior(
           is ResourceAliases.Resolved.Ready -> resolved.tls
         }
     val profile = profiles.find(settings.kind) ?: return CheckFailure.ERROR
+    profile.inspect(settings.location)?.let {
+      return it.toCheck()
+    }
     val failure =
         JdbcProbe.check(profile, settings, credentialOf(resource), checkTimeout.toMillis(), tls)
             ?: return null
@@ -180,6 +190,7 @@ internal class JdbcPoolBehavior(
         JdbcSettingsProblem.INVALID_TIMEOUT -> InvalidResource.INVALID_TIMEOUT
         JdbcSettingsProblem.INVALID_LIMIT -> InvalidResource.INVALID_LIMIT
         JdbcSettingsProblem.INVALID_ALIAS -> InvalidResource.INVALID_SECRET_ALIAS
+        JdbcSettingsProblem.PATH_OUTSIDE_ROOT -> InvalidResource.PATH_OUTSIDE_ROOT
       }
 
   private companion object {

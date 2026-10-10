@@ -144,9 +144,13 @@ export function describeResourceTypesContract(name: string, setup: PipelinesCont
     test('each database kind of jdbc-pool says its properties, each with a rule', async () => {
       const { databases } = await typeNamed('jdbc-pool');
 
-      expect(databases.map((d: any) => d.kind)).toContain('postgresql');
+      expect(databases.map((d: any) => d.kind)).toEqual(expect.arrayContaining(['postgresql', 'sqlite']));
+      expect(databases.find((d: any) => d.kind === 'postgresql').fields).toEqual(['host', 'port', 'database', 'username']);
+      expect(databases.find((d: any) => d.kind === 'sqlite').fields).toEqual(['path']);
       for (const db of databases) {
-        expect(Object.keys(db).sort()).toEqual(['kind', 'properties']);
+        expect(Object.keys(db).sort()).toEqual(['fields', 'kind', 'properties']);
+        expect(db.fields.length).toBeGreaterThan(0);
+        for (const field of db.fields) expect(typeof field).toBe('string');
         for (const property of db.properties) {
           const extra = { text: 'maxLength', oneOf: 'values', pattern: 'pattern' }[property.rule as string];
           expect(extra).toBeDefined();
@@ -192,14 +196,29 @@ export function describeResourceTypesContract(name: string, setup: PipelinesCont
 
     test('a database kind it tells is accepted and one it does not is unsupported_database; a property it tells takes a value of its rule, another is property_not_allowed', async () => {
       const { databases } = await typeNamed('jdbc-pool');
+      // The members that say where the database is, each of the kind as it tells them.
+      const sample: Record<string, string> = { host: '127.0.0.1', database: 'orders', username: 'reader', path: 'digest.db' };
+      const place = (kind: string) =>
+        Object.fromEntries(
+          (databases.find((d: any) => d.kind === kind)?.fields ?? ['host', 'database', 'username'])
+            .filter((field: string) => field !== 'port')
+            .map((field: string) => [field, sample[field]]),
+        );
       const settings = (kind: string, properties?: Record<string, string>) => ({
         kind,
-        host: '127.0.0.1',
-        database: 'orders',
-        username: 'reader',
+        ...place(kind),
         ...(properties ? { properties } : {}),
       });
       const told: string[] = databases.map((d: any) => d.kind);
+      // A kind takes the fields it tells and no other kind's.
+      for (const { kind, fields } of databases) {
+        for (const other of databases.filter((d: any) => d.kind !== kind)) {
+          const foreign = other.fields.find((field: string) => !fields.includes(field));
+          if (foreign === undefined) continue;
+          const given = { ...settings(kind), [foreign]: foreign === 'port' ? 5432 : sample[foreign] };
+          expect([kind, foreign, problemOf(await define('jdbc-pool', given))]).toEqual([kind, foreign, 'invalid_settings']);
+        }
+      }
       for (const kind of ['mysql', 'PostgreSQL', 'oracle']) {
         if (!told.includes(kind)) expect([kind, problemOf(await define('jdbc-pool', settings(kind)))]).toEqual([kind, 'unsupported_database']);
       }

@@ -21,6 +21,9 @@ enum class JdbcSettingsProblem(val wire: String) {
   /** Connections per run, or a limit on rows or size. */
   INVALID_LIMIT("invalid_limit"),
 
+  /** The path of a database file leads out of the resource root (WI-1003). */
+  PATH_OUTSIDE_ROOT("path_outside_root"),
+
   /** A keystore alias of a certificate that is not written like one (WI-52). */
   INVALID_ALIAS("invalid_secret_alias"),
 }
@@ -40,10 +43,8 @@ sealed interface JdbcSettingsResult {
  */
 data class JdbcSettings(
     val kind: String,
-    val host: String,
-    val port: Int,
-    val database: String,
-    val username: String,
+    /** Where the database is, as its profile says it (a host and a database, or a file). */
+    val location: JdbcLocation,
     /** How many connections one run may use at once. */
     val connectionsPerRun: Int,
     val connectTimeoutMillis: Long,
@@ -59,19 +60,10 @@ data class JdbcSettings(
     val tls: TlsAliases = TlsAliases.NONE,
 ) {
   companion object {
-    private val MEMBERS =
-        setOf(
-            "kind",
-            "host",
-            "port",
-            "database",
-            "username",
-            "connectionsPerRun",
-            "timeouts",
-            "maxRows",
-            "maxResponseBytes",
-            "properties",
-        ) + TlsAliases.MEMBERS
+    /** The members every kind has; the place of the database is the kind's own. */
+    private val COMMON_MEMBERS =
+        setOf("kind", "connectionsPerRun", "timeouts", "maxRows", "maxResponseBytes", "properties")
+    private val NO_TLS = TlsAliases.Parsed.Valid(TlsAliases.NONE)
     private val TIMEOUT_MEMBERS = setOf("connectMs", "statementMs", "quotaWaitMs")
 
     const val DEFAULT_CONNECT_MS = 10_000L
@@ -83,36 +75,41 @@ data class JdbcSettings(
     private const val MOST_CONNECTIONS_PER_RUN = 64L
     private const val MOST_ROWS = 1_000_000L
     private const val MOST_RESPONSE_BYTES = 256L * 1024 * 1024
-    private const val LONGEST_NAME = 128
     private const val MOST_PROPERTIES = 16
 
     /** Checks [settings] against the profile of their kind and writes every effective value out. */
     fun parse(settings: JsonObject, profiles: JdbcProfiles): JdbcSettingsResult {
-      if (!MEMBERS.containsAll(settings.keys)) return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
-      val kind = text(settings["kind"]) ?: return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
-      val profile = profiles.find(kind) ?: return invalid(JdbcSettingsProblem.UNSUPPORTED_DATABASE)
-      val host = text(settings["host"]) ?: return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
-      val database =
-          text(settings["database"]) ?: return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
-      val username =
-          text(settings["username"])?.takeIf { isPlainName(it) }
-              ?: return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
-      if (!profile.acceptsAddress(host, database)) {
+      val everyMember =
+          COMMON_MEMBERS + TlsAliases.MEMBERS + profiles.all.flatMap { it.locationMembers }
+      if (!everyMember.containsAll(settings.keys)) {
         return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
       }
-      val port =
-          boundedLong(settings["port"], 1, 65535, profile.defaultPort.toLong())
+      val kind =
+          SettingsValues.text(settings["kind"])
               ?: return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
+      val profile = profiles.find(kind) ?: return invalid(JdbcSettingsProblem.UNSUPPORTED_DATABASE)
+      val ownMembers =
+          COMMON_MEMBERS +
+              profile.locationMembers +
+              (if (profile.networked) TlsAliases.MEMBERS else emptySet())
+      if (!ownMembers.containsAll(settings.keys)) {
+        return invalid(JdbcSettingsProblem.INVALID_SETTINGS)
+      }
+      val location =
+          when (val result = profile.locationOf(settings)) {
+            is JdbcLocationResult.Rejected -> return invalid(result.problem)
+            is JdbcLocationResult.Found -> result.location
+          }
       val timeouts =
           timeoutsOf(settings["timeouts"]) ?: return invalid(JdbcSettingsProblem.INVALID_TIMEOUT)
       val perRun =
-          boundedLong(settings["connectionsPerRun"], 1, MOST_CONNECTIONS_PER_RUN, 1)
+          SettingsValues.boundedLong(settings["connectionsPerRun"], 1, MOST_CONNECTIONS_PER_RUN, 1)
               ?: return invalid(JdbcSettingsProblem.INVALID_LIMIT)
       val maxRows =
-          boundedLong(settings["maxRows"], 1, MOST_ROWS, DEFAULT_MAX_ROWS.toLong())
+          SettingsValues.boundedLong(settings["maxRows"], 1, MOST_ROWS, DEFAULT_MAX_ROWS.toLong())
               ?: return invalid(JdbcSettingsProblem.INVALID_LIMIT)
       val maxBytes =
-          boundedLong(
+          SettingsValues.boundedLong(
               settings["maxResponseBytes"],
               1,
               MOST_RESPONSE_BYTES,
@@ -124,7 +121,7 @@ data class JdbcSettings(
             is Properties.Good -> result.values
           }
       val tls =
-          when (val result = TlsAliases.parse(settings)) {
+          when (val result = if (profile.networked) TlsAliases.parse(settings) else NO_TLS) {
             is TlsAliases.Parsed.Invalid ->
                 return invalid(
                     if (result.shape) JdbcSettingsProblem.INVALID_SETTINGS
@@ -135,10 +132,7 @@ data class JdbcSettings(
       val parsed =
           JdbcSettings(
               kind,
-              host,
-              port.toInt(),
-              database,
-              username,
+              location,
               perRun.toInt(),
               timeouts[0],
               timeouts[1],
@@ -153,21 +147,6 @@ data class JdbcSettings(
 
     private fun invalid(problem: JdbcSettingsProblem) = JdbcSettingsResult.Invalid(problem)
 
-    private fun text(element: JsonElement?): String? =
-        (element as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
-
-    /** A name of an account: printable, without a control character, not longer than it need be. */
-    private fun isPlainName(name: String) =
-        name.length <= LONGEST_NAME && name.none { it.isISOControl() }
-
-    /** [element] as a whole number in [min]..[max], [default] when there is none; null if wrong. */
-    private fun boundedLong(element: JsonElement?, min: Long, max: Long, default: Long): Long? {
-      if (element == null) return default
-      val primitive = element as? JsonPrimitive ?: return null
-      if (primitive.isString) return null
-      return primitive.longOrNull?.takeIf { it in min..max }
-    }
-
     /** The connect, statement and quota-wait limits, in that order. */
     private fun timeoutsOf(element: JsonElement?): List<Long>? {
       if (element == null)
@@ -175,12 +154,24 @@ data class JdbcSettings(
       val timeouts = element as? JsonObject ?: return null
       if (!TIMEOUT_MEMBERS.containsAll(timeouts.keys)) return null
       return listOf(
-          boundedLong(timeouts["connectMs"], 1, LONGEST_TIMEOUT_MS, DEFAULT_CONNECT_MS)
-              ?: return null,
-          boundedLong(timeouts["statementMs"], 1, LONGEST_TIMEOUT_MS, DEFAULT_STATEMENT_MS)
-              ?: return null,
-          boundedLong(timeouts["quotaWaitMs"], 1, LONGEST_TIMEOUT_MS, DEFAULT_QUOTA_WAIT_MS)
-              ?: return null,
+          SettingsValues.boundedLong(
+              timeouts["connectMs"],
+              1,
+              LONGEST_TIMEOUT_MS,
+              DEFAULT_CONNECT_MS,
+          ) ?: return null,
+          SettingsValues.boundedLong(
+              timeouts["statementMs"],
+              1,
+              LONGEST_TIMEOUT_MS,
+              DEFAULT_STATEMENT_MS,
+          ) ?: return null,
+          SettingsValues.boundedLong(
+              timeouts["quotaWaitMs"],
+              1,
+              LONGEST_TIMEOUT_MS,
+              DEFAULT_QUOTA_WAIT_MS,
+          ) ?: return null,
       )
     }
 
@@ -217,10 +208,7 @@ data class JdbcSettings(
   private fun normalized(): JsonObject {
     val result = LinkedHashMap<String, JsonElement>()
     result["kind"] = JsonPrimitive(kind)
-    result["host"] = JsonPrimitive(host)
-    result["port"] = JsonPrimitive(port)
-    result["database"] = JsonPrimitive(database)
-    result["username"] = JsonPrimitive(username)
+    location.writeTo(result)
     result["connectionsPerRun"] = JsonPrimitive(connectionsPerRun)
     result["timeouts"] =
         JsonObject(
@@ -237,5 +225,58 @@ data class JdbcSettings(
     }
     tls.writeTo(result)
     return JsonObject(result)
+  }
+}
+
+/**
+ * Where the database of a `jdbc-pool` resource is: what a kind's [JdbcProfile] makes of the
+ * settings.
+ */
+sealed interface JdbcLocation {
+  /** Writes the members that say the place, as they are stored. */
+  fun writeTo(into: MutableMap<String, JsonElement>)
+
+  /** A database that is a file below the resource root, at [path] relative to it (WI-1003). */
+  data class LocalFile(val path: String) : JdbcLocation {
+    override fun writeTo(into: MutableMap<String, JsonElement>) {
+      into["path"] = JsonPrimitive(path)
+    }
+  }
+
+  /** A database a server answers for: its host and port, the database and the account. */
+  data class Network(val host: String, val port: Int, val database: String, val username: String) :
+      JdbcLocation {
+    override fun writeTo(into: MutableMap<String, JsonElement>) {
+      into["host"] = JsonPrimitive(host)
+      into["port"] = JsonPrimitive(port)
+      into["database"] = JsonPrimitive(database)
+      into["username"] = JsonPrimitive(username)
+    }
+  }
+}
+
+/** What a profile makes of the members of settings that say where the database is. */
+sealed interface JdbcLocationResult {
+  class Found(val location: JdbcLocation) : JdbcLocationResult
+
+  class Rejected(val problem: JdbcSettingsProblem) : JdbcLocationResult {
+    companion object {
+      /** A member is missing, or is not what the kind takes. */
+      val INVALID_SETTINGS = Rejected(JdbcSettingsProblem.INVALID_SETTINGS)
+    }
+  }
+}
+
+/** Reading the members of settings, for the settings and for the profiles that read their own. */
+internal object SettingsValues {
+  fun text(element: JsonElement?): String? =
+      (element as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
+
+  /** [element] as a whole number in [min]..[max], [default] when there is none; null if wrong. */
+  fun boundedLong(element: JsonElement?, min: Long, max: Long, default: Long): Long? {
+    if (element == null) return default
+    val primitive = element as? JsonPrimitive ?: return null
+    if (primitive.isString) return null
+    return primitive.longOrNull?.takeIf { it in min..max }
   }
 }

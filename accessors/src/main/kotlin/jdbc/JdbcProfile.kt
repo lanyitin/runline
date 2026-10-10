@@ -1,11 +1,13 @@
 package dev.lawlan.runline.accessors.jdbc
 
+import dev.lawlan.runline.accessors.FileProblem
 import dev.lawlan.runline.core.ResourceFailure
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.Properties
+import kotlinx.serialization.json.JsonObject
 
 /**
  * What a database says is acceptable for one extra connection property. A rule is data, so that
@@ -52,8 +54,36 @@ interface JdbcProfile {
   /** The name of the database kind in a resource's settings (`postgresql`). */
   val kind: String
 
-  /** The port used when the settings give none. */
-  val defaultPort: Int
+  /**
+   * The members of a resource's settings that say where the database is (`host`, `port`,
+   * `database`, `username` for a database reached over a network; `path` for a file). They are what
+   * the Engine tells of the kind, and no other member of the settings is read for the place.
+   */
+  val locationMembers: List<String>
+
+  /**
+   * Whether the database is reached over a network with an account: such a kind can have the
+   * certificates of a connection (WI-52). A kind that is a file has none.
+   */
+  val networked: Boolean
+    get() = true
+
+  /**
+   * Whether a connection that a run is done with may be kept for the next run. A database for which
+   * a new connection costs nothing and whose sessions hold more than a reset can be shown to clear
+   * (a file's temporary tables and pragmas) says no, and its connections are closed when given
+   * back, after what is open in them is rolled back.
+   */
+  val keepsConnections: Boolean
+    get() = true
+
+  /**
+   * Whether the thread that runs a statement is interrupted when the statement is cancelled. For a
+   * database whose driver cannot be told from outside to stop waiting (for a lock) the thread that
+   * waits is what it watches; for one that is cancelled over the network, nothing is interrupted.
+   */
+  val interruptsStatements: Boolean
+    get() = false
 
   /**
    * The extra connection properties an administrator may set, by name. A property that is not here
@@ -83,24 +113,34 @@ interface JdbcProfile {
    * extra properties asked for, run when it is opened and again after [resetStatements] (which
    * returns a session to the server's defaults, not to what it was opened with).
    */
-  fun startStatements(extra: Map<String, String>): List<String>
+  fun startStatements(settings: JdbcSettings): List<String>
 
   /** The values passing between Java and the database. */
   val values: JdbcValues
 
-  /** Whether [host] and [database] are names this database's address can hold, as they are. */
-  fun acceptsAddress(host: String, database: String): Boolean
+  /**
+   * The place of the database as [settings] say it, made only of the [locationMembers] and only if
+   * every one of them is acceptable as it is; otherwise what is wrong with them.
+   */
+  fun locationOf(settings: JsonObject): JdbcLocationResult
 
-  /** The address of the database, made only of what [acceptsAddress] has accepted. */
-  fun url(host: String, port: Int, database: String): String
+  /** The address of the database at [location], which [locationOf] has accepted. */
+  fun url(location: JdbcLocation): String
 
   /**
-   * The properties of a connection: the account, the password (none when null), the limit on
-   * connecting and the administrator's extra properties, which were accepted by
+   * What stops the file of a database at [location] from being used, where the database is a file:
+   * looked at on the file system, nothing is opened, made or changed. A database that is not a file
+   * has nothing to say.
+   */
+  fun inspect(location: JdbcLocation): FileProblem? = null
+
+  /**
+   * The properties of a connection to [location]: the account, the password (none when null), the
+   * limit on connecting and the administrator's extra properties, which were accepted by
    * [allowedProperties].
    */
   fun properties(
-      username: String,
+      location: JdbcLocation,
       password: String?,
       connectTimeoutMillis: Long,
       extra: Map<String, String>,
@@ -151,7 +191,11 @@ class JdbcProfiles(profiles: List<JdbcProfile>) {
   init {
     require(byKind.size == profiles.size) { "two profiles for one kind of database" }
     for (profile in profiles) {
-      require(profile.resetStatements.isNotEmpty() || profile.resetNotNeeded) {
+      require(
+          profile.resetStatements.isNotEmpty() ||
+              profile.resetNotNeeded ||
+              !profile.keepsConnections
+      ) {
         "the profile of ${profile.kind} has no reset statements and does not say none are needed"
       }
     }

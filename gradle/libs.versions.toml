@@ -9,6 +9,7 @@ opentelemetry = "1.63.0"
 opentelemetry-ktor = "2.29.0-alpha"
 opentelemetry-semconv = "1.42.0"
 postgresql = "42.7.13"
+sqlite-jdbc = "3.53.4.0"
 testcontainers = "2.0.5"
 
 [libraries]
@@ -23,6 +24,7 @@ opentelemetry-sdkTesting = { module = "io.opentelemetry:opentelemetry-sdk-testin
 opentelemetry-sdkAutoconfigure = { module = "io.opentelemetry:opentelemetry-sdk-extension-autoconfigure", version.ref = "opentelemetry" }
 opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semconv", version.ref = "opentelemetry-semconv" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
 
 [plugins]

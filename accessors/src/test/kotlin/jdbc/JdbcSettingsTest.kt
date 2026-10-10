@@ -7,6 +7,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -38,10 +39,10 @@ class JdbcSettingsTest {
     val s = valid(minimal)
 
     assertEquals("postgresql", s.kind)
-    assertEquals("db.internal", s.host)
-    assertEquals(5432, s.port)
-    assertEquals("app", s.database)
-    assertEquals("app_rw", s.username)
+    assertEquals("db.internal", (s.location as JdbcLocation.Network).host)
+    assertEquals(5432, (s.location as JdbcLocation.Network).port)
+    assertEquals("app", (s.location as JdbcLocation.Network).database)
+    assertEquals("app_rw", (s.location as JdbcLocation.Network).username)
     assertEquals(1, s.connectionsPerRun)
     assertEquals(10_000L, s.connectTimeoutMillis)
     assertEquals(300_000L, s.statementTimeoutMillis)
@@ -136,7 +137,10 @@ class JdbcSettingsTest {
   @Test
   fun `an address of a name, an IPv4 number or an IPv6 number in brackets is accepted`() {
     for (host in listOf("db", "db.internal", "10.0.0.5", "DB-1.example.org", "[::1]")) {
-      assertEquals(host, valid(minimal.replace("db.internal", host)).host)
+      assertEquals(
+          host,
+          (valid(minimal.replace("db.internal", host)).location as JdbcLocation.Network).host,
+      )
     }
   }
 
@@ -287,7 +291,17 @@ class JdbcSettingsTest {
     val other =
         object : JdbcProfile by PostgresProfile {
           override val kind = "otherdb"
-          override val defaultPort = 1521
+
+          // Its default port is its own.
+          override fun locationOf(settings: JsonObject): JdbcLocationResult =
+              PostgresProfile.locationOf(settings).let { found ->
+                if (found is JdbcLocationResult.Found && settings["port"] == null) {
+                  JdbcLocationResult.Found(
+                      (found.location as JdbcLocation.Network).copy(port = 1521)
+                  )
+                } else found
+              }
+
           override val allowedProperties = mapOf("Flavor" to PropertyRule.OneOf(listOf("mild")))
         }
     val both = JdbcProfiles(listOf(PostgresProfile, other))
@@ -296,7 +310,7 @@ class JdbcSettingsTest {
 
     val s = assertIs<JdbcSettingsResult.Valid>(parse(json, both)).settings
 
-    assertEquals(1521, s.port)
+    assertEquals(1521, (s.location as JdbcLocation.Network).port)
     assertEquals(mapOf("Flavor" to "mild"), s.properties)
     // The same settings are not valid where that profile is not carried, nor with the other's
     // rules.

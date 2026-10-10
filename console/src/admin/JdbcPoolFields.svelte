@@ -31,6 +31,8 @@
       : property.rule === 'oneOf' && property.values !== undefined
         ? i18n.t('resources.form.jdbc.property.oneOf', { name: property.name, values: property.values.join(', ') })
         : property.name;
+  /** The members of the settings that say where the database of the chosen kind is, as the Engine tells. */
+  const shown = $derived(databases.find((database) => database.kind === fields.kind)?.fields ?? ['host', 'port', 'database', 'username']);
   const allowed = $derived.by(() => {
     const properties = databases.find((database) => database.kind === fields.kind)?.properties;
     if (properties === undefined) return undefined;
@@ -65,39 +67,59 @@
   {#if errors['jdbc-kind']}<span class="rl-field-error">{errors['jdbc-kind']}</span>{/if}
 </div>
 
-<div class="row">
+{#if shown.includes('host') || shown.includes('port')}
+  <div class="row">
+    {#if shown.includes('host')}
+      <TextField
+        id="jdbc-host"
+        label={i18n.t('resources.setting.host')}
+        error={errors['jdbc-host']}
+        bind:value={fields.host}
+        oninput={() => onchange('jdbc-host', 'jdbc-settings')}
+      />
+    {/if}
+    {#if shown.includes('port')}
+      <TextField
+        id="jdbc-port"
+        label={i18n.t('resources.setting.port')}
+        placeholder="5432"
+        numeric
+        error={errors['jdbc-port']}
+        bind:value={fields.port}
+        oninput={() => onchange('jdbc-port', 'jdbc-settings')}
+      />
+    {/if}
+  </div>
+{/if}
+{#if shown.includes('database')}
   <TextField
-    id="jdbc-host"
-    label={i18n.t('resources.setting.host')}
-    error={errors['jdbc-host']}
-    bind:value={fields.host}
-    oninput={() => onchange('jdbc-host', 'jdbc-settings')}
+    id="jdbc-database"
+    label={i18n.t('resources.setting.database')}
+    error={errors['jdbc-database']}
+    bind:value={fields.database}
+    oninput={() => onchange('jdbc-database', 'jdbc-settings')}
   />
+{/if}
+{#if shown.includes('username')}
   <TextField
-    id="jdbc-port"
-    label={i18n.t('resources.setting.port')}
-    placeholder="5432"
-    numeric
-    error={errors['jdbc-port']}
-    bind:value={fields.port}
-    oninput={() => onchange('jdbc-port', 'jdbc-settings')}
+    id="jdbc-username"
+    label={i18n.t('resources.setting.username')}
+    help={i18n.t('resources.form.jdbc.username.help')}
+    error={errors['jdbc-username']}
+    bind:value={fields.username}
+    oninput={() => onchange('jdbc-username', 'jdbc-settings')}
   />
-</div>
-<TextField
-  id="jdbc-database"
-  label={i18n.t('resources.setting.database')}
-  error={errors['jdbc-database']}
-  bind:value={fields.database}
-  oninput={() => onchange('jdbc-database', 'jdbc-settings')}
-/>
-<TextField
-  id="jdbc-username"
-  label={i18n.t('resources.setting.username')}
-  help={i18n.t('resources.form.jdbc.username.help')}
-  error={errors['jdbc-username']}
-  bind:value={fields.username}
-  oninput={() => onchange('jdbc-username', 'jdbc-settings')}
-/>
+{/if}
+{#if shown.includes('path')}
+  <TextField
+    id="jdbc-path"
+    label={i18n.t('resources.setting.path')}
+    help={i18n.t('resources.form.jdbc.path.help')}
+    error={errors['jdbc-path']}
+    bind:value={fields.path}
+    oninput={() => onchange('jdbc-path', 'jdbc-settings')}
+  />
+{/if}
 <div class="rl-field" id="jdbc-settings">
   {#if errors['jdbc-settings']}<span class="rl-field-error">{errors['jdbc-settings']}</span>{/if}
 </div>

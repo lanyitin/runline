@@ -20,6 +20,11 @@ export type FormResult = { settings: Record<string, unknown> | undefined } | { e
 export interface TypeForm<F> {
   /** Whether the type names a secret of the keystore by its alias. */
   takesSecret: boolean;
+  /**
+   * Whether [fields] are of something reached over a network, which has an account (its password
+   * is the secret) and certificates; absent: they always are. A database that is a file has neither.
+   */
+  networked?(fields: F): boolean;
   /** The fields of a new resource. */
   empty(): F;
   /** The fields of an existing resource, from its settings as the Engine wrote them. */
@@ -139,6 +144,8 @@ export interface JdbcFields extends CertificateFields {
   port: string;
   database: string;
   username: string;
+  /** Of a database that is a file: relative to the resource root of the Engine. */
+  path: string;
   connectionsPerRun: string;
   connectMs: string;
   statementMs: string;
@@ -152,15 +159,21 @@ const JDBC_TIMEOUTS: Array<[keyof JdbcFields, string, string]> = [
   ['quotaWaitMs', 'quotaWaitMs', 'jdbc-quota-wait-ms'],
 ];
 
+/** As the Engine tells the kind: a database with a host is reached over a network. */
+const reachedOverNetwork = (databases: CatalogDatabase[], kind: string): boolean =>
+  databases.find((database) => database.kind === kind)?.fields.includes('host') ?? true;
+
 /** The form of `jdbc-pool`, whose kinds of database are [databases], as the Engine tells them. */
 const jdbcPool = (databases: CatalogDatabase[]): TypeForm<JdbcFields> => ({
   takesSecret: true,
+  networked: (fields) => reachedOverNetwork(databases, fields.kind),
   empty: () => ({
     kind: databases[0]?.kind ?? '',
     host: '',
     port: '',
     database: '',
     username: '',
+    path: '',
     connectionsPerRun: '',
     connectMs: '',
     statementMs: '',
@@ -177,6 +190,7 @@ const jdbcPool = (databases: CatalogDatabase[]): TypeForm<JdbcFields> => ({
       port: text(settings.port),
       database: text(settings.database),
       username: text(settings.username),
+      path: text(settings.path),
       connectionsPerRun: text(settings.connectionsPerRun),
       connectMs: text(timeouts.connectMs),
       statementMs: text(timeouts.statementMs),
@@ -192,17 +206,24 @@ const jdbcPool = (databases: CatalogDatabase[]): TypeForm<JdbcFields> => ({
       'port',
       'database',
       'username',
+      'path',
       'connectionsPerRun',
       'timeouts',
       'properties',
       ...CERTIFICATE_MEMBERS,
     ]);
     out.settings.kind = fields.kind;
-    out.required('jdbc-host', 'host', fields.host);
-    const port = out.wholeNumber('jdbc-port', fields.port);
-    out.required('jdbc-database', 'database', fields.database);
-    out.required('jdbc-username', 'username', fields.username);
-    if (port !== undefined) out.settings.port = port;
+    // Where the database is: what the kind has, and nothing of the other kind's fields.
+    const network = reachedOverNetwork(databases, fields.kind);
+    if (network) {
+      out.required('jdbc-host', 'host', fields.host);
+      const port = out.wholeNumber('jdbc-port', fields.port);
+      out.required('jdbc-database', 'database', fields.database);
+      out.required('jdbc-username', 'username', fields.username);
+      if (port !== undefined) out.settings.port = port;
+    } else {
+      out.required('jdbc-path', 'path', fields.path);
+    }
     const perRun = out.wholeNumber('jdbc-per-run', fields.connectionsPerRun);
     if (perRun !== undefined) out.settings.connectionsPerRun = perRun;
     const timeouts = present(
@@ -211,12 +232,13 @@ const jdbcPool = (databases: CatalogDatabase[]): TypeForm<JdbcFields> => ({
     if (timeouts !== undefined) out.settings.timeouts = timeouts;
     const properties = objectOfPairs(fields.properties);
     if (properties !== undefined) out.settings.properties = properties;
-    writeCertificates(out, fields);
+    if (network) writeCertificates(out, fields);
     return out.result();
   },
   fieldOf: (problem) =>
     ({
       unsupported_database: 'jdbc-kind',
+      path_outside_root: 'jdbc-path',
       property_not_allowed: 'jdbc-properties',
       invalid_timeout: 'jdbc-timeouts',
       invalid_limit: 'jdbc-per-run',

@@ -14,6 +14,8 @@ export interface TypeRules {
   takesSecret: boolean;
   /** [given] (undefined when the request had none), checked and written out. */
   settings(given: unknown): SettingsAnswer;
+  /** Whether a resource with these (written) settings may name a secret; [takesSecret] when absent. */
+  secretFor?(settings: Record<string, unknown>): boolean;
 }
 
 const ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
@@ -87,7 +89,10 @@ const bounded = (value: unknown, min: number, max: number, fallback: number): nu
 
 const DAY_MS = 24 * 3600 * 1000;
 
-const JDBC_MEMBERS = ['kind', 'host', 'port', 'database', 'username', 'connectionsPerRun', 'timeouts', 'maxRows', 'maxResponseBytes', 'properties', 'trustAliases', 'clientCertAlias'];
+const JDBC_COMMON = ['kind', 'connectionsPerRun', 'timeouts', 'maxRows', 'maxResponseBytes', 'properties'];
+const JDBC_TLS = ['trustAliases', 'clientCertAlias'];
+/** A path of at most eight plain names, each starting with a letter, a digit or an underscore. */
+const SQLITE_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}(?:\/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}){0,7}$/;
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])$/;
 const DATABASE = /^[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}$/;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
@@ -117,9 +122,12 @@ function timeoutsOf(
 /** The connection pool of a database of a kind the catalog has (PostgreSQL, in the first version). */
 const jdbcPool: TypeRules = {
   takesSecret: true,
+  secretFor: (settings) => settings.kind !== 'sqlite',
   settings(given) {
     const settings = objectOf(given);
-    if (settings === null || Object.keys(settings).some((key) => !JDBC_MEMBERS.includes(key))) {
+    // A member is known when some kind has it; each kind then takes only its own.
+    const everyMember = [...JDBC_COMMON, ...JDBC_TLS, ...DATABASES.flatMap((database) => database.fields)];
+    if (settings === null || Object.keys(settings).some((key) => !everyMember.includes(key))) {
       return { problem: 'invalid_settings' };
     }
     const text = (key: string) => (typeof settings[key] === 'string' && settings[key] !== '' ? (settings[key] as string) : undefined);
@@ -127,15 +135,31 @@ const jdbcPool: TypeRules = {
     if (kind === undefined) return { problem: 'invalid_settings' };
     const profile = DATABASES.find((database) => database.kind === kind);
     if (profile === undefined) return { problem: 'unsupported_database' };
-    const host = text('host');
-    const database = text('database');
-    const username = text('username');
-    if (host === undefined || database === undefined || username === undefined) return { problem: 'invalid_settings' };
-    if (username.length > 128 || CONTROL.test(username) || !HOST.test(host) || !DATABASE.test(database)) {
-      return { problem: 'invalid_settings' };
+    // The place of the database: the members of the kind, and the certificates only where it has a host.
+    const networked = profile.fields.includes('host');
+    const own = [...JDBC_COMMON, ...profile.fields, ...(networked ? JDBC_TLS : [])];
+    if (Object.keys(settings).some((key) => !own.includes(key))) return { problem: 'invalid_settings' };
+    let place: Record<string, unknown>;
+    if (networked) {
+      const host = text('host');
+      const database = text('database');
+      const username = text('username');
+      if (host === undefined || database === undefined || username === undefined) return { problem: 'invalid_settings' };
+      if (username.length > 128 || CONTROL.test(username) || !HOST.test(host) || !DATABASE.test(database)) {
+        return { problem: 'invalid_settings' };
+      }
+      const port = bounded(settings.port, 1, 65535, 5432);
+      if (port === undefined) return { problem: 'invalid_settings' };
+      place = { host, port, database, username };
+    } else {
+      const path = text('path');
+      if (path === undefined) return { problem: 'invalid_settings' };
+      if (path.startsWith('/') || path.split('/').reduce((depth, part) => (part === '..' ? depth - 1 : part === '' || part === '.' ? depth : depth + 1), 0) < 0) {
+        return { problem: 'path_outside_root' };
+      }
+      if (!SQLITE_PATH.test(path)) return { problem: 'invalid_settings' };
+      place = { path };
     }
-    const port = bounded(settings.port, 1, 65535, 5432);
-    if (port === undefined) return { problem: 'invalid_settings' };
     const timeouts = timeoutsOf(settings.timeouts, { connectMs: 10_000, statementMs: 300_000, quotaWaitMs: 60_000 });
     if (timeouts === undefined) return { problem: 'invalid_timeout' };
     const connectionsPerRun = bounded(settings.connectionsPerRun, 1, 64, 1);
@@ -154,17 +178,14 @@ const jdbcPool: TypeRules = {
     }
     const written: Record<string, unknown> = {
       kind,
-      host,
-      port,
-      database,
-      username,
+      ...place,
       connectionsPerRun,
       timeouts,
       maxRows,
       maxResponseBytes,
     };
     if (Object.keys(properties).length > 0) written.properties = properties;
-    const tls = tlsOf(settings);
+    const tls = networked ? tlsOf(settings) : {};
     if ('problem' in tls) return tls as { problem: string };
     return { settings: { ...written, ...tls } };
   },

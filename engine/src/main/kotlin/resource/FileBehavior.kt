@@ -37,13 +37,7 @@ internal class FileBehavior(private val root: Path, private val maxReadBytes: Lo
   }
 
   override fun check(resource: SharedResource): CheckFailure? =
-      when (FileProbe.check(root, checkNotNull(pathOf(resource.settings)))) {
-        null -> null
-        FileProblem.ROOT_UNAVAILABLE -> CheckFailure.ROOT_UNAVAILABLE
-        FileProblem.PARENT_NOT_CREATABLE -> CheckFailure.PARENT_NOT_CREATABLE
-        FileProblem.NOT_READABLE_WRITABLE -> CheckFailure.NOT_READABLE_WRITABLE
-        FileProblem.PATH_OUTSIDE_ROOT -> CheckFailure.PATH_OUTSIDE_ROOT
-      }
+      FileProbe.check(root, checkNotNull(pathOf(resource.settings)))?.toCheck()
 
   /** The path of [settings] when they are exactly `{"path": "<text>"}` with some text. */
   private fun pathOf(settings: JsonObject?): String? {

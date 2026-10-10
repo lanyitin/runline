@@ -138,11 +138,13 @@ class ResourceTypeCatalogApiTest : ResourceApiSupport() {
 
         assertEquals(
             Json.parseToJsonElement(
-                """{"type":"jdbc-pool","databases":[{"kind":"postgresql","properties":[
-                  {"name":"ApplicationName","rule":"text","maxLength":64},
-                  {"name":"currentSchema","rule":"pattern",
-                   "pattern":"[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}"},
-                  {"name":"tcpKeepAlive","rule":"oneOf","values":["true","false"]}]}]}"""
+                """{"type":"jdbc-pool","databases":[
+                  {"kind":"postgresql","fields":["host","port","database","username"],"properties":[
+                    {"name":"ApplicationName","rule":"text","maxLength":64},
+                    {"name":"currentSchema","rule":"pattern",
+                     "pattern":"[A-Za-z_][A-Za-z0-9_$]{0,62}(?:,[A-Za-z_][A-Za-z0-9_$]{0,62}){0,7}"},
+                    {"name":"tcpKeepAlive","rule":"oneOf","values":["true","false"]}]},
+                  {"kind":"sqlite","fields":["path"],"properties":[]}]}"""
             ),
             typeNamed("jdbc-pool"),
         )
@@ -265,8 +267,11 @@ class ResourceTypeCatalogApiTest : ResourceApiSupport() {
         )
       }
 
+  /** Settings of [kind] made of the fields it tells (`fields` of its entry in the catalog). */
   private fun database(kind: String, properties: String = "") =
-      """{"kind":"$kind","host":"db.internal","database":"app","username":"app_rw"$properties}"""
+      if (kind == "sqlite") """{"kind":"$kind","path":"app.db"$properties}"""
+      else
+          """{"kind":"$kind","host":"db.internal","database":"app","username":"app_rw"$properties}"""
 
   @Test
   fun `a database kind told is accepted and one not told is unsupported_database`() =
@@ -277,7 +282,8 @@ class ResourceTypeCatalogApiTest : ResourceApiSupport() {
         assertEquals(HttpStatusCode.Created, pool(database(told.first())).status)
         val existing = "p${count - 1}"
 
-        for (kind in told + listOf("PostgreSQL", "postgres", "mysql", "oracle", "sqlite")) {
+        for (kind in
+            told + listOf("PostgreSQL", "SQLite", "postgres", "mysql", "oracle", "sqlite3")) {
           val expected = if (kind in told) null else "unsupported_database"
           assertEquals(expected, pool(database(kind)).problem(), "create with $kind")
           assertEquals(

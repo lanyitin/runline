@@ -16,7 +16,7 @@ const SUMMARY_FIELDS: Record<string, string[]> = {
   counter: [],
   file: ['path'],
   'openai-compatible': ['baseUrl', 'organization', 'project'],
-  'jdbc-pool': ['kind', 'host', 'port', 'database', 'username'],
+  'jdbc-pool': ['kind', 'host', 'port', 'database', 'username', 'path'],
 };
 
 /** One line of a summary: the name of the setting, and its value as text. */

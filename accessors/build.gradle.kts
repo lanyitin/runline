@@ -17,6 +17,10 @@ dependencies {
   // The driver of the first database of `jdbc-pool` (WI-48). It ships with the Engine and is loaded
   // by the Engine's class loader; the run's class loader never has it.
   implementation(libs.postgresql)
+  // The driver of the second database (WI-1003, ADR-024). It carries a native library, which a JVM
+  // can load into one class loader only, so it too is the Engine's alone and no run's class loader
+  // has it.
+  implementation(libs.sqlite.jdbc)
 
   // The behavior every host of accessors must show, run by the Engine's and the development
   // entry's own tests (WI-43): the same acceptance tests for both.
@@ -25,6 +29,7 @@ dependencies {
   // A real PostgreSQL for every test of `jdbc-pool` (WI-48): the same image as the Engine's tests.
   testFixturesImplementation(libs.testcontainers.postgresql)
   testFixturesImplementation(libs.postgresql)
+  testFixturesImplementation(libs.sqlite.jdbc)
 
   testImplementation(kotlin("test"))
   testImplementation(testFixtures(project(":runner")))

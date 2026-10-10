@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.FileProblem
 import java.time.Instant
 
 /** Why a check of a resource's entity failed; [wire] is its name in the API. */
@@ -65,6 +66,15 @@ enum class CheckFailure(val wire: String) {
     fun fromWire(wire: String): CheckFailure = entries.first { it.wire == wire }
   }
 }
+
+/** What a check says of a problem with a file below the resource root. */
+internal fun FileProblem.toCheck(): CheckFailure =
+    when (this) {
+      FileProblem.ROOT_UNAVAILABLE -> CheckFailure.ROOT_UNAVAILABLE
+      FileProblem.PARENT_NOT_CREATABLE -> CheckFailure.PARENT_NOT_CREATABLE
+      FileProblem.NOT_READABLE_WRITABLE -> CheckFailure.NOT_READABLE_WRITABLE
+      FileProblem.PATH_OUTSIDE_ROOT -> CheckFailure.PATH_OUTSIDE_ROOT
+    }
 
 /** The last check of a resource: whether it passed, why not, and when. No detail beyond that. */
 data class CheckResult(val ok: Boolean, val failure: CheckFailure?, val checkedAt: Instant) {

@@ -8,11 +8,13 @@ import dev.lawlan.runline.accessors.Invalidation
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.ResourceObserver
 import dev.lawlan.runline.accessors.jdbc.JdbcCredential
+import dev.lawlan.runline.accessors.jdbc.JdbcLocation
 import dev.lawlan.runline.accessors.jdbc.JdbcPools
 import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
 import dev.lawlan.runline.accessors.jdbc.JdbcSettings
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsResult
 import dev.lawlan.runline.accessors.jdbc.PostgresProfile
+import dev.lawlan.runline.accessors.jdbc.SqliteProfile
 import dev.lawlan.runline.accessors.openai.OpenAiBinding
 import dev.lawlan.runline.accessors.openai.OpenAiCredential
 import dev.lawlan.runline.accessors.openai.OpenAiSettings
@@ -47,6 +49,11 @@ internal class LocalResources(
     private val out: PrintStream,
     private val settings: LocalResourceSettings,
 ) {
+  /** The databases of `jdbc-pool` resources; a file is below the same root as `file` resources. */
+  private val jdbcProfiles by lazy {
+    JdbcProfiles(listOf(PostgresProfile, SqliteProfile(settings.root)))
+  }
+
   /**
    * Holds the resources [metadata] declares while [run] executes, handing it the accessors (null
    * when the pipeline declared no type); says so on the console. Fails with [LocalResourceProblem]
@@ -56,7 +63,7 @@ internal class LocalResources(
     val declared = metadata.resources.toList()
     // The pools of this run's `jdbc-pool` resources: a development run is alone, so they are its
     // own and are closed with it.
-    val pools = JdbcPools(JdbcProfiles(listOf(PostgresProfile)))
+    val pools = JdbcPools(jdbcProfiles)
     val host =
         try {
           bind(metadata, pools)
@@ -87,14 +94,19 @@ internal class LocalResources(
   private fun bind(metadata: PipelineMetadata, pools: JdbcPools): BoundResources? {
     val bindings = LinkedHashMap<String, ResourceBinding>()
     for ((name, type) in metadata.resourceTypes) {
+      // The key of RUNLINE_RESOURCES is the role: the name the pipeline uses (ADR-025). The
+      // purpose, when the pipeline wrote one, tells what the role is meant to be defined as.
+      val purpose = metadata.resourcePurposes[name]?.let { " (purpose: $it)" }.orEmpty()
       val local =
           settings.definitions[name]
               ?: throw LocalResourceProblem(
-                  "The pipeline declares the $type resource '$name' but RUNLINE_RESOURCES does not define it."
+                  "The pipeline declares the $type resource role '$name'$purpose but " +
+                      "RUNLINE_RESOURCES does not define it."
               )
       if (local.type != type) {
         throw LocalResourceProblem(
-            "The pipeline declares '$name' as $type but RUNLINE_RESOURCES defines it as ${local.type}."
+            "The pipeline declares the role '$name'$purpose as $type but RUNLINE_RESOURCES " +
+                "defines it as ${local.type}."
         )
       }
       if (type == ResourceTypes.FILE) {
@@ -181,7 +193,7 @@ internal class LocalResources(
   private fun jdbc(name: String, file: String, pools: JdbcPools): ResourceBinding {
     val (json, alias) = settingsFile("jdbc-pool", name, file)
     val parsed =
-        when (val result = JdbcSettings.parse(json, JdbcProfiles(listOf(PostgresProfile)))) {
+        when (val result = JdbcSettings.parse(json, jdbcProfiles)) {
           is JdbcSettingsResult.Invalid ->
               throw LocalResourceProblem(
                   "The jdbc-pool resource '$name' (RUNLINE_RESOURCES) cannot be set up: " +
@@ -190,6 +202,14 @@ internal class LocalResources(
           is JdbcSettingsResult.Valid -> result.settings
         }
     refuseCertificates("jdbc-pool", name, parsed.tls)
+    if (alias != null && jdbcProfiles.find(parsed.kind)?.networked == false) {
+      throw LocalResourceProblem(
+          "The jdbc-pool resource '$name' (RUNLINE_RESOURCES) cannot be set up: a ${parsed.kind} " +
+              "database has no password to name (invalid_secret_alias)."
+      )
+    }
+    // The file of a database is made below the root, which is made too when it is not there.
+    if (parsed.location is JdbcLocation.LocalFile) Files.createDirectories(settings.root)
     val credential =
         if (alias == null) JdbcCredential.None
         else

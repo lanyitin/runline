@@ -33,6 +33,8 @@ export type DatabaseProperty = { name: string } & PropertyRule;
 
 export interface DatabaseKind {
   kind: string;
+  /** The members of `settings` that say where the database is; no other kind takes them. */
+  fields: string[];
   properties: DatabaseProperty[];
 }
 
@@ -117,6 +119,7 @@ export const REQUEST_PARAMETERS: RequestParameter[] = [
 export const DATABASES: DatabaseKind[] = [
   {
     kind: 'postgresql',
+    fields: ['host', 'port', 'database', 'username'],
     properties: [
       { name: 'ApplicationName', rule: 'text', maxLength: 64 },
       {
@@ -127,6 +130,9 @@ export const DATABASES: DatabaseKind[] = [
       { name: 'tcpKeepAlive', rule: 'oneOf', values: ['true', 'false'] },
     ],
   },
+  // A file below the resource root: no host, account, password or certificates, and nothing of the
+  // file's behavior to set (WI-1003).
+  { kind: 'sqlite', fields: ['path'], properties: [] },
 ];
 
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;

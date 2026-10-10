@@ -92,8 +92,13 @@ internal constructor(
   @Volatile private var transaction: Transaction? = null
   private val transactionLock = ReentrantLock()
 
-  /** The statements running now, with their connections, which an abort cuts off. */
-  private val running = ConcurrentHashMap<Statement, Connection>()
+  /**
+   * A statement running now: its connection, which an abort cuts off, and the thread running it.
+   */
+  private class Running(val connection: Connection, val thread: Thread)
+
+  /** The statements running now. */
+  private val running = ConcurrentHashMap<Statement, Running>()
 
   @Volatile private var aborted = false
 
@@ -149,12 +154,13 @@ internal constructor(
 
   /** Cancels what is running in the database and cuts the connections it runs on. */
   private fun cutRunning() {
-    for ((statement, connection) in running) {
+    for ((statement, run) in running) {
       // The cancel goes to the database over a new connection and can take as long as that does,
       // so it has a limit; the connection is cut whatever came of it.
       val cancel = Thread.ofPlatform().daemon().start { runCatching { statement.cancel() } }
+      if (profile.interruptsStatements) run.thread.interrupt()
       runCatching { cancel.join(CANCEL_LIMIT_MILLIS) }
-      runCatching { connection.abort(Runnable::run) }
+      runCatching { run.connection.abort(Runnable::run) }
     }
   }
 
@@ -443,12 +449,14 @@ internal constructor(
   /** Runs [body], which executes [statement], and cuts it off when it takes longer than allowed. */
   private fun <T> limited(statement: Statement, body: () -> T): T {
     val timedOut = AtomicBoolean()
-    running[statement] = statement.connection
+    val worker = Thread.currentThread()
+    running[statement] = Running(statement.connection, worker)
     val cutOff =
         timer.schedule(
             {
               timedOut.set(true)
               runCatching { statement.cancel() }
+              if (profile.interruptsStatements) worker.interrupt()
             },
             settings.statementTimeoutMillis,
             TimeUnit.MILLISECONDS,

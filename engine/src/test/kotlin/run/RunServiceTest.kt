@@ -22,12 +22,14 @@ class RunServiceTest {
       runTimeout: Duration? = null,
       gate: ResourceGate = NoResources,
       jarDirectory: java.nio.file.Path? = null,
+      shutdownGrace: Duration = Duration.ofSeconds(5),
   ) =
       RunHarness(
               maxConcurrent = maxConcurrent,
               runTimeout = runTimeout,
               gate = gate,
               jarDirectory = jarDirectory,
+              shutdownGrace = shutdownGrace,
           )
           .also { harnesses += it }
 
@@ -401,6 +403,18 @@ class RunServiceTest {
     assertEquals(0, Files.list(h.jars).use { it.count() })
   }
 
+  @Test
+  fun `the copy of the jar made for a run is named for that run`() {
+    val h = harness()
+    val id = h.start(h.upload("held", holdUntilReleased("held-started")), "held")
+    h.awaitFile(h.shared("held", "held-started"))
+
+    val copies = Files.list(h.jars).use { it.toList() }
+
+    assertEquals(listOf(id), copies.map { RunJarFiles.runOf(it) }, "$copies")
+    h.release("held")
+  }
+
   // ---- directories ----
 
   @Test
@@ -605,5 +619,18 @@ class RunServiceTest {
 
     assertEquals(RunState.INTERRUPTED, h.state(running))
     assertEquals(RunState.INTERRUPTED, h.state(queued))
+  }
+
+  @Test
+  fun `a run that does not stop within the grace time of a shutdown leaves no copy of its jar`() {
+    val h = harness(shutdownGrace = Duration.ofMillis(500))
+    val deaf = h.start(h.upload("deaf", deafUntilReleased("deaf-started")), "deaf")
+    h.awaitFile(h.shared("deaf", "deaf-started"))
+
+    h.scheduler.close()
+
+    assertEquals(RunState.INTERRUPTED, h.state(deaf))
+    assertEquals(emptyList(), Files.list(h.jars).use { it.toList() })
+    h.release("deaf")
   }
 }

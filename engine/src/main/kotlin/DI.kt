@@ -280,12 +280,7 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceGate>(),
           resolve<RunTelemetry>(),
           resolve<Clock>(),
-          SchedulerConfig(
-              runs.maxConcurrent,
-              runs.timeout,
-              Path.of(System.getProperty("java.io.tmpdir")),
-              runs.releaseWait,
-          ),
+          SchedulerConfig(runs.maxConcurrent, runs.timeout, runJarDirectory(), runs.releaseWait),
           resolve<ShutdownBudget>(),
       )
     }
@@ -339,6 +334,7 @@ fun Application.configureDependencyInjection() {
     provide<RunRecovery> {
       RunRecovery(resolve<RunStore>(), resolve<Workspaces>(), resolve<Clock>())
     }
+    provide<LeftoverRunJars> { LeftoverRunJars(runJarDirectory(), resolve<RunStore>()) }
     provide<WorkspaceSweeper> {
       WorkspaceSweeper(resolve<Workspaces>(), resolve<EngineConfig>().workspace.sweepInterval)
     }
@@ -360,3 +356,9 @@ fun Application.configureDependencyInjection() {
     }
   }
 }
+
+/**
+ * Where the copies of runs' jars are written while they run: the JVM's place for temporary files,
+ * shared with other programs, which is why their names say whose they are ([RunJarFiles]).
+ */
+private fun runJarDirectory(): Path = Path.of(System.getProperty("java.io.tmpdir"))

@@ -257,7 +257,7 @@ class RunScheduler(
     var jar: Path? = null
     var recorder: RunRecorder? = null
     try {
-      jar = Files.createTempFile(config.jarDirectory, "run-", ".jar")
+      jar = RunJarFiles.create(config.jarDirectory, plan.id)
       check(definitions.copyContent(plan.contentHash, jar)) {
         "The stored jar of version ${plan.contentHash} is missing"
       }
@@ -419,7 +419,8 @@ class RunScheduler(
   /**
    * The grace is over. Runs that are still giving back what they held are recorded as they ended;
    * runs that have not stopped are given what is left of the grace time, not the release wait, to
-   * give back what they hold, all at once, and are recorded as interrupted.
+   * give back what they hold, all at once, and are recorded as interrupted; their jars are deleted
+   * as far as that is possible.
    */
   private fun abandonRemaining() {
     for ((id, run) in ending) {
@@ -427,16 +428,24 @@ class RunScheduler(
       runCatching { Files.deleteIfExists(run.jar) }
     }
     ending.clear()
-    val releasing = active.map { (id, run) ->
+    val abandoned = active.toMap()
+    val releasing = abandoned.map { (id, run) ->
       runCatching { run.recorder.close() }
-      id to releases.start(id, run.types)
+      releases.start(id, run.types)
     }
     active.clear()
     runCatching {
-      CompletableFuture.allOf(*releasing.map { it.second }.toTypedArray())
+      CompletableFuture.allOf(*releasing.toTypedArray())
           .get(shutdown.remaining().toMillis(), TimeUnit.MILLISECONDS)
     }
-    for ((id, _) in releasing) runCatching { progress.finish(id, RunState.INTERRUPTED) }
+    for ((id, run) in abandoned) {
+      runCatching { progress.finish(id, RunState.INTERRUPTED) }
+      // The run may still be reading it; what cannot be deleted now goes at the next start.
+      runCatching { Files.deleteIfExists(run.jar) }
+          .onFailure {
+            log.warn("The jar of interrupted run {} is left for the next start", id, it)
+          }
+    }
   }
 
   private fun slotsTaken() = active.size + ending.size

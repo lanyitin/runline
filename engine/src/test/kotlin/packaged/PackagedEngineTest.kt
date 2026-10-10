@@ -4,6 +4,7 @@ import dev.lawlan.runline.accessors.fake.FreezableForward
 import dev.lawlan.runline.accessors.jdbc.RealPostgres
 import dev.lawlan.runline.accessors.support.TestDirectories
 import dev.lawlan.runline.engine.config.DatabaseConfig
+import dev.lawlan.runline.engine.run.RunJarFiles
 import dev.lawlan.runline.engine.support.Keystores
 import dev.lawlan.runline.engine.support.ManagedProcess
 import dev.lawlan.runline.engine.support.PipelineJars
@@ -118,11 +119,14 @@ class PackagedEngineTest {
       database: DatabaseConfig,
       runtimeDir: Path,
       extra: Map<String, String> = emptyMap(),
+      /** Options of the JVM, before the jar, such as where its temporary files go. */
+      jvmOptions: List<String> = emptyList(),
   ): ManagedProcess {
     val process =
         launch(
             "the packaged Engine",
             environment(database, runtimeDir, extra),
+            *jvmOptions.toTypedArray(),
             "-jar",
             dist.resolve("engine.jar").toString(),
             log = "engine.log",
@@ -881,6 +885,112 @@ class PackagedEngineTest {
       collector.close()
       target.close()
     }
+  }
+
+  // ---- the jars of runs that a shutdown gave up on (WI-67) ----
+
+  /** The JVM option that makes [directory] the place of the Engine's temporary files. */
+  private fun temporaryFilesIn(directory: Path) = listOf("-Djava.io.tmpdir=$directory")
+
+  private fun stateInDatabase(database: DatabaseConfig, runId: String): String =
+      PostgresTestContainer.connect(database).use { c ->
+        c.prepareStatement("SELECT state FROM run WHERE id = ?::uuid").use { s ->
+          s.setString(1, runId)
+          s.executeQuery().use { rs ->
+            rs.next()
+            rs.getString(1)
+          }
+        }
+      }
+
+  private fun names(directory: Path): Set<String> =
+      Files.list(directory).use { files -> files.map { it.fileName.toString() }.toList().toSet() }
+
+  @Test
+  fun `a run that does not stop when the Engine is told to leaves no jar behind, within the grace time and the wrap-up time`() {
+    val grace = Duration.ofSeconds(3)
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    val temporary = Files.createDirectory(work.resolve("tmp"))
+    val engine =
+        startEngine(
+            database,
+            runtime,
+            mapOf("RUNLINE_SHUTDOWN_GRACE_SECONDS" to "${grace.seconds}"),
+            temporaryFilesIn(temporary),
+        )
+    val runId =
+        uploadAndRun(
+            "deaf",
+            "while (true) { try { Thread.sleep(10); } catch (InterruptedException e) { } }",
+        )
+    awaitState(runId, "RUNNING")
+    assertEquals(1, names(temporary).count { it.startsWith("run-") }, "${names(temporary)}")
+
+    val signalled = System.nanoTime()
+    engine.terminate() // SIGTERM, as a platform stops a container
+    engine.awaitExit(grace + SHUTDOWN_WRAP_UP + Duration.ofSeconds(30))
+    val elapsed = Duration.ofNanos(System.nanoTime() - signalled)
+
+    assertTrue(
+        output("engine.log").contains("did not stop within the grace time"),
+        tail("engine.log", 80),
+    )
+    assertEquals("INTERRUPTED", stateInDatabase(database, runId), tail("engine.log", 80))
+    assertEquals(emptySet(), names(temporary).filter { it.startsWith("run-") }.toSet())
+    assertTrue(
+        elapsed <= grace + SHUTDOWN_WRAP_UP,
+        "stopping took $elapsed, more than the grace time $grace and the wrap-up time " +
+            "$SHUTDOWN_WRAP_UP:\n${tail("engine.log", 80)}",
+    )
+  }
+
+  @Test
+  fun `the jar an earlier Engine process left for a run is removed at the next start, and nothing else beside it`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    val temporary = Files.createDirectory(work.resolve("tmp"))
+    val first = startEngine(database, runtime, jvmOptions = temporaryFilesIn(temporary))
+    val runId = uploadAndRun("quick", "")
+    assertEquals(
+        "SUCCEEDED",
+        awaitState(runId, "SUCCEEDED", "FAILED")["state"]!!.jsonPrimitive.content,
+    )
+    first.terminate()
+    first.awaitExit(TestTimeouts.processExit)
+    // What the earlier process could not delete, as it named it, and what others keep there.
+    val left = RunJarFiles.create(temporary, java.util.UUID.fromString(runId))
+    Files.writeString(left, "the jar of an earlier process")
+    val others =
+        setOf(
+            RunJarFiles.create(temporary, java.util.UUID.randomUUID()).fileName.toString(),
+            Files.createFile(temporary.resolve("run-$runId.jar")).fileName.toString(),
+            Files.createFile(temporary.resolve("run-6233326115724267127.jar")).fileName.toString(),
+            Files.createFile(temporary.resolve("notes.txt")).fileName.toString(),
+        )
+
+    startEngine(database, runtime, jvmOptions = temporaryFilesIn(temporary))
+
+    assertFalse(Files.exists(left), tail("engine.log"))
+    assertTrue(names(temporary).containsAll(others), "${names(temporary)}")
+  }
+
+  @Test
+  fun `the Engine starts when it cannot look for jars of an earlier process, and says so`() {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    val missing = work.resolve("no-such-directory")
+
+    startEngine(database, runtime, jvmOptions = temporaryFilesIn(missing))
+
+    assertEquals(200, get("/api/v1/health/ready", token = null).statusCode())
+    assertTrue(
+        output("engine.log").lines().any { it.contains("WARN") && it.contains(missing.toString()) },
+        tail("engine.log"),
+    )
   }
 
   // ---- liveness and readiness probes (WI-29) ----

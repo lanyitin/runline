@@ -416,7 +416,8 @@ class ResourceAccessorRunTest {
     Files.writeString(h.resourceRoot.resolve("out.txt"), "keep me")
 
     val removed =
-        ResourceRemoval(h.resourceStore, h.coordinator!!, NoDeclarations).remove("log", admin)
+        ResourceRemoval(h.resourceStore, h.coordinator!!, NoDeclarations, h.behaviors)
+            .remove("log", admin)
 
     assertEquals(RemovalOutcome.Removed, removed)
     assertEquals("keep me", Files.readString(h.resourceRoot.resolve("out.txt")))

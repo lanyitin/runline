@@ -250,6 +250,7 @@ fun Application.configureDependencyInjection() {
           resolve<ResourceStore>(),
           resolve<ResourceCoordinator>(),
           resolve<ResourceDeclarationStore>(),
+          resolve<ResourceBehaviors>(),
       )
     }
     provide<ResourceChecker> {

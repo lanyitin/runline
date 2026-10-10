@@ -79,6 +79,13 @@ interface ResourceBehavior {
   fun bind(resource: SharedResource): ResourceBinding?
 
   /**
+   * The resource [name] has been deleted (ADR-019 point 8) and no run holds it: what the type keeps
+   * for it beyond its definition goes now. Called while no run can be granted the name, so it must
+   * not wait on the entity for longer than a bounded time. Nothing to do by default.
+   */
+  fun removed(name: String) = Unit
+
+  /**
    * Looks at the real entity and says what stops it from being used, or null when nothing does. May
    * block (that is what the limit on a check is for); called on a thread of the checker's.
    */

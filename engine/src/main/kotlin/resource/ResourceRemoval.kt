@@ -23,12 +23,14 @@ data class RemovalPreview(
  * go; the pipeline definitions and triggers that declare it do not stop it, and their runs are
  * refused as unknown afterwards. The decision is made by the [ResourceCoordinator], under the lock
  * that also grants resources, so a delete and an acquisition cannot both succeed. Who deleted is
- * recorded as the name of the caller (ADR-012). Deleting a file resource never deletes the file.
+ * recorded as the name of the caller (ADR-012). What the resource's type keeps for it goes with it
+ * (the pool of a `jdbc-pool`, WI-65); deleting a file resource never deletes the file.
  */
 class ResourceRemoval(
     private val store: ResourceStore,
     private val coordinator: ResourceCoordinator,
     private val declarations: ResourceDeclarationStore,
+    private val behaviors: ResourceBehaviors,
 ) {
   private val log = LoggerFactory.getLogger(ResourceRemoval::class.java)
 
@@ -48,7 +50,11 @@ class ResourceRemoval(
 
   /** Deletes [name] unless runs hold it or wait for it. */
   fun remove(name: String, by: ApiIdentity): RemovalOutcome {
-    val outcome = coordinator.removeWhenUnused(name) { store.delete(name) }
+    val outcome =
+        coordinator.removeWhenUnused(name) {
+          val type = store.find(name)?.type ?: return@removeWhenUnused false
+          store.delete(name).also { if (it) behaviors.of(type)?.removed(name) }
+        }
     when (outcome) {
       RemovalOutcome.Removed -> log.info("Shared resource {} deleted by {}", name, by.name)
       is RemovalOutcome.InUse ->

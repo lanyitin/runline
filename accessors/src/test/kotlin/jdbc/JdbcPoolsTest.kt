@@ -165,6 +165,18 @@ class JdbcPoolsTest {
   }
 
   @Test
+  fun `removing a resource closes the connections its pool keeps for the next run`() {
+    val first = rig.host()
+    pidOf(first)
+    first.invalidateAll(Invalidation.RUN_ENDED)
+    assertEquals(1, rig.db.sessions(user = rig.role))
+
+    rig.pools.remove("db")
+
+    assertEquals(0, rig.db.sessions(user = rig.role), "the pool of a removed resource is open")
+  }
+
+  @Test
   fun `the connections in use are those of every generation of the resource`() {
     val old = rig.host(extra = """"properties":{"ApplicationName":"gen-1"}""")
     val new = rig.host(extra = """"properties":{"ApplicationName":"gen-2"}""")

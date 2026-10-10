@@ -138,6 +138,14 @@ class JdbcPools(private val profiles: JdbcProfiles) : AutoCloseable {
     generation.tls?.close()
   }
 
+  /**
+   * The resource is gone (ADR-019 point 8): its generation is closed now, or, if a run still holds
+   * it, as soon as the last holder is done; a later bind of the name gets a new pool.
+   */
+  fun remove(resource: String) {
+    synchronized(lock) { current.remove(resource)?.let { retire(resource, it) } }
+  }
+
   /** How many connections of [resource] a run is using now, in every generation. */
   fun activeConnections(resource: String): Int =
       synchronized(lock) { all[resource]?.sumOf { it.pool.active } ?: 0 }

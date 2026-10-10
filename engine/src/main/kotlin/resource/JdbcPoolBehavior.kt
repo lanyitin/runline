@@ -128,6 +128,9 @@ internal class JdbcPoolBehavior(
     }
   }
 
+  /** Every generation of the pool is closed, with its connections (WI-65). */
+  override fun removed(name: String) = pools.remove(name)
+
   override fun check(resource: SharedResource): CheckFailure? {
     val settings = settingsOf(resource) ?: return CheckFailure.ERROR
     aliases.secretFailure(resource.secretAlias)?.let {

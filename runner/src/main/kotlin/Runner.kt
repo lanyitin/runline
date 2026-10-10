@@ -51,10 +51,8 @@ class Runner(
 
   private val loaders = LoaderTracker()
 
-  private val timers =
-      ScheduledThreadPoolExecutor(1) { task ->
-        Thread.ofPlatform().name("runner-timers").daemon(true).unstarted(task)
-      }
+  /** The timeouts of runs; the first run that has one makes its thread (WI-66). */
+  private val timers = ScheduledThreadPoolExecutor(1, SharedThreads.factory("runner-timers"))
 
   fun start(request: RunRequest, listener: RunListener): RunHandle {
     val future = CompletableFuture<RunResult>()

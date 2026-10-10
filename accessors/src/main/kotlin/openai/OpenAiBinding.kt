@@ -7,6 +7,7 @@ import dev.lawlan.runline.accessors.tls.TlsContext
 import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.core.ResourceTypes
+import dev.lawlan.runline.runner.SharedThreads
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
@@ -856,12 +857,14 @@ class OpenAiBinding(
     private const val MAX_REDIRECTS = 5
     private const val BUFFER = 16 * 1024
 
-    /** The timers that stop a call: one thread for all of them, which only ever flips a switch. */
+    /**
+     * The timers that stop a call: one thread for all of them, which only ever flips a switch. It
+     * is shared by every run, and the first call of any run makes it (WI-66).
+     */
     private val TIMERS =
-        ScheduledThreadPoolExecutor(1) { task ->
-              Thread.ofPlatform().name("openai-timers").daemon(true).unstarted(task)
-            }
-            .apply { removeOnCancelPolicy = true }
+        ScheduledThreadPoolExecutor(1, SharedThreads.factory("openai-timers")).apply {
+          removeOnCancelPolicy = true
+        }
   }
 }
 

@@ -14,7 +14,7 @@
 | 管理員 | 機密管理 | 唯讀列出金鑰庫別名與引用者、重載金鑰庫；不接受機密值 |
 | 外部系統 | webhook 入口 | 驗證密鑰後立即回 accepted，run 非同步執行；以呼叫端提供的 delivery 識別碼去重 |
 | 任何已授權者 | run 查詢 | 狀態、結果、log |
-| 任何已授權者 | run log 串流 | 以 WebSocket 或 SSE 推送；客戶端中斷不影響 run（背壓：緩衝有上限，超過則丟棄舊 log 並標記） |
+| 任何已授權者 | run log 串流 | 以 WebSocket 推送，內容讀自已保存的 run log；客戶端中斷不影響 run。因讀自保存的 log，慢的客戶端只會延後收到，不會遺失或丟棄 log。Console 以輪詢顯示 log（[ADR-017](adr/ADR-017-console-websocket-and-token.md)），不使用此串流 |
 | 任何已授權者 | 取消 run | 協作式取消（見 [07](07-nfr-risks.md)） |
 
 認證：管理與上傳 API 用既有 Ktor 認證機制；webhook 用 per-trigger 密鑰。重試與逾時：webhook 由呼叫端重試；Engine 不自動重跑 run。API 版本以路徑前綴區分。

@@ -36,7 +36,7 @@
 | 資源檔案路徑穿越 | 相對路徑、符號連結或與 ADR-009 目錄重疊使 `file` 資源跳出範圍 | 限定資源根目錄、解析符號連結後驗證、根目錄不得與共享目錄與私有目錄重疊 |
 | 資源檢查卡在無法中斷的檔案系統物件 | 檢查會真的開啟檔案；沒有對端的具名管線會使開啟無限期阻塞，JDK 無法中斷它 | 檢查有整體時間上限（逾時為一種失敗類別）；每個資源同時只有一個檢查，同時的檢查共用一個答案，逾時而仍卡住的檢查未結束前再次檢查立即回逾時、不再開新執行緒，所以卡住的執行緒最多每個資源一個；執行緒為 daemon，不阻擋 Engine 關閉 |
 | 機密外洩 | 機密經錯誤訊息、log、trace、回應標頭或本文回射 | 機密值不入庫、不經 API、不穿過邊界；錯誤只給類別，原文只在 Engine log；剝除授權標頭；已知機密字串遮蔽為最後防線（Engine 的 log 訊息與例外、run log 的每一行、run 紀錄的失敗訊息與堆疊；金鑰庫密碼也在其內；盡力而為，拆成兩行或改寫形式的值遮不到）；HTTP 回應本文回射金鑰為接受的限度 |
-| 金鑰庫與密碼的保管 | 金鑰庫檔案或其密碼外洩、遺失或權限過寬；密碼來源為環境變數時 unsafe pipeline 可讀取 | 檔案與密碼分開保管、檔案僅服務帳號可讀（過寬時 Engine 記錄警告）、密碼優先用機密檔；備份與還原由維運負責；未重載前舊機密持續生效 |
+| 金鑰庫與密碼的保管 | 金鑰庫檔案或其密碼外洩、遺失或權限過寬；unsafe pipeline 可讀取金鑰庫密碼（無論以環境變數、密碼檔、Docker secret 或 systemd 憑證目錄提供，密碼或其檔案位置都在行程可及之處） | 檔案與密碼分開保管、檔案僅服務帳號可讀（過寬時 Engine 記錄警告）、密碼優先用機密檔；備份與還原由維運負責；未重載前舊機密持續生效 |
 | 機密字元集與不可偵測的損毀 | 機密項目限可列印 ASCII；非 ASCII 被金鑰庫工具的 PBE 編碼破壞且無法還原，部分損毀在載入時無法辨識 | 載入時明確拒絕可辨識的違規（別名狀態 `invalid_secret`）與錯誤格式（含 JKS：JDK 預設的 `keystore.type.compat` 會讓 PKCS12 的讀取開啟 JKS，因此 Engine 自行檢查檔頭）；不可辨識者呈現為連線時認證失敗；維運手冊明言並要求更新後以「檢查」驗證；日後需要非 ASCII 時採混合方案（ADR-019） |
 | 憑證到期與信任範圍 | 受信任或用戶端憑證到期造成連線失敗；信任過寬或驗證被關閉造成中間人風險 | 檢查回報剩餘天數與到期警告（預設 30 天）與 metric；`trustAliases` 取代預設信任；主機名稱與憑證驗證不可關閉；私鑰與憑證只在 Engine 內，API、Console、log 只顯示別名、主旨、到期日與指紋；輪替沿用重載與新世代；私鑰保護密碼同金鑰庫密碼，取得金鑰庫密碼即取得所有私鑰（接受的限度） |
 | 持有者占用實體 | 卡住的 run 占用連線或請求額度 | 強制釋放使存取端失效並回收實體；以持有時間 metric 觀察 |
@@ -72,7 +72,7 @@
 - Run 結束時的釋放失敗（[ADR-007](adr/ADR-007-shared-resources.md)「Run 終止時」，[WI-62](work-items/WI-62-release-wait-limit.md)）：`runline.runs.release.failures`（計數），標籤 `outcome` 為 `failed`（釋放拋出例外）或 `timed_out`（超過釋放等待上限），`type` 為該 run 持有的型別化資源的型別（`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有型別化資源時為 `none`）；每個 run、每種型別各記一次，逾時之後釋放才失敗或完成時不再計數（只寫 log）。同時寫一筆 error log，含 run id，不含資源設定與使用者輸入。
 - 型別化資源（[ADR-019](adr/ADR-019-typed-shared-resources.md)）：資源指標帶資源名稱與型別標籤（不放 SQL、路徑、網址或模型的使用者輸入）；另有 `jdbc-pool` 的使用中連線數（`runline.resources.jdbc.connections.active`）、取得失敗數（`runline.resources.jdbc.acquire.failures`）與語句耗時（`runline.resources.jdbc.statement.duration`），`openai-compatible` 的進行中請求數、依狀態類別的請求數與延遲、等待請求額度的時間、生成時間（首位元組到完成；串流另有首塊時間與塊間最長間隔）、依逾時種類的逾時次數、服務回報的 token 用量，`file` 的操作數與路徑檢查失敗數，所有型別的實體檢查結果，機密重載的次數與結果。
 - Run 的 trace 之下每次資源操作一個 span，只記錄資源名稱、型別與操作類別。Run 的 log 記錄資源的取得、存取端失效與實體錯誤類別，不記錄 SQL 參數、請求與回應本文、機密。資源的建立、修改、刪除、檢查、強制釋放與機密重載記錄管理員名稱。
-- 指標、trace 與 log 都經 OpenTelemetry 匯出，匯出方式與目的地由部署環境以標準 OpenTelemetry 環境變數決定（與 trace、log 相同，Engine 不設另外的開關，也不強制關閉任何一種）；不定期寫入 log，log 只記錄事件（12-Factor 的事件串流）。Engine 啟動的所有指標、匯出與排程相關背景工作，以及 OpenTelemetry 本身，都在 Engine 停止時由 Engine 關閉，不另外註冊 JVM 結束時的關閉掛鉤；同一個 JVM 內多次啟動與停止 Engine 不會累積背景工作或掛鉤。需要本機檢視指標時，以 OTLP 匯出到本機收集器的方式提供。
+- 指標與 trace 經 OpenTelemetry 匯出，匯出方式與目的地由部署環境以標準 OpenTelemetry 環境變數決定（Engine 不設另外的開關，也不強制關閉任何一種）。log 依 12-Factor 以事件串流輸出到 stdout，由執行平台收集（Docker 的 log driver、systemd journal），不經 OpenTelemetry；不定期寫入指標。Engine 啟動的所有指標、匯出與排程相關背景工作，以及 OpenTelemetry 本身，都在 Engine 停止時由 Engine 關閉，不另外註冊 JVM 結束時的關閉掛鉤；同一個 JVM 內多次啟動與停止 Engine 不會累積背景工作或掛鉤。需要本機檢視指標時，以 OTLP 匯出到本機收集器的方式提供。
 
 ## 安全
 

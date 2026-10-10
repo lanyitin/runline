@@ -556,7 +556,7 @@ describe('what a card says of its type', () => {
     expect(last('printer').querySelector('time')).toBeNull();
   });
 
-  test('the pipelines that declare it, each a link to its page with the version, the type it expects and its triggers; or that none does', async () => {
+  test('the pipelines that use it through a role, each a link to its page and that role, with the uploader, the type it expects and its triggers; or that none does', async () => {
     const { view, clock } = await page({
       seed: (b) => {
         b.defineResource('demo-printer');
@@ -572,21 +572,46 @@ describe('what a card says of its type', () => {
     await vi.waitFor(() => expect(card(view, 'demo-printer').querySelectorAll('.declared li')).toHaveLength(2));
 
     const declared = card(view, 'demo-printer').querySelector('.declared')!;
-    expect(declared.querySelector('.summary')!.textContent!.trim()).toBe('Declared by 2 pipeline definitions, with 0 triggers bound to them');
+    expect(declared.querySelector('.summary')!.textContent!.trim()).toBe('Used by 2 pipeline definitions through their roles, with 0 triggers bound to them');
     const rows = [...declared.querySelectorAll('li')].map((li) => ({
       href: li.querySelector('a')!.getAttribute('href'),
       text: li.textContent!.replace(/\s+/g, ' ').trim(),
     }));
     expect(rows).toContainEqual({
-      href: `/pipelines/${plain}?pipeline=demo-resource&uploader=root`,
+      href: `/pipelines/${plain}?pipeline=demo-resource&uploader=root&role=demo-printer`,
       text: expect.stringContaining('any type'),
     });
     expect(rows).toContainEqual({
-      href: `/pipelines/${typedHash}?pipeline=demo-typed&uploader=root`,
+      href: `/pipelines/${typedHash}?pipeline=demo-typed&uploader=root&role=demo-printer`,
       text: expect.stringContaining('expects File'),
     });
     expect(rows.every((r) => r.text.includes('root') && r.text.includes('0 triggers'))).toBe(true);
-    expect(card(view, 'scanner').querySelector('.declared')!.textContent).toContain('No pipeline declares it.');
+    expect(card(view, 'scanner').querySelector('.declared')!.textContent).toContain('No pipeline uses it.');
+  });
+
+  test('a resource that a role of another name is bound to names that role and its uploader; the resource of the role\'s own name is not named for it', async () => {
+    const { view, clock } = await page({
+      seed: (b) => {
+        b.defineResource('printer');
+        b.resources.define('spare-disk', { type: 'file' });
+        b.seedArtifact(
+          'ada',
+          [{ name: 'report', className: 'x.R', resources: ['store'], resourceTypes: { store: 'file' }, resourcePurposes: {} }],
+          { contentHash: 'ee'.repeat(32) },
+        );
+        b.defineResource('store');
+        b.bindings.seed('ada', 'report', 'store', 'spare-disk');
+      },
+    });
+    await loaded(view);
+    clock.advance(3000);
+    await vi.waitFor(() => expect(card(view, 'spare-disk').querySelectorAll('.declared li')).toHaveLength(1));
+
+    const row = card(view, 'spare-disk').querySelector('.declared li')!;
+    expect(row.querySelector('a')!.getAttribute('href')).toBe(`/pipelines/${'ee'.repeat(32)}?pipeline=report&uploader=ada&role=store`);
+    expect(row.textContent!.replace(/\s+/g, ' ')).toContain('store');
+    expect(row.textContent).toContain('ada');
+    expect(card(view, 'store').querySelector('.declared')!.textContent).toContain('No pipeline uses it.');
   });
 });
 
@@ -642,7 +667,7 @@ describe('deleting a resource', () => {
     await vi.waitFor(() => expect(dialog(view).querySelector('.preview')).not.toBeNull());
     const ask = dialog(view);
     expect(ask.querySelector('h2')!.textContent).toBe('Delete demo-printer?');
-    expect(ask.querySelector('.preview')!.textContent).toContain('1 pipeline definition declares it, with 0 triggers bound to it');
+    expect(ask.querySelector('.preview')!.textContent).toContain('1 pipeline definition uses it, with 0 triggers bound to it');
     expect(ask.querySelector('.preview')!.textContent).toContain('No run holds it or waits for it');
     expect(ask.textContent).toContain('refused');
     expect(app.engine.backend.resources.typeOf('demo-printer')).toBe('counter');
@@ -846,7 +871,7 @@ describe('the form of a jdbc-pool', () => {
     await defineForm(view, 'jdbc-pool', 'orders-db');
     const kinds = dialog(view).querySelector<HTMLSelectElement>('#jdbc-kind')!;
     // The kinds the Engine tells, each as it names it (WI-55: the Console has no list or label of its own).
-    expect([...kinds.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([['postgresql', 'postgresql']]);
+    expect([...kinds.options].map((o) => [o.value, o.textContent!.trim()])).toEqual([['postgresql', 'postgresql'], ['sqlite', 'sqlite']]);
     type(field(view, 'jdbc-host'), 'db.internal');
     type(field(view, 'jdbc-port'), '6543');
     type(field(view, 'jdbc-database'), 'orders');
@@ -882,6 +907,38 @@ describe('the form of a jdbc-pool', () => {
       secretAlias: 'orders-pass',
     });
     expect(card(view, 'orders-db').querySelector('.secret .alias')!.textContent).toBe('orders-pass');
+  });
+
+  test('for a database that is a file, asks for its path, and not for a host, an account, a password or certificates', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'jdbc-pool', 'digest-db');
+    expect(field(view, 'jdbc-host')).not.toBeNull();
+
+    choose(dialog(view).querySelector('#jdbc-kind')!, 'sqlite');
+    await tick();
+
+    expect(dialog(view).querySelector('#jdbc-host')).toBeNull();
+    expect(dialog(view).querySelector('#jdbc-port')).toBeNull();
+    expect(dialog(view).querySelector('#jdbc-database')).toBeNull();
+    expect(dialog(view).querySelector('#jdbc-username')).toBeNull();
+    expect(dialog(view).querySelector('#resource-secret')).toBeNull();
+    expect(dialog(view).querySelector('#resource-certificates')).toBeNull();
+    button(dialog(view), 'Define').click();
+    await tick();
+    expect(errorAt(view, 'jdbc-path')).toBe('Fill this in.');
+
+    type(field(view, 'jdbc-path'), 'digest.db');
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST')).toEqual({
+      name: 'digest-db',
+      type: 'jdbc-pool',
+      capacity: 1,
+      settings: { kind: 'sqlite', path: 'digest.db' },
+    });
+    expect(card(view, 'digest-db').textContent).toContain('digest.db');
   });
 
   test('says that the pool is the capacity times the connections per run, as they are typed', async () => {

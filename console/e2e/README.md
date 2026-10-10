@@ -15,7 +15,7 @@ made with keytool and two Fake OpenAI compatible services as processes of their 
 | A new, empty database (PostgreSQL 17), migrated | every script | Not one a contract run (`npm run test:contract`) or an earlier `npm run e2e` has used: what they leave behind (versions, triggers, resources) makes tests fail |
 | `API_TOKENS` with two developers and an admin | every script | the same text in `E2E_TOKENS` |
 | `RUNLINE_MAX_CONCURRENT_RUNS` of 8 | every script that makes runs | the value the scripts are verified with (several tests keep runs going side by side; the contract tests need 8 or more) |
-| The sample jars, `dev/sample-pipelines/build/pipelines` | `admin`, `developer`, `resources`, `security`, `typed-forms`, `versions` | `./gradlew -p dev/sample-pipelines pipelineJars`; in `E2E_JARS` |
+| The sample jars, `dev/sample-pipelines/build/pipelines` | `admin`, `bindings`, `developer`, `resources`, `security`, `typed-forms`, `versions` | `./gradlew -p dev/sample-pipelines pipelineJars`; in `E2E_JARS` |
 | A PKCS12 keystore the Engine opens, writable by the tests | `resources`, `resource-types`, `typed-forms`, `certificates` | its entries are below; `resources` changes it with keytool and puts it back |
 | A database `orders` owned by an account `reader` | `typed-forms` | the password is the secret `db-pass` |
 | The Fake OpenAI compatible service over HTTP, asking for the key | `typed-forms` | `FAKE_OPENAI_KEY_FILE` (the value of `llm-key`), `FAKE_OPENAI_CHAT_DELAY_MS=15000`; in `E2E_OPENAI_URL` |
@@ -140,7 +140,9 @@ new directory. The values are for this machine only.
    ```
 
 6. **The Engine**: the migration, then the Engine, with the settings of *Engine runs: packaging and
-   configuration* in the root README:
+   configuration* in the root README. `java` here must be JDK 25, the version the Engine is built for:
+   a `java` of JDK 21 on the `PATH` fails at once with `UnsupportedClassVersionError`; put JDK 25 first
+   on `PATH`, or set `JAVA_HOME`.
    ```
    export PORT=8080 POSTGRES_URL=jdbc:postgresql://localhost:55433/runline POSTGRES_USER=runline POSTGRES_PASSWORD=runline
    export API_TOKENS="ada:developer:ada-$(openssl rand -hex 8),bob:developer:bob-$(openssl rand -hex 8),root:admin:root-$(openssl rand -hex 8)"
@@ -173,3 +175,6 @@ new directory. The values are for this machine only.
 
 `dev/verify-console-security.sh` prepares its own Engine (with `dev/dev.sh`) and runs only
 `security.e2e.ts`, which needs only the Engine, the tokens and the sample jars of the list above.
+It needs no environment variable for the resource root: `dev/dev.sh` uses `dev/.runline/resources`
+(git-ignored, removed by `dev/dev.sh clean`) unless `RUNLINE_RESOURCE_ROOT` is already exported, in
+which case your value is used as it is.

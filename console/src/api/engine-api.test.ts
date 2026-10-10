@@ -263,7 +263,7 @@ describe('the runs', () => {
       status: 409,
       body: {
         error: 'resources_unavailable',
-        problems: [{ resource: 'demo-printer', problem: 'unknown' }],
+        problems: [{ role: 'demo-printer', resource: 'demo-printer', problem: 'unbound' }],
       },
     });
   });

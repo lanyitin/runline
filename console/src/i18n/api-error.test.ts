@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { describeApiError } from './api-error';
+import { catalogs as real } from './catalogs';
 import { createTranslator } from './translator';
 
 const catalogs = {
@@ -61,6 +62,14 @@ describe('describeApiError', () => {
     expect(described.problems).toEqual(['Parameter gpu is required.']);
   });
 
+  test('the subject of a problem of a role is the role, when the problem names one', () => {
+    const described = describeApiError(en, 409, {
+      error: 'resources_unavailable',
+      problems: [{ role: 'gpu', resource: 'big-gpu', problem: 'missing' }],
+    });
+    expect(described.problems).toEqual(['Parameter gpu is required.']);
+  });
+
   test('the single problem of an answer has a text of its own, without a subject', () => {
     const described = describeApiError(en, 422, {
       error: 'invalid_trigger',
@@ -102,5 +111,37 @@ describe('describeApiError', () => {
   test('a body that is not what the API sends is treated as no body', () => {
     expect(describeApiError(en, 401, 'text').message).toBe('You are not signed in.');
     expect(describeApiError(en, 401, { error: 5 }).message).toBe('You are not signed in.');
+  });
+});
+
+describe('the answers to a binding, in the words of the Console', () => {
+  const words = { en: createTranslator(real, 'en'), zh: createTranslator(real, 'zh-TW') };
+
+  test('a binding that is refused says why: the resource is of another type, or the version has no such role', () => {
+    const type = describeApiError(words.en, 422, { error: 'invalid_binding', problem: 'type_mismatch' });
+    expect(type.known).toBe(true);
+    expect(type.problems).toEqual(['The shared resource is not of the type the role expects.']);
+    const role = describeApiError(words.zh, 422, { error: 'invalid_binding', problem: 'unknown_role' });
+    expect(role.known).toBe(true);
+    expect(role.problems).toEqual(['這個版本沒有宣告這個資源角色。']);
+  });
+
+  test('the codes of the roles and bindings are all known, in both languages', () => {
+    for (const code of ['invalid_binding', 'role_not_found', 'resource_not_found', 'definition_not_found', 'resources_unavailable', 'ambiguous_version']) {
+      expect([code, describeApiError(words.en, 400, { error: code }).known]).toEqual([code, true]);
+      expect([code, describeApiError(words.zh, 400, { error: code }).known]).toEqual([code, true]);
+    }
+  });
+
+  test('a role that cannot be used is said with the role, whichever way it is wrong', () => {
+    const lines = (problem: string) =>
+      describeApiError(words.en, 409, {
+        error: 'resources_unavailable',
+        problems: [{ role: 'store', resource: 'disk', problem }],
+      }).problems;
+    expect(lines('unbound')).toEqual(['store: not bound to a shared resource, and no shared resource has its name.']);
+    expect(lines('unknown')[0]).toContain('store');
+    expect(lines('disabled')[0]).toContain('store');
+    expect(lines('type_mismatch')[0]).toContain('store');
   });
 });

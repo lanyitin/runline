@@ -488,7 +488,7 @@ describe('creating a run and watching it', () => {
       .getByText('A shared resource the pipeline needs is not defined or is disabled.')
       .waitFor();
     expect(await alert.locator('.problems li').allTextContents()).toEqual([
-      defined ? 'demo-printer: the shared resource is disabled.' : 'demo-printer: no such shared resource.',
+      defined ? 'demo-printer: the shared resource is disabled.' : 'demo-printer: not bound to a shared resource, and no shared resource has its name.',
     ]);
     await shot(page, 'create-run-resource-en');
 

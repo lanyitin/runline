@@ -5,10 +5,17 @@
 // A version is a content hash and the person who uploaded it (ADR-020): the same bytes uploaded by
 // two people are two versions, so a link to one carries `uploader` next to the hash. The name is in
 // the query, as the names of pipelines and triggers are.
-export const pipelineHref = (contentHash: string, pipeline: string | null, uploader?: string) =>
+// With `role`, the page brings the person to that resource role of the pipeline (ADR-025).
+export const pipelineHref = (
+  contentHash: string,
+  pipeline: string | null,
+  uploader?: string,
+  role?: string,
+) =>
   `/pipelines/${encodeURIComponent(contentHash)}?${new URLSearchParams({
     ...(pipeline === null ? {} : { pipeline }),
     ...(uploader === undefined ? {} : { uploader }),
+    ...(role === undefined ? {} : { role }),
   })}`;
 
 export const runHref = (runId: string) => `/runs/${encodeURIComponent(runId)}`;

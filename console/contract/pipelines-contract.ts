@@ -367,7 +367,7 @@ export function describePipelinesContract(name: string, setup: PipelinesContract
       expect(status).toBe(409);
       expect(body.error).toBe('resources_unavailable');
       expect(body.problems).toEqual([
-        { resource: 'demo-printer', problem: defined.status === 200 ? 'disabled' : 'unknown' },
+        { role: 'demo-printer', resource: 'demo-printer', problem: defined.status === 200 ? 'disabled' : 'unbound' },
       ]);
     });
 

@@ -21,20 +21,23 @@ const text = (value: unknown): string | null => (typeof value === 'string' ? val
 
 function problemLines(t: Translate, body: Record<string, unknown>): string[] {
   const lines: string[] = [];
-  const line = (subject: string | null, problem: string) => {
-    const key = `error.problem.${problem}`;
+  const line = (subject: string | null, problem: string, code: string | null = null) => {
+    // The one problem of an answer may be said in words of its code (`error.invalid_binding.type_mismatch`),
+    // for a problem that is also said of a subject in a list (`error.problem.type_mismatch`).
+    const own = code === null ? null : `error.${code}.${problem}`;
+    const key = own !== null && t.has(own) ? own : `error.problem.${problem}`;
     if (t.has(key)) return t(key, subject === null ? undefined : { subject });
     return subject !== null ? `${subject}: ${problem}` : problem;
   };
 
   const single = text(body.problem);
-  if (single) lines.push(line(null, single));
+  if (single) lines.push(line(null, single, text(body.error)));
   if (Array.isArray(body.problems)) {
     for (const item of body.problems) {
       if (typeof item !== 'object' || item === null) continue;
       const entry = item as Record<string, unknown>;
       const problem = text(entry.problem);
-      if (problem) lines.push(line(text(entry.name) ?? text(entry.resource) ?? '', problem));
+      if (problem) lines.push(line(text(entry.name) ?? text(entry.role) ?? text(entry.resource) ?? '', problem));
     }
   }
   return lines;

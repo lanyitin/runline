@@ -363,7 +363,10 @@ describe('untrusted content is text, on every screen', () => {
       await dialog(tab.page).getByRole('button', { name: 'Cancel' }).click();
 
       await tab.page.goto(`${engineUrl}/resources`);
-      await tab.page.getByRole('button', { name: 'Define a resource' }).click();
+      await tab.page
+        .locator('.rl-page-head')
+        .getByRole('button', { name: 'Define a resource' })
+        .click();
       await dialog(tab.page).locator('#resource-type').selectOption('counter');
       await dialog(tab.page).locator('#resource-name').fill(RESOURCE_NAME);
       await dialog(tab.page).locator('#resource-capacity').fill('1');

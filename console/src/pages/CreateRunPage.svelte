@@ -3,7 +3,7 @@
   import { createPolled } from '../api/polled.svelte';
   import type { Definition } from '../api/model';
   import { useApp } from '../app/context';
-  import { runHref } from '../app/links';
+  import { pipelineHref, runHref } from '../app/links';
   import { shortHash } from '../engine/info';
   import { describeApiError } from '../i18n/api-error';
   import { browserClock, pageVisibility } from '../runs/run-watch.svelte';
@@ -142,6 +142,22 @@
     }
     return { shown: new ApiFailure(failure.status, { ...body, problems: rest }), onFields };
   });
+  // A run refused because roles of the pipeline have no shared resource it can use: each leads to
+  // the role in the page of the pipeline, where the resource is chosen (ADR-025).
+  const unavailable = $derived.by(() => {
+    const body = failure?.body as { error?: unknown; problems?: unknown } | null | undefined;
+    if (failure?.status !== 409 || body?.error !== 'resources_unavailable' || !Array.isArray(body.problems)) {
+      return [];
+    }
+    return body.problems.flatMap((item: unknown) => {
+      const entry = item as { role?: unknown; problem?: unknown } | null;
+      return typeof entry?.role === 'string' && typeof entry.problem === 'string'
+        ? [{ role: entry.role, problem: entry.problem }]
+        : [];
+    });
+  });
+  const stateLabel = (problem: string) =>
+    i18n.translate.has(`bindings.state.${problem}`) ? i18n.translate(`bindings.state.${problem}`) : problem;
   const shownErrors = $derived({ ...split.onFields, ...fieldErrors });
   const warningText = (kind: string, resource: string, message: string) =>
     i18n.translate.has(`warning.${kind}`) ? i18n.translate(`warning.${kind}`, { resource }) : message;
@@ -250,6 +266,18 @@
       {#if split.shown}
         <ApiErrorNotice failure={split.shown} />
       {/if}
+      {#if selected && unavailable.length > 0}
+        <div class="unavailable rl-notice warning">
+          <p>{i18n.t('createRun.unavailable')}</p>
+          <ul>
+            {#each unavailable as item (item.role)}
+              <li>
+                <Link href={pipelineHref(selected.contentHash, selected.name, selected.uploader, item.role)}><PlainText value={item.role} mono /> · {stateLabel(item.problem)}</Link>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
 
       <div class="rl-actions">
         <button class="rl-btn primary submit" type="submit" disabled={!selected || busy}>
@@ -282,6 +310,14 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+  .unavailable p {
+    margin: 0 0 var(--space-2);
+    font-weight: 600;
+  }
+  .unavailable ul {
+    margin: 0;
+    padding-left: var(--space-5);
   }
   .kind {
     margin-left: var(--space-2);

@@ -393,7 +393,7 @@ describe('creating the run', () => {
       'A shared resource the pipeline needs is not defined or is disabled.',
     );
     expect([...alert.querySelectorAll('.problems li')].map((li) => li.textContent)).toEqual([
-      'printer: no such shared resource.',
+      'printer: not bound to a shared resource, and no shared resource has its name.',
       'erp-api: the shared resource is disabled.',
     ]);
     expect(runsMade()).toHaveLength(0);
@@ -449,4 +449,48 @@ test('a pipeline that was just uploaded can be run at once', async () => {
   submit(view).click();
   await vi.waitFor(() => expect(runsMade()).toHaveLength(1));
   expect(runsMade()[0].parameters).toEqual({ label: 'demo', steps: '30', delayMillis: '1000' });
+});
+
+describe('a run that is refused because of a shared resource', () => {
+  const roles = {
+    name: 'report',
+    className: 'com.acme.Report',
+    resources: ['store', 'counter'],
+    resourceTypes: { store: 'file' },
+  };
+  const refused = async (languages?: string[]) => {
+    const view = await page({
+      languages,
+      seed: (backend) => {
+        backend.seedArtifact('ada', [roles], { contentHash: HASH });
+        backend.resources.define('disk', { type: 'file', enabled: false });
+        backend.bindings.seed('ada', 'report', 'store', 'disk');
+      },
+      query: `?contentHash=${HASH}&pipeline=report&uploader=ada`,
+    });
+    await ready(view);
+    submit(view).click();
+    await vi.waitFor(() => expect(view.querySelector('.unavailable')).not.toBeNull());
+    return view;
+  };
+
+  test('leads to each role that has no resource it can use, in the page of the pipeline of this version', async () => {
+    const view = await refused();
+
+    const links = [...view.querySelectorAll<HTMLAnchorElement>('.unavailable a')];
+    expect(links.map((a) => a.textContent!.trim())).toEqual(['store · Disabled', 'counter · Not bound']);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      `/pipelines/${HASH}?pipeline=report&uploader=ada&role=store`,
+      `/pipelines/${HASH}?pipeline=report&uploader=ada&role=counter`,
+    ]);
+    expect(view.querySelector('[role="alert"]')!.textContent).toContain('shared resource');
+    expect(runsMade()).toHaveLength(0);
+  });
+
+  test('is told in the language of the screen', async () => {
+    const view = await refused(['zh-TW']);
+
+    expect(view.querySelector('.unavailable')!.textContent).toContain('選好後再重新建立 run');
+    expect(view.querySelector('.unavailable a')!.textContent).toContain('已停用');
+  });
 });

@@ -72,7 +72,7 @@ describe('the page of a pipeline', () => {
     expect(section(view, 'Files').textContent).toContain('Read and write');
     expect(section(view, 'Network').textContent).toContain('None');
     expect(section(view, 'External processes').textContent).toContain('None');
-    expect(section(view, 'Shared resources').textContent).toContain('erp-api');
+    await vi.waitFor(() => expect(section(view, 'Shared resources').textContent).toContain('erp-api'));
   });
 
   test('says when there are no parameters, files or resources', async () => {
@@ -280,7 +280,7 @@ describe('the page of a pipeline', () => {
     expect(view.textContent).toContain('建立 run');
   });
 
-  test('has each shared resource it declares with the type it expects and whether it can be used now, which a developer sees too', async () => {
+  test('has each shared resource role it declares with the type it expects and whether it can be used now, which a developer sees too', async () => {
     const view = await page({
       pipelines: [
         {
@@ -297,19 +297,20 @@ describe('the page of a pipeline', () => {
     app.engine.backend.defineResource('odd');
     app.engine.backend.resources.define('llm', { type: 'openai-compatible', settings: { baseUrl: 'http://x/v1' } });
     await ready(view);
+    await vi.waitFor(() => expect(view.querySelectorAll('li.role').length).toBe(6));
 
-    const rows = [...section(view, 'Shared resources').querySelectorAll('li')].map((li) => [
-      li.querySelector('.name')!.textContent!.trim(),
-      li.querySelector('.declared-type')!.textContent!.trim(),
-      li.querySelector('.status')!.textContent!.trim(),
+    const rows = [...section(view, 'Shared resources').querySelectorAll('li.role')].map((li) => [
+      li.querySelector('.role-name')!.textContent!.trim(),
+      li.querySelector('.role-type')!.textContent!.trim(),
+      li.querySelector('.role-state')!.textContent!.trim(),
     ]);
     expect(rows).toEqual([
       ['printer', 'any type', 'Available'],
       ['scanner', 'any type', 'Disabled'],
-      ['report', 'expects File', 'Defined as another type'],
-      ['llm', 'expects OpenAI-compatible service', 'Available'],
-      ['odd', 'expects quantum', 'Not a type the Engine knows'],
-      ['erp-api', 'any type', 'Not defined'],
+      ['report', 'File', 'Another type'],
+      ['llm', 'OpenAI-compatible service', 'Available'],
+      ['odd', 'quantum', 'Another type'],
+      ['erp-api', 'any type', 'Not bound'],
     ]);
   });
 });

@@ -140,7 +140,9 @@ export interface DeclaringDefinition {
   contentHash: string;
   uploader: string;
   pipeline: string;
-  /** The type the definition expects; null when it declares only the name. */
+  /** The role of the pipeline that leads to the resource: bound to it, or of its own name (ADR-025). */
+  role: string;
+  /** The type the definition expects of the role; null when it declares only the name. */
   declaredType: string | null;
   /** The triggers bound to this definition. */
   triggers: number;
@@ -387,6 +389,7 @@ function readDeclaredBy(value: unknown): Resource['declaredBy'] {
         contentHash: str(definition.contentHash, 'declaring contentHash'),
         uploader: str(definition.uploader, 'declaring uploader'),
         pipeline: str(definition.pipeline, 'declaring pipeline'),
+        role: str(definition.role, 'declaring role'),
         declaredType: strOrNull(definition.declaredType, 'declaring declaredType'),
         triggers: num(definition.triggers, 'declaring triggers'),
       };
@@ -558,6 +561,8 @@ export interface CatalogProperty {
 
 export interface CatalogDatabase {
   kind: string;
+  /** The members of `settings` that say where the database is: a host, a port...; or a path. */
+  fields: string[];
   properties: CatalogProperty[];
 }
 
@@ -612,6 +617,7 @@ export function parseResourceTypes(json: unknown): ResourceTypeCatalog {
               const d = obj(v, 'a database kind');
               return {
                 kind: str(d.kind, 'database kind'),
+                fields: strings(d.fields, 'database fields'),
                 properties: list(d.properties, 'database properties', (w) => {
                   const p = obj(w, 'a database property');
                   return {

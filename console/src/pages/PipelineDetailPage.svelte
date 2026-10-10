@@ -6,7 +6,7 @@
   import { newRunHref, pipelineHref } from '../app/links';
   import { enumLabel } from '../i18n/enums';
   import { formatBytes } from '../i18n/format';
-  import { declarationsOf } from '../pipelines/declarations';
+  import ResourceBindings from '../pipelines/ResourceBindings.svelte';
   import { browserClock, pageVisibility } from '../runs/run-watch.svelte';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
   import Badge from '../ui/Badge.svelte';
@@ -222,30 +222,7 @@
         </section>
       {/each}
 
-      <section class="rl-card">
-        <h2>{i18n.t('pipeline.resources')}</h2>
-        {#if pipeline.metadata.resources.length === 0}
-          <p>{i18n.t('pipeline.resources.none')}</p>
-        {:else}
-          <ul class="plain-list declarations">
-            {#each declarationsOf(pipeline.metadata, pipeline.warnings) as declaration (declaration.name)}
-              <li>
-                <span class="name"><PlainText value={declaration.name} mono /></span>
-                <span class="declared-type">
-                  {#if declaration.declaredType === null}
-                    {i18n.t('resources.declaredBy.anyType')}
-                  {:else}
-                    {i18n.t('resources.declaredBy.expects', {
-                      type: enumLabel(i18n.translate, 'resourceType', declaration.declaredType),
-                    })}
-                  {/if}
-                </span>
-                <span class="status {declaration.status}">{i18n.t(`pipeline.resources.status.${declaration.status}`)}</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
+      <ResourceBindings {artifact} {pipeline} {isAdmin} focusRole={new URLSearchParams(router.search).get('role')} />
 
       <section class="rl-card">
         <h2>{i18n.t('pipeline.section.verdict')}</h2>
@@ -417,25 +394,5 @@
   }
   .limitations strong {
     display: block;
-  }
-  .declarations li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--space-2);
-  }
-  .declarations .declared-type {
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-  }
-  .declarations .status {
-    font-size: var(--text-sm);
-    font-weight: 600;
-  }
-  .declarations .status.available {
-    color: var(--success-text);
-  }
-  .declarations .status:not(.available) {
-    color: var(--warning-text);
   }
 </style>

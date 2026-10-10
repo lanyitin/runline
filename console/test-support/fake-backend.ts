@@ -26,7 +26,8 @@ import {
   ambiguousVersion,
 } from './fake-api';
 import { FakeAllowList, judge } from './fake-allowlist';
-import { FakeResources, type DeclaringDefinition } from './fake-resources';
+import { FakeBindings } from './fake-bindings';
+import { FakeResources } from './fake-resources';
 import { FakeSecrets, type FakeKeystoreEntry } from './fake-secrets';
 import { FakeTriggers, type FakeTrigger } from './fake-triggers';
 
@@ -95,6 +96,8 @@ export interface Definition {
     processes: { unrestricted: boolean; allow: string[] };
     resources: string[];
     resourceTypes: Record<string, string>;
+    /** What a declared resource is for, by its name; only those with a purpose. */
+    resourcePurposes: Record<string, string>;
   };
   verdict: 'SAFE' | 'UNSAFE';
   reasons: Array<Required<FakeReason>>;
@@ -120,8 +123,6 @@ interface Artifact {
 const LIMITATIONS =
   'The analysis only checks the class references of the compiled classes (a Fake).';
 
-/** The closed set of the types of shared resources (ADR-019). */
-const RESOURCE_TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible'];
 const RESOURCE_NAME = /^[A-Za-z0-9._-]+$/;
 const PIPELINE_NAME = /^(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -145,7 +146,7 @@ export class FakeBackend {
   readonly runs: FakeRun[] = [];
   /** The shared resources that are defined, who holds them and who waits. */
   readonly resources: FakeResources = new FakeResources(
-    { declarersOf: (name) => this.declarersOf(name) },
+    { declarersOf: (name) => this.bindings.declarersOf(name) },
     {
       statusOf: (alias) => this.secrets.statusOf(alias),
       typeOf: (alias) => this.secrets.typeOf(alias),
@@ -163,11 +164,14 @@ export class FakeBackend {
   readonly triggers = new FakeTriggers(this);
   /** The entries that decide what is SAFE, and the versions they had. */
   readonly allowList = new FakeAllowList(this);
+  /** Which resource each role of a pipeline is bound to, for each uploader (ADR-025). */
+  readonly bindings: FakeBindings = new FakeBindings(this);
   /** The routes of the parts the backend is made of, apart from its own. */
   private readonly routes: FakeRoute[] = [
     ...this.triggers.routes,
     ...this.allowList.routes,
     ...this.resources.routes,
+    ...this.bindings.routes,
     ...this.secrets.routes,
     {
       method: 'DELETE',
@@ -331,7 +335,7 @@ export class FakeBackend {
     return answer(201, this.artifactDoc(artifact));
   }
 
-  private pipelineDoc(d: Definition) {
+  private pipelineDoc(uploader: string, d: Definition) {
     return {
       className: d.className,
       name: d.name,
@@ -340,40 +344,8 @@ export class FakeBackend {
       reasons: d.reasons,
       allowListVersion: d.allowListVersion,
       allowUnsafeExecution: d.allowUnsafeExecution,
-      warnings: this.warningsOf(d.metadata),
+      warnings: this.bindings.warningsOf(uploader, d),
     };
-  }
-
-  /** As the Engine warns: one problem of each declared resource, and a declared type out of the set. */
-  private warningsOf(metadata: Definition['metadata']) {
-    const warning = (kind: string, resource: string, message: string) => ({ kind, resource, message });
-    const outsideTheSet = (resource: string) => {
-      const declared = metadata.resourceTypes[resource];
-      return declared !== undefined && !RESOURCE_TYPES.includes(declared);
-    };
-    return [
-      ...metadata.resources.flatMap((resource) => {
-        const enabled = this.resources.enabledOf(resource);
-        const declared = metadata.resourceTypes[resource];
-        if (enabled === undefined) {
-          return [warning('resource_unknown', resource, `The resource ${resource} is not defined.`)];
-        }
-        if (!enabled) {
-          return [warning('resource_disabled', resource, `The resource ${resource} is disabled.`)];
-        }
-        if (declared !== undefined && !outsideTheSet(resource) && declared !== this.resources.typeOf(resource)) {
-          return [
-            warning('resource_type_mismatch', resource, `The resource ${resource} is not of the declared type.`),
-          ];
-        }
-        return [];
-      }),
-      ...Object.keys(metadata.resourceTypes)
-        .filter(outsideTheSet)
-        .map((resource) =>
-          warning('resource_type_unknown', resource, `The type declared for ${resource} is not one of the set.`),
-        ),
-    ];
   }
 
   private artifactDoc(a: Artifact) {
@@ -383,7 +355,7 @@ export class FakeBackend {
       sizeBytes: a.sizeBytes,
       uploadedBy: a.uploadedBy,
       uploadedAt: a.uploadedAt,
-      pipelines: a.definitions.map((d) => this.pipelineDoc(d)),
+      pipelines: a.definitions.map((d) => this.pipelineDoc(a.uploadedBy, d)),
       limitations: LIMITATIONS,
     };
   }
@@ -404,7 +376,7 @@ export class FakeBackend {
           uploader: a.uploadedBy,
           uploadedBy: a.uploadedBy,
           uploadedAt: a.uploadedAt,
-          ...this.pipelineDoc(d),
+          ...this.pipelineDoc(a.uploadedBy, d),
         })),
       );
     return answer(200, { definitions, limitations: LIMITATIONS });
@@ -567,12 +539,7 @@ export class FakeBackend {
         refusal: failure(409, 'unsafe_not_allowed', `${pipeline} is UNSAFE and not allowed.`),
       };
     }
-    const unavailable = definition.metadata.resources
-      .filter((name) => this.resources.enabledOf(name) !== true)
-      .map((resource) => ({
-        resource,
-        problem: this.resources.enabledOf(resource) === undefined ? 'unknown' : 'disabled',
-      }));
+    const unavailable = this.bindings.unavailable(artifact.uploadedBy, definition);
     if (unavailable.length > 0) {
       return {
         refusal: failure(409, 'resources_unavailable', 'A shared resource is not available.', {
@@ -798,8 +765,8 @@ export class FakeBackend {
 
   private begin(run: FakeRun) {
     if (run.state !== 'QUEUED') return; // cancelled while it waited
-    const needs =
-      this.definitionOf(run.contentHash, run.uploader, run.pipeline)?.metadata.resources ?? [];
+    const definition = this.definitionOf(run.contentHash, run.uploader, run.pipeline);
+    const needs = definition ? this.bindings.resourcesOf(run.uploader, definition) : [];
     if (needs.length === 0) return this.start(run);
     const outcome = this.resources.acquire(run, needs, {
       granted: () => this.start(run),
@@ -906,6 +873,7 @@ export class FakeBackend {
         processes: { unrestricted: pipeline.processesUnrestricted ?? false, allow: [] },
         resources: pipeline.resources ?? [],
         resourceTypes: pipeline.resourceTypes ?? {},
+        resourcePurposes: pipeline.resourcePurposes ?? {},
       },
       verdict: 'SAFE',
       reasons: [],
@@ -926,19 +894,11 @@ export class FakeBackend {
     return definition;
   }
 
-  /** The definitions that declare the shared resource [name], with the triggers bound to each. */
-  private declarersOf(name: string): DeclaringDefinition[] {
-    return this.allDefinitions()
-      .filter(({ definition }) => definition.metadata.resources.includes(name))
-      .map(({ contentHash, uploader, definition }) => ({
-        contentHash,
-        uploader,
-        pipeline: definition.name,
-        declaredType: definition.metadata.resourceTypes[name] ?? null,
-        triggers: [...this.triggers.triggers.values()].filter(
-          (t) => t.contentHash === contentHash && t.uploader === uploader && t.pipeline === definition.name,
-        ).length,
-      }));
+  /** The triggers bound to the pipeline of a version. */
+  triggersOf(contentHash: string, uploader: string, pipeline: string): number {
+    return [...this.triggers.triggers.values()].filter(
+      (t) => t.contentHash === contentHash && t.uploader === uploader && t.pipeline === pipeline,
+    ).length;
   }
 
   /** Every pipeline of every version, with the hash of the version. */

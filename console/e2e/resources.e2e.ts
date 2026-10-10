@@ -196,7 +196,7 @@ describe('the resources page of an admin', () => {
     }
   }, 90_000);
 
-  test('a card names the pipelines that declare it, with links; the page of a pipeline says the type each declaration expects and whether it can be used, to an admin and to a developer', async () => {
+  test('a card names the pipelines that use it through a role, with links; the page of a pipeline says the type each role expects and whether it can be used, to an admin and to a developer', async () => {
     const plain = await putJar('demo-resource');
     const typed = await putJar('demo-typed');
     await printer();
@@ -207,19 +207,20 @@ describe('the resources page of an admin', () => {
       await card.waitFor();
       const declared = (await resource('demo-printer')).declaredBy;
       expect(await card.locator('.declared .summary').innerText()).toContain(
-        `Declared by ${declared.count} pipeline definition${declared.count === 1 ? '' : 's'}`,
+        `Used by ${declared.count} pipeline definition${declared.count === 1 ? '' : 's'}`,
       );
-      const typedLink = card.locator(`.declared a[href="/pipelines/${typed.contentHash}?pipeline=demo-typed&uploader=${ada.name}"]`);
+      const typedLink = card.locator(`.declared a[href="/pipelines/${typed.contentHash}?pipeline=demo-typed&uploader=${ada.name}&role=demo-printer"]`);
       expect(await typedLink.locator('xpath=..').innerText()).toContain('expects File');
-      const plainLink = card.locator(`.declared a[href="/pipelines/${plain.contentHash}?pipeline=demo-resource&uploader=${ada.name}"]`);
+      const plainLink = card.locator(`.declared a[href="/pipelines/${plain.contentHash}?pipeline=demo-resource&uploader=${ada.name}&role=demo-printer"]`);
       expect(await plainLink.locator('xpath=..').innerText()).toContain('any type');
       await shot(page, 'wi49-resources-declared-en');
 
       await typedLink.click();
       await page.getByRole('heading', { name: 'demo-typed', level: 1 }).waitFor();
-      const declaration = page.locator('.declarations li', { hasText: 'demo-printer' });
-      expect(await declaration.locator('.declared-type').innerText()).toBe('expects File');
-      expect(await declaration.locator('.status').innerText()).toBe('Defined as another type');
+      const declaration = page.locator('li.role', { hasText: 'demo-printer' });
+      await declaration.waitFor();
+      expect(await declaration.locator('.role-type').innerText()).toBe('File');
+      expect(await declaration.locator('.role-state').innerText()).toBe('Another type');
       await shot(page, 'wi49-pipeline-declarations-admin-en');
     } finally {
       await context.close();
@@ -229,9 +230,10 @@ describe('the resources page of an admin', () => {
     try {
       const { page } = await signedIn(developer, ada, `/pipelines/${plain.contentHash}?pipeline=demo-resource&uploader=${ada.name}`);
       await page.getByRole('heading', { name: 'demo-resource', level: 1 }).waitFor();
-      const declaration = page.locator('.declarations li', { hasText: 'demo-printer' });
-      expect(await declaration.locator('.declared-type').innerText()).toBe('any type');
-      expect(await declaration.locator('.status').innerText()).toBe('Available');
+      const declaration = page.locator('li.role', { hasText: 'demo-printer' });
+      await declaration.waitFor();
+      expect(await declaration.locator('.role-type').innerText()).toBe('any type');
+      expect(await declaration.locator('.role-state').innerText()).toBe('Available');
       await page.goto(`${engineUrl}/resources`);
       await page.getByRole('heading', { name: 'Admins only' }).waitFor();
       expect((await api(ada, '/api/v1/secrets')).status).toBe(403);
@@ -255,7 +257,7 @@ describe('the resources page of an admin', () => {
       await dialog(page).locator('.preview').waitFor();
       const preview = await json(await api(root, `/api/v1/resources/${name}?preview=true`, { method: 'DELETE' }));
       expect(preview).toMatchObject({ definitions: 0, triggers: 0, holders: 0, waiters: 0, inUse: false });
-      expect(await dialog(page).locator('.preview').innerText()).toContain('No pipeline definition declares it');
+      expect(await dialog(page).locator('.preview').innerText()).toContain('No pipeline definition uses it');
       expect(await dialog(page).locator('.preview').innerText()).toContain('No run holds it or waits for it.');
       await shot(page, 'wi49-resources-delete-en');
       await dialog(page).getByRole('button', { name: 'Delete the resource' }).click();
@@ -271,7 +273,7 @@ describe('the resources page of an admin', () => {
       const busy = await json(await api(root, '/api/v1/resources/demo-printer?preview=true', { method: 'DELETE' }));
       expect(busy).toMatchObject({ holders: 1, waiters: 0, inUse: true });
       expect(await dialog(page).locator('.preview').innerText()).toContain(
-        `${busy.definitions} pipeline definition${busy.definitions === 1 ? ' declares' : 's declare'} it`,
+        `${busy.definitions} pipeline definition${busy.definitions === 1 ? ' uses' : 's use'} it`,
       );
       expect(await dialog(page).locator('.in-use').innerText()).toContain('1 run holds it and 0 runs wait for it');
       expect(await dialog(page).locator('.in-use').innerText()).toContain('disable it');

@@ -305,6 +305,66 @@ describe('the form of a jdbc-pool', () => {
   }, 180_000);
 });
 
+describe('the form of a jdbc-pool for a SQLite file (WI-1003)', () => {
+  test('asks for a path only, refuses one out of the resource root at the path, defines the file, passes its check, fails the check of one in a directory that is not there, and deletes it', async () => {
+    const name = `e2e-sqlite-${stamp()}`;
+    const missing = `e2e-sqlite-missing-${stamp()}`;
+    const context = await newContext(browser, 'en-US');
+    try {
+      const { page, problems } = await signedIn(context, root, '/resources');
+      await defineForm(page, 'Database pool (JDBC)', name);
+      const kinds = (await json(await api(root, '/api/v1/resource-types'))).types.find((t: any) => t.type === 'jdbc-pool').databases.map((d: any) => d.kind);
+      expect(kinds).toContain('sqlite');
+      await dialog(page).locator('#jdbc-kind').selectOption('sqlite');
+      for (const gone of ['jdbc-host', 'jdbc-port', 'jdbc-database', 'jdbc-username', 'resource-secret', 'resource-certificates']) {
+        expect([gone, await dialog(page).locator(`#${gone}`).count()]).toEqual([gone, 0]);
+      }
+      expect(await dialog(page).locator('#jdbc-path').count()).toBe(1);
+      await shot(page, 'wi1003-sqlite-form-en');
+
+      await dialog(page).getByRole('button', { name: 'Define' }).click();
+      await expect.poll(() => errorAt(page, 'jdbc-path').innerText()).toContain('Fill this in');
+      await dialog(page).locator('#jdbc-path').fill('../outside.db');
+      await dialog(page).getByRole('button', { name: 'Define' }).click();
+      await expect.poll(() => errorAt(page, 'jdbc-path').innerText()).toContain('outside the resource root');
+      expect((await api(root, `/api/v1/resources/${name}`)).status).toBe(404);
+
+      await dialog(page).locator('#jdbc-path').fill(`${name}.db`);
+      await dialog(page).getByRole('button', { name: 'Define' }).click();
+      await dialog(page).waitFor({ state: 'detached' });
+      const card = cardOf(page, name);
+      await card.waitFor();
+      expect(await resource(name)).toMatchObject({
+        type: 'jdbc-pool',
+        capacity: 1,
+        secretAlias: null,
+        settings: { kind: 'sqlite', path: `${name}.db` },
+      });
+      const text = await card.locator('.settings').innerText();
+      expect(text).toContain('sqlite');
+      expect(text).toContain(`${name}.db`);
+      expect(await check(card, name, 'passed')).toMatchObject({ ok: true, failure: null });
+
+      await change(page, card, async () => {
+        expect(await dialog(page).locator('#jdbc-path').inputValue()).toBe(`${name}.db`);
+        await dialog(page).locator('#jdbc-path').fill(`${missing}/x.db`);
+      });
+      expect(await resource(name)).toMatchObject({ settings: { path: `${missing}/x.db` }, lastCheck: null });
+      expect(await check(card, name, 'failed')).toMatchObject({ ok: false, failure: 'parent_not_creatable' });
+
+      await card.getByRole('button', { name: 'Delete' }).click();
+      await dialog(page).locator('.preview').waitFor();
+      await dialog(page).getByRole('button', { name: 'Delete the resource' }).click();
+      await card.waitFor({ state: 'detached' });
+      expect((await api(root, `/api/v1/resources/${name}`)).status).toBe(404);
+      expect(problems.csp).toEqual([]);
+    } finally {
+      await context.close();
+      await remove(name);
+    }
+  }, 90_000);
+});
+
 describe('the form of an openai-compatible service', () => {
   test('defines a service with its endpoints, parameters and the alias of its key, says what a lock and a ceiling are and what it refuses, passes and fails its check, and shows a request a real run has in flight', async () => {
     const name = 'demo-llm';

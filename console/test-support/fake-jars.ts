@@ -36,6 +36,8 @@ export interface FakePipeline {
   resources?: string[];
   /** The type expected of a declared resource, by its name; only those declared with a type. */
   resourceTypes?: Record<string, string>;
+  /** What a declared resource is for, by its name; only those declared with a purpose (ADR-025). */
+  resourcePurposes?: Record<string, string>;
   reasons?: FakeReason[];
   /** Classes the pipeline refers to: UNSAFE for as long as no allow-list entry covers one. */
   references?: string[];
@@ -97,6 +99,19 @@ const typed: FakePipeline = {
   references: ['java.io.PrintStream'],
 };
 
+/** As `samples.roles.RolesPipeline`: three roles, two typed with a purpose and one by name only. */
+const roles: FakePipeline = {
+  name: 'demo-roles',
+  className: 'samples.roles.RolesPipeline',
+  resources: ['scratch', 'report-store', 'ticket-counter'],
+  resourceTypes: { 'report-store': 'file', 'ticket-counter': 'counter' },
+  resourcePurposes: {
+    'report-store': 'Where the weekly report is written',
+    'ticket-counter': 'Limits how many tickets are handled at once',
+  },
+  references: ['java.io.PrintStream'],
+};
+
 export interface DemoJars {
   slow: Uint8Array;
   failing: Uint8Array;
@@ -104,6 +119,8 @@ export interface DemoJars {
   resource: Uint8Array;
   /** `demo-typed`: declares `demo-printer` and expects it to be a `file`. */
   typed: Uint8Array;
+  /** `demo-roles`: the roles `report-store` (file), `ticket-counter` (counter) and `scratch` (any type). */
+  roles: Uint8Array;
   /** A zip file with nothing in it that is a pipeline. */
   noPipeline: Uint8Array;
   /** Bytes that are no zip file at all. */
@@ -117,6 +134,7 @@ export function demoJars(): DemoJars {
     unsafe: fakeJar([unsafe]),
     resource: fakeJar([resource]),
     typed: fakeJar([typed]),
+    roles: fakeJar([roles]),
     noPipeline: storedZip({ 'hello.txt': 'there is no pipeline here' }),
     junk: new TextEncoder().encode('this is not a jar'),
   };

@@ -66,6 +66,8 @@ export interface DeclaringDefinition {
   contentHash: string;
   uploader: string;
   pipeline: string;
+  /** The role of the pipeline that leads to the resource (ADR-025). */
+  role: string;
   /** The type the definition expects; null when it declares only the name. */
   declaredType: string | null;
   /** The triggers bound to this definition. */
@@ -140,6 +142,11 @@ export class FakeResources {
   /** The type of the resource; undefined when it is not defined. */
   typeOf(name: string): string | undefined {
     return this.resources.get(name)?.type;
+  }
+
+  /** Every resource that is defined: its name, type and whether it is enabled. */
+  all(): Array<{ name: string; type: string; enabled: boolean }> {
+    return [...this.resources.values()].map(({ name, type, enabled }) => ({ name, type, enabled }));
   }
 
   define(
@@ -415,7 +422,8 @@ export class FakeResources {
     const settings = rules.settings(request.settings);
     if ('problem' in settings) return this.invalid('The settings are not valid.', settings.problem);
     const alias = request.secretAlias;
-    if (alias !== undefined && (!rules.takesSecret || typeof alias !== 'string' || !NAME.test(alias))) {
+    const secretAllowed = rules.secretFor?.(settings.settings) ?? rules.takesSecret;
+    if (alias !== undefined && (!secretAllowed || typeof alias !== 'string' || !NAME.test(alias))) {
       return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
     }
     if (this.wrongType(settings.settings, (alias as string | undefined) ?? null)) {
@@ -475,7 +483,8 @@ export class FakeResources {
     const rules = TYPE_RULES[resource.type];
     const written = settings === undefined || rules === undefined ? undefined : rules.settings(settings);
     if (written !== undefined && 'problem' in written) return this.invalid('The settings are not valid.', written.problem);
-    if (secretAlias !== undefined && (rules?.takesSecret !== true || !NAME.test(secretAlias as string))) {
+    const secretAllowed = rules?.secretFor?.(written?.settings ?? resource.settings) ?? rules?.takesSecret === true;
+    if (secretAlias !== undefined && (!secretAllowed || !NAME.test(secretAlias as string))) {
       return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
     }
     if (

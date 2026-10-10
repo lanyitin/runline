@@ -902,7 +902,7 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
           (d: any) => d.contentHash === contentHash && d.uploader === ada().name && d.pipeline === 'demo-resource',
         );
       const before = await resource('demo-printer');
-      expect(declaring(before)).toMatchObject({ declaredType: null });
+      expect(declaring(before)).toMatchObject({ role: 'demo-printer', declaredType: null });
       expect(before.declaredBy.count).toBe(before.declaredBy.definitions.length);
 
       const trigger = fresh('cron');
@@ -932,7 +932,7 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       const typed = (await resource('demo-printer')).declaredBy.definitions.find(
         (d: any) => d.contentHash === typedVersion.contentHash && d.uploader === ada().name,
       );
-      expect(typed).toMatchObject({ pipeline: 'demo-typed', declaredType: 'file' });
+      expect(typed).toMatchObject({ pipeline: 'demo-typed', role: 'demo-printer', declaredType: 'file' });
 
       const pipelineOf = async (contentHash: string, pipeline: string) =>
         (await call(ada(), 'GET', `/api/v1/artifacts/${contentHash}`)).body.pipelines.find(

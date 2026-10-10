@@ -16,7 +16,7 @@
   // check, how much of it is held and the use of its type's own (connections that runs hold of a
   // pool, requests in flight to a service; read again with the page, never by a check), who holds
   // it and who waits, and the pipeline definitions that
-  // declare it, each a link to its page. A check is made here, only when the admin asks for it (it
+  // use it through a role (bound to it, or of its own name), each a link to the role in its page. A check is made here, only when the admin asks for it (it
   // may reach a service or a database); the card then shows it as the last check. Changing,
   // deleting and releasing a holder are the page's, which asks first.
   interface Props {
@@ -173,14 +173,15 @@
         })}
       </p>
       <ul>
-        {#each resource.declaredBy.definitions as definition (`${definition.contentHash}/${definition.uploader}/${definition.pipeline}`)}
+        {#each resource.declaredBy.definitions as definition (JSON.stringify([definition.contentHash, definition.uploader, definition.pipeline, definition.role]))}
           <li>
-            <Link href={pipelineHref(definition.contentHash, definition.pipeline, definition.uploader)} class="rl-mono">
+            <Link href={pipelineHref(definition.contentHash, definition.pipeline, definition.uploader, definition.role)} class="rl-mono">
               <PlainText value={definition.pipeline} mono />
             </Link>
             <span class="rl-help">
-              <PlainText value={definition.contentHash.slice(0, 12)} mono />
+              {i18n.t('resources.declaredBy.role')} <PlainText value={definition.role} mono />
               · <PlainText value={definition.uploader} />
+              · <PlainText value={definition.contentHash.slice(0, 12)} mono />
               · {definition.declaredType === null
                 ? i18n.t('resources.declaredBy.anyType')
                 : i18n.t('resources.declaredBy.expects', {

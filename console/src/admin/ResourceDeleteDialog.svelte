@@ -6,7 +6,7 @@
   import Dialog from '../ui/Dialog.svelte';
 
   // Deletes a shared resource (`DELETE /api/v1/resources/{name}`), after showing what it would touch
-  // (`preview=true`, which changes nothing): the pipeline definitions that declare it and the
+  // (`preview=true`, which changes nothing): the pipeline definitions that use it and the
   // triggers bound to them, which keep their declaration and are refused new runs, and whether a
   // run holds it or waits for it. A resource in use is not deleted, by the Engine: the dialog says
   // so, before (from the preview) and after (a run may take it in between, 409 `resource_in_use`),

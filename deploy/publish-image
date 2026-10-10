@@ -1,0 +1,78 @@
+#!/bin/bash
+# Builds the Engine image for browser pipelines as linux/amd64 and pushes it to a registry, tagged with
+# the commit it was built from (docs/stable/homelab-arr/work-items/WI-1100-publishable-image.md).
+#
+#   RUNLINE_REGISTRY=forgejo.example/owner deploy/publish-image             # build and push
+#   RUNLINE_REGISTRY=forgejo.example/owner deploy/publish-image --no-push   # build only, in the local daemon
+#
+# Configuration comes from the environment, never from this file:
+#   RUNLINE_REGISTRY   registry host and path the image goes under, no tag and no credentials
+#                      (forgejo.example/owner gives forgejo.example/owner/runline-engine-browser:<tag>)
+#
+# Registry credentials are not read or stored here. Log in beforehand with `docker login "$host"`; the
+# password is then read from the terminal or a credential helper (`--password-stdin` from a secret
+# manager), never given on a command line. The push uses that login.
+#
+# The tag is the first 12 characters of the commit id: nothing floats, so a deployment names exactly
+# what it runs and can be rolled back to a tag. A tree with uncommitted or untracked changes is not
+# pushed (what runs could not be found from the tag); with --no-push it builds, tagged `<commit>-dirty`.
+#
+# The image is linux/amd64 only (Google ships Chrome for nothing else). On an arm64 machine the Docker
+# daemon must be able to run amd64 containers (Rosetta; Colima: vmType vz, rosetta true) and the entry
+# says so when it cannot.
+set -euo pipefail
+
+fail() { printf 'publish-image: %s\n' "$*" >&2; exit 1; }
+
+push=yes
+case "${1:-}" in
+  "") ;;
+  --no-push) push=no ;;
+  *) fail "unknown argument '$1' (the only one is --no-push)" ;;
+esac
+
+# The registry is checked first: nothing is built for a push that cannot happen.
+registry="${RUNLINE_REGISTRY:-}"
+[ -n "$registry" ] || fail "RUNLINE_REGISTRY is not set: give the registry host and path, e.g. RUNLINE_REGISTRY=forgejo.example/owner"
+case "$registry" in
+  *@*|*://*|*:latest|*[[:space:]]*) fail "RUNLINE_REGISTRY must be a host and path only (no credentials, scheme or tag): '${registry//@*/@...}'" ;;
+esac
+registry="${registry%/}"
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+
+commit="$(git rev-parse --short=12 HEAD)" || fail "this is not a git checkout; the tag comes from the commit"
+tag="$commit"
+if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+  if [ "$push" = yes ]; then
+    fail "the working tree has uncommitted or untracked changes, so the image could not be found again from its tag $commit; commit them (or stash) and run again. (--no-push builds it locally anyway)"
+  fi
+  tag="$commit-dirty"
+fi
+image="$registry/runline-engine-browser:$tag"
+
+command -v docker >/dev/null || fail "docker is not installed"
+docker info >/dev/null 2>&1 || fail "the Docker daemon cannot be reached (is Docker, or Colima, running?)"
+
+# An amd64 container must run here. Only a run proves it; the architecture of the host does not.
+base="$(sed -n 's/^FROM \(eclipse-temurin[^ ]*\) AS engine$/\1/p' deploy/docker/Dockerfile)"
+[ -n "$base" ] || fail "cannot find the base image in deploy/docker/Dockerfile"
+arch="$(docker run --rm --platform linux/amd64 --entrypoint uname "$base" -m 2>&1)" || arch=""
+if [ "$arch" != "x86_64" ]; then
+  fail "this Docker daemon cannot run linux/amd64 containers (got '${arch:-nothing}'). On an arm64 machine enable amd64 emulation: Colima with vmType vz and rosetta true (colima start --vm-type vz --vz-rosetta), Docker Desktop with Rosetta. QEMU is not enough: Chrome aborts under it."
+fi
+
+./gradlew --console=plain :engine:engineDistribution
+
+docker build --platform linux/amd64 --target browser --build-context deploy=deploy \
+  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+  -f deploy/docker/Dockerfile -t "$image" engine/build/engine-dist
+
+built="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")"
+[ "$built" = "linux/amd64" ] || fail "the image came out as $built, not linux/amd64; it is not pushed"
+
+if [ "$push" = yes ]; then
+  docker push "$image"
+fi
+printf '%s\n' "$image"

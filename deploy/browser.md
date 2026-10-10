@@ -11,10 +11,45 @@
 | `docker/Dockerfile` 的 `browser` 階段 | 在 Engine 映像上加 Chrome、Xvfb、字型與下列腳本；只建 `linux/amd64` |
 | `docker/compose.browser.yaml` | 疊加檔：用 `browser` 階段、啟用 init、掛載私有 CA 的根憑證 |
 | `docker/compose.browser-gpu.yaml` | 疊加檔：把 `/dev/dri` 交給容器 |
+| `publish-image` | 建置入口：在筆電交叉建置 `linux/amd64` 的瀏覽器版映像並以 commit 為 tag 推到 registry |
+| `docker/compose.registry.yaml` | 獨立範本：引用已發佈的映像（不建置），含 PostgreSQL、`init`、migrate、engine |
+| `docker/compose.registry-gpu.yaml` | `compose.registry.yaml` 的疊加檔：GPU 裝置與群組 |
+| `test/publish-test.sh` | 不需 Docker daemon 的檢查：建置入口的拒絕條件、範本展開後的內容 |
 | `bin/runline-entrypoint` | 容器（與 systemd 選用）的啟動：虛擬顯示、JVM 信任、啟動時的渲染器報告，然後以 `exec` 啟動 Engine |
 | `bin/runline-browser-probe` | 讀出 Chrome 取得的 WebGL 渲染器；可要求硬體渲染 |
 | `bin/runline-build-truststore` | 把 JDK 的 CA 與目錄中的 PEM 合成一個 JVM 信任庫 |
 | `systemd/runline-engine-browser.conf` | systemd 的 drop-in |
+
+## 發佈映像檔與引用它的 Compose 範本（WI-1100）
+
+部署端（例如 homelab 的 arr）不建置：維運者在筆電上建置並推送，部署端只引用映像檔。
+
+建置入口（要求 Docker daemon 在跑、Gradle 的 Node 與 JDK 就緒、已 `docker login`）：
+
+```
+RUNLINE_REGISTRY=registry.example/owner deploy/publish-image          # 建置並推送
+RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只在本機建置
+```
+
+- `RUNLINE_REGISTRY`（環境變數，必填）：registry 位址與路徑，不含 tag、帳密。映像為 `$RUNLINE_REGISTRY/runline-engine-browser:<commit 前 12 碼>`，最後一行輸出印出完整引用。沒有浮動 tag。
+- 憑證：入口不讀不存。先 `docker login <host>`（密碼由終端機提示或 `--password-stdin`），推送使用該登入。
+- 工作樹有未提交或未追蹤的變更時拒絕推送並說明原因；`--no-push` 仍可建置，tag 為 `<commit>-dirty`。
+- 一律 `linux/amd64`。arm64 筆電上 Docker 的虛擬機須以 Rosetta 模擬（Colima：`vmType: vz`、`rosetta: true`）；入口先實際跑一個 amd64 容器，不行就明確失敗並說明。建置後檢查映像的架構，不是 `linux/amd64` 即不推送。映像帶 `org.opencontainers.image.revision` 標籤（完整 commit）。
+
+部署端只需要 `docker/compose.registry.yaml`、`.env`（由 `docker/.env.example` 複製，置換佔位值）與下列變數，不需要原始碼：
+
+| 變數 | 說明 |
+|---|---|
+| `RUNLINE_IMAGE`（必填） | 入口印出的映像引用（含 commit tag） |
+| `RUNLINE_DATA_DIR`（必填） | 宿主目錄；其下的 `postgres-data`、`shared`、`resources` 是三個持久目錄 |
+| `TRUSTED_CA_FILE`（必填） | 私有 CA 根憑證檔，唯讀掛載為容器內信任目錄中唯一的檔案 |
+| `ENGINE_SHM_SIZE` | engine 的共享記憶體，預設 `1gb` |
+| `ENGINE_MEM_LIMIT`、`ENGINE_CPUS` | engine 的記憶體與 CPU 上限，預設不限 |
+| `GPU_DEVICE`、`RENDER_GROUP_ID` | 只用於 `compose.registry-gpu.yaml`：裝置（預設 `/dev/dri`）與其數字群組（必填） |
+
+行為與 `compose.yaml` 加 `compose.browser.yaml` 相同：migrate 先於 engine、`stop_grace_period` 45s、就緒探測、`init: true`；差異是 engine 不發布連接埠（由同一 Compose 網路上的反向代理連 8080），並多一個一次性的 root 容器 `init`，在 engine 啟動前建立 `shared`、`resources` 並把這兩個目錄（不遞迴）的擁有者設為 uid 10001。`postgres-data` 不預建，由 PostgreSQL 首次啟動時建立。
+
+驗證：`deploy/test/publish-test.sh`（不需 daemon）。其餘在 Colima（Rosetta）與本機 `registry:2` 上實測：從乾淨 clone 建置並推送，刪除本機映像後在只有範本、`.env` 與憑證檔的目錄 `docker compose up -d` 拉取並啟動，engine 就緒、`runline-browser-probe` 執行完成、在映像上跑一個 pipeline 確認 Engine 的類別對 run 不可見。**未實測**：amd64 原生的筆電、真實的 Forgejo registry（含認證）、GPU 疊加檔在有 `/dev/dri` 的主機。
 
 ## 環境變數
 

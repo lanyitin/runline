@@ -60,6 +60,10 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.keystore.y
 
 為 digest-rss 這類在 Engine 主機上驅動有畫面的 Chrome 的 pipeline（[ADR-022](../digest-rss/adr/ADR-022-unsafe-pipeline-with-local-browser.md)），`Dockerfile` 另有 `browser` 階段，疊加檔 `deploy/docker/compose.browser.yaml` 使用它：真實的 Google Chrome（只有 `linux/amd64`）、Xvfb、init 為 PID 1、私有 CA 根憑證的 JVM 信任、啟動時的渲染器報告；`compose.browser-gpu.yaml` 把 `/dev/dri` 交給容器。`compose.yaml` 指定 `target: engine`，原本的映像與就緒探測都不變，Chrome 不可用不影響就緒。設定項目、驗證步驟與實測見 [瀏覽器部署手冊](../../../deploy/browser.md)；以真實 Docker 驗證：`./gradlew :engine:browserDeploymentTest`（需要 amd64 的 Docker，下載 Chrome，不屬於 `check`）。
 
+### 由 registry 引用的發佈路徑
+
+部署端不建置時（例如 [homelab arr](../homelab-arr/README.md)），改由 `deploy/publish-image` 在筆電建置 `linux/amd64` 的瀏覽器映像並以 commit 為 tag 推到 registry，部署端以 `deploy/docker/compose.registry.yaml` 引用它（獨立範本，無建置步驟，engine 不發布連接埠，多一個一次性的 root `init` 容器準備 `shared` 與 `resources` 的擁有者）。用法、變數與實測範圍見 [瀏覽器部署手冊](../../../deploy/browser.md)「發佈映像檔與引用它的 Compose 範本」。
+
 ## 已接受的限度
 
 - 單機 Docker 不因行程卡死（存活失敗）而重啟；以監控告警補位。

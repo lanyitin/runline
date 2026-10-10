@@ -1,0 +1,118 @@
+# The Engine for browser pipelines, PostgreSQL included, from a published image: nothing is built here,
+# and neither Gradle, a JDK, Node nor the source is needed on the host
+# (docs/stable/homelab-arr/work-items/WI-1100-publishable-image.md). A standalone file, not an overlay:
+# it states what compose.yaml and compose.browser.yaml state together, for an image from a registry.
+#
+#   RUNLINE_IMAGE=forgejo.example/owner/runline-engine-browser:0123456789ab   (printed by deploy/publish-image)
+#   cp .env.example .env   # replace every placeholder, set the variables below
+#   docker compose -f compose.registry.yaml up -d
+#
+# RUNLINE_IMAGE names the image with its tag, as the build entry prints it; never a floating tag. It
+# and the variables below are read from the environment or from the .env beside this file; the Engine's
+# own configuration and secrets come from .env only (env_file), never from this file.
+#
+#   RUNLINE_IMAGE      required. The image with its commit tag.
+#   RUNLINE_DATA_DIR   required. Host directory of the three persistent directories: postgres-data,
+#                      shared and resources are made below it.
+#   TRUSTED_CA_FILE    required. Host file with the root certificate of the private CA, mounted read-only
+#                      as the only file in the directory the JVM reads (RUNLINE_TRUSTED_CA_DIR).
+#   ENGINE_SHM_SIZE    shared memory of the Engine's container (default 1gb: Chrome crashes with Docker's
+#                      64 MB).
+#   ENGINE_MEM_LIMIT, ENGINE_CPUS   optional limits of the Engine's container (default: none).
+#   deploy/docker/compose.registry-gpu.yaml adds a GPU device and its group.
+#
+# The Engine is not published to the host: a reverse proxy on the same Compose network reaches it on
+# 8080. The image is linux/amd64 only.
+
+x-engine: &engine
+  image: ${RUNLINE_IMAGE:?set RUNLINE_IMAGE to the published image with its commit tag}
+  platform: linux/amd64
+  env_file: .env
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # Not prepared: PostgreSQL creates this directory on its first start and owns it.
+      - type: bind
+        source: ${RUNLINE_DATA_DIR:?set RUNLINE_DATA_DIR to the host directory of the persistent data}/postgres-data
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-off, as root: makes the directories the Engine writes to, and gives them (not what is in them)
+  # to the Engine's account, uid 10001. The Engine starts after it has succeeded.
+  init:
+    <<: *engine
+    user: root
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - mkdir -p /data/shared /data/resources && chown 10001:10001 /data/shared /data/resources
+    volumes:
+      - type: bind
+        source: ${RUNLINE_DATA_DIR:?set RUNLINE_DATA_DIR to the host directory of the persistent data}
+        target: /data
+
+  # One-off: the same image and the same environment as the engine, run before it.
+  migrate:
+    <<: *engine
+    entrypoint: ["java", "-cp", "/app/engine.jar", "dev.lawlan.runline.engine.db.MigrateKt"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  engine:
+    <<: *engine
+    restart: unless-stopped
+    # PID 1 must reap the Chrome helpers that a cancelled run leaves behind; the JVM does not.
+    init: true
+    shm_size: ${ENGINE_SHM_SIZE:-1gb}
+    mem_limit: ${ENGINE_MEM_LIMIT:-0}
+    cpus: ${ENGINE_CPUS:-0}
+    environment:
+      RUNLINE_TRUSTED_CA_DIR: /etc/runline/trusted-ca
+    depends_on:
+      postgres:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - type: bind
+        source: ${RUNLINE_DATA_DIR}/shared
+        target: /var/lib/runline/shared
+      - type: bind
+        source: ${RUNLINE_DATA_DIR}/resources
+        target: /var/lib/runline/resources
+      - type: bind
+        source: ${TRUSTED_CA_FILE:?set TRUSTED_CA_FILE to the root certificate of the private CA}
+        target: /etc/runline/trusted-ca/root.crt
+        read_only: true
+    # RUNLINE_SHUTDOWN_GRACE_SECONDS (30 unless set in .env) plus 15 seconds; Docker's default of
+    # 10 seconds would kill the Engine inside its grace time. Raise both together.
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD
+        - java
+        - -cp
+        - /app/engine.jar
+        - dev.lawlan.runline.engine.HealthCheckKt
+        - ready
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s

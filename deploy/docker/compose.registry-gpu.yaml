@@ -1,0 +1,15 @@
+# Hands a GPU to the Engine of compose.registry.yaml (see compose.browser-gpu.yaml for what it does and
+# does not give: a device node is not hardware rendering, the probe tells).
+#
+#   docker compose -f compose.registry.yaml -f compose.registry-gpu.yaml up -d
+#
+#   RENDER_GROUP_ID  required. The numeric group of the render node on the host, for example
+#                    `stat -c %g /dev/dri/renderD128`.
+#   GPU_DEVICE       the device directory of the host (default /dev/dri), given to the container as is.
+
+services:
+  engine:
+    devices:
+      - ${GPU_DEVICE:-/dev/dri}:${GPU_DEVICE:-/dev/dri}
+    group_add:
+      - "${RENDER_GROUP_ID:?set RENDER_GROUP_ID to the numeric group of the render node}"

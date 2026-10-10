@@ -11,6 +11,8 @@ x-engine: &engine
   build:
     context: ../../engine/build/engine-dist
     dockerfile: ../../../deploy/docker/Dockerfile
+    # The plain Engine; compose.browser.yaml selects the other stage.
+    target: engine
   image: runline-engine:${RUNLINE_IMAGE_TAG:-local}
   env_file: .env
 

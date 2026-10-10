@@ -1,0 +1,73 @@
+#!/bin/bash
+# How the Engine starts in the browser image (docs/stable/digest-rss/04-deployment.md, WI-1001).
+# Everything here is configuration from environment variables; the last line is the Engine itself
+# (the command this script is given), started in this process so that it receives the signals.
+#
+#   DISPLAY                        the display Chrome draws on, ":99" in the image
+#   RUNLINE_VIRTUAL_DISPLAY        "on" (default) starts Xvfb on DISPLAY; "off" leaves the display to
+#                                  whoever provides it (a socket mounted into the container)
+#   RUNLINE_VIRTUAL_DISPLAY_SIZE   WIDTHxHEIGHTxDEPTH of the virtual display (default 1920x1080x24)
+#   RUNLINE_TRUSTED_CA_DIR         a directory of PEM files, the root certificates the whole JVM trusts in
+#                                  addition to the JDK's (the operator's private CA). Unset: the JDK's only
+#   RUNLINE_BROWSER_PROBE          "on" (default) logs which WebGL renderer Chrome gets, a few seconds
+#                                  after the start and without holding the Engine back (runline-browser-probe)
+set -eu
+
+# The scripts beside this one (in the image /usr/local/bin, on a host wherever they were installed;
+# that directory is not on the PATH of a systemd service).
+here="$(dirname "$(readlink -f "$0")")"
+
+log() { printf '%s runline-entrypoint: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+start_virtual_display() {
+  local display="${DISPLAY:?DISPLAY must name the display Chrome draws on}"
+  local number="${display#:}"
+  number="${number%%.*}"
+  local size="${RUNLINE_VIRTUAL_DISPLAY_SIZE:-1920x1080x24}"
+  # A restarted container keeps its writable layer: the lock of the display it had is still there.
+  # (If they are another account's they stay, Xvfb then says so, and only the browser pipelines suffer.)
+  rm -f "/tmp/.X${number}-lock" "/tmp/.X11-unix/X${number}" || true
+  # In a subshell that ends at once, so that Xvfb is adopted by PID 1 (the init) and not left as a
+  # child of the JVM, which never waits for it.
+  (Xvfb "$display" -screen 0 "$size" -nolisten tcp &)
+  for _ in $(seq 1 50); do
+    if [ -S "/tmp/.X11-unix/X${number}" ]; then
+      log "virtual display $display is up ($size)"
+      return 0
+    fi
+    sleep 0.2
+  done
+  # The Engine does not need the display: it starts, and only the pipelines that use Chrome fail.
+  log "WARNING: virtual display $display did not come up within 10 seconds; browser pipelines will fail"
+}
+
+configure_trust() {
+  # In a directory of its own that only this account can enter, wherever the temporary directory is.
+  local store
+  store="$(mktemp -d)/truststore.p12"
+  if ! "$here/runline-build-truststore" "$RUNLINE_TRUSTED_CA_DIR" "$store"; then
+    log "ERROR: RUNLINE_TRUSTED_CA_DIR=$RUNLINE_TRUSTED_CA_DIR cannot be used; the Engine does not start with a trust it was not given"
+    exit 1
+  fi
+  # The JVM reads this variable itself (the java launcher); the health check and the other entry
+  # points of engine.jar are started with their own environment and need none of it.
+  export JDK_JAVA_OPTIONS="${JDK_JAVA_OPTIONS:+$JDK_JAVA_OPTIONS }-Djavax.net.ssl.trustStore=$store -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=changeit"
+}
+
+if [ -n "${RUNLINE_TRUSTED_CA_DIR:-}" ]; then
+  configure_trust
+fi
+
+if [ "${RUNLINE_VIRTUAL_DISPLAY:-on}" = "on" ]; then
+  start_virtual_display
+else
+  log "virtual display not started (RUNLINE_VIRTUAL_DISPLAY=${RUNLINE_VIRTUAL_DISPLAY}); DISPLAY=${DISPLAY:-unset}"
+fi
+
+# Just before the Engine starts, in a subshell that ends at once (the init adopts it): it only
+# reports, and nothing it finds keeps the Engine from starting or becoming ready.
+if [ "${RUNLINE_BROWSER_PROBE:-on}" = "on" ]; then
+  ("$here/runline-browser-probe" --startup &)
+fi
+
+exec "$@"

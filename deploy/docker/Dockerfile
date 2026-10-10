@@ -5,8 +5,11 @@
 # builds nothing, and Node and build tools are not in it. No secret and no configuration is baked in:
 # everything comes from environment variables when a container starts.
 #
-#   docker build -f deploy/docker/Dockerfile -t runline-engine engine/build/engine-dist
-FROM eclipse-temurin:25-jre
+# This file has two stages: `engine` (below) and `browser` (at the end, for pipelines that drive a
+# browser). The last stage is what a build without --target makes, so name the one you want:
+#
+#   docker build --target engine -f deploy/docker/Dockerfile -t runline-engine engine/build/engine-dist
+FROM eclipse-temurin:25-jre AS engine
 
 # A dedicated unprivileged account. The three directories are the places the Engine writes to: the
 # shared root (ADR-009) and the resource root (the files of `file` shared resources, ADR-019) must
@@ -34,3 +37,41 @@ VOLUME /var/lib/runline/shared /var/lib/runline/resources
 # migration and the health check use the same engine.jar with another main class (04 "Deployment
 # entry points").
 ENTRYPOINT ["java", "-jar", "/app/engine.jar"]
+
+# The Engine for pipelines that drive a browser (WI-1001, docs/stable/digest-rss/04-deployment.md):
+# the same image plus a real Google Chrome, a virtual display and the scripts that start them.
+# Google ships Chrome for linux/amd64 only, so this stage builds only for that platform (on an arm64
+# host the Docker VM must emulate amd64 with Rosetta). Chrome is installed from Google's package at
+# the version given, which is not part of the byte-reproducible release (WI-32): the release is the
+# jars, not the image.
+#
+#   docker build --target browser --platform linux/amd64 --build-context deploy=deploy \
+#       -f deploy/docker/Dockerfile -t runline-engine-browser engine/build/engine-dist
+FROM engine AS browser
+ARG CHROME_VERSION=155.0.8059.39-1
+USER root
+RUN [ "$(dpkg --print-architecture)" = "amd64" ] \
+    || { echo "the browser image is linux/amd64 only (Google Chrome has no other build); build with --platform linux/amd64" >&2; exit 1; }
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xvfb xauth procps fonts-noto-cjk fonts-liberation \
+    && curl -fsSL -o /tmp/chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb" \
+    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+    && rm -rf /tmp/chrome.deb /var/lib/apt/lists/*
+# Chrome keeps small files in the account's home (its certificate database, desktop settings); the
+# account of the plain image has none. Nothing there needs to outlive the container.
+RUN mkdir -p /home/runline && chown runline:runline /home/runline
+# The directory Xvfb puts its socket in, owned by root and sticky as X wants it, so that Xvfb does not
+# have to make it as the unprivileged account.
+RUN mkdir -p -m 1777 /tmp/.X11-unix
+COPY --from=deploy --chmod=0755 bin/runline-entrypoint bin/runline-browser-probe bin/runline-build-truststore /usr/local/bin/
+
+# Where Chrome is and how it is started are configuration of the pipeline, read from these variables:
+# CHROME_ARGS carries what a container needs (no sandbox, no /dev/shm) and the flag without which
+# Chrome has no WebGL on a machine without a GPU. Replace any of them in the environment.
+ENV CHROME_BIN=/usr/bin/google-chrome-stable \
+    CHROME_ARGS="--no-sandbox --disable-dev-shm-usage --ignore-gpu-blocklist" \
+    DISPLAY=:99 \
+    HOME=/home/runline
+USER runline
+ENTRYPOINT ["/usr/local/bin/runline-entrypoint"]
+CMD ["java", "-jar", "/app/engine.jar"]

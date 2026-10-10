@@ -1,0 +1,97 @@
+#!/bin/bash
+# Reports which WebGL renderer the Chrome of this machine gets, and applies the rule for hardware
+# rendering (docs/stable/digest-rss/04-deployment.md, WI-1001). It starts the Chrome the pipelines
+# start (CHROME_BIN with CHROME_ARGS, on DISPLAY), has it read its own renderer in a page, and ends it.
+#
+#   runline-browser-probe              prints the renderer; exit 3 if hardware rendering is required
+#                                      (CHROME_REQUIRE_HARDWARE_RENDERING=true) and it is software
+#   runline-browser-probe --startup    for the container's start: only reports, always exits 0
+#
+# Exit: 0 reported (and, when required, hardware); 2 no renderer could be read; 3 required, software.
+# "Software" is what the pipeline's own rule says: the renderer names swiftshader, llvmpipe, software
+# or microsoft basic, or there is no renderer at all.
+set -u
+
+mode="${1:-}"
+chrome="${CHROME_BIN:-google-chrome-stable}"
+required="${CHROME_REQUIRE_HARDWARE_RENDERING:-false}"
+log() { printf '%s browser-probe: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+profile="$(mktemp -d /tmp/runline-probe-XXXXXX)"
+chrome_pid=""
+cleanup() {
+  [ -n "$chrome_pid" ] && kill "$chrome_pid" 2>/dev/null
+  # The helpers (and the crash handler, which names the directory in another flag) are told apart by
+  # the profile directory only this probe uses.
+  pkill -f -- "$profile" 2>/dev/null
+  rm -rf "$profile"
+}
+trap cleanup EXIT
+
+cat >"$profile/probe.html" <<'HTML'
+<title>pending</title>
+<script>
+var vendor = 'none', renderer = 'none';
+try {
+  var gl = document.createElement('canvas').getContext('webgl');
+  if (gl) {
+    var info = gl.getExtension('WEBGL_debug_renderer_info');
+    vendor = gl.getParameter(info ? info.UNMASKED_VENDOR_WEBGL : gl.VENDOR);
+    renderer = gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+  }
+} catch (e) { renderer = 'error: ' + e; }
+document.title = 'RUNLINE-PROBE|' + vendor + '|' + renderer;
+</script>
+HTML
+
+# shellcheck disable=SC2086
+"$chrome" ${CHROME_ARGS:-} --user-data-dir="$profile" --remote-debugging-port=0 --no-first-run \
+  --no-default-browser-check "file://$profile/probe.html" >/dev/null 2>&1 &
+chrome_pid=$!
+
+title=""
+for _ in $(seq 1 150); do
+  if ! kill -0 "$chrome_pid" 2>/dev/null; then break; fi
+  if [ -s "$profile/DevToolsActivePort" ]; then
+    port="$(head -n1 "$profile/DevToolsActivePort")"
+    title="$(curl -fsS --max-time 2 "http://127.0.0.1:$port/json/list" 2>/dev/null \
+      | grep -o '"title": *"RUNLINE-PROBE|[^"]*"' | head -n1 | sed 's/^"title": *"//; s/"$//')"
+    [ -n "$title" ] && break
+  fi
+  sleep 0.2
+done
+
+if [ -z "$title" ]; then
+  log "WARNING: could not read the renderer: Chrome ($chrome) did not start or did not answer on DISPLAY=${DISPLAY:-unset}"
+  [ "$mode" = "--startup" ] && exit 0
+  exit 2
+fi
+
+vendor="$(printf '%s' "$title" | cut -d'|' -f2)"
+renderer="$(printf '%s' "$title" | cut -d'|' -f3-)"
+
+dri="absent"
+if [ -d /dev/dri ]; then
+  dri="present"
+  ls /dev/dri/renderD* >/dev/null 2>&1 || dri="present, no render node"
+  for node in /dev/dri/renderD*; do
+    [ -e "$node" ] && [ ! -r "$node" ] && [ ! -w "$node" ] && dri="present, not accessible to uid $(id -u) (give the container the device's group)"
+  done
+fi
+
+if [ -z "$renderer" ] || [ "$renderer" = "none" ] || printf '%s' "$renderer" | grep -Eiq 'swiftshader|llvmpipe|software|microsoft basic'; then
+  log "WARNING: software rendering: vendor='$vendor' renderer='$renderer' /dev/dri=$dri"
+  if [ "$dri" = "absent" ]; then
+    log "WARNING: there is no /dev/dri here; hand the GPU to the Engine for hardware rendering (deploy/browser.md, GPU)"
+  elif [ "$dri" = "present" ]; then
+    log "WARNING: /dev/dri is there but Chrome renders in software: the virtual display has no hardware GL path (deploy/browser.md, hardware GL of the virtual display)"
+  fi
+  if [ "$required" = "true" ] && [ "$mode" != "--startup" ]; then
+    log "ERROR: hardware rendering is required (CHROME_REQUIRE_HARDWARE_RENDERING=true) and the renderer is software"
+    exit 3
+  fi
+  [ "$required" = "true" ] && log "WARNING: CHROME_REQUIRE_HARDWARE_RENDERING=true: runs of the browser pipelines will fail at their start"
+else
+  log "hardware rendering: vendor='$vendor' renderer='$renderer' /dev/dri=$dri"
+fi
+exit 0

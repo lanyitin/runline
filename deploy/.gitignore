@@ -4,3 +4,5 @@ systemd/runline.env
 # The keystore and its password file of the optional keystore overlay (docker/compose.keystore.yaml).
 docker/keystore/
 docker/secrets/
+# The private CA's root certificates of the browser overlay (docker/compose.browser.yaml).
+docker/trusted-ca/

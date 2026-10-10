@@ -1,0 +1,26 @@
+# Hands the host's GPU to the Engine's container (docs/stable/digest-rss/04-deployment.md, WI-1001).
+# An overlay on compose.yaml and compose.browser.yaml; without it Chrome renders in software
+# (llvmpipe) and the container says so in its log.
+#
+#   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.yaml \
+#       -f deploy/docker/compose.browser-gpu.yaml up -d
+#
+# The device nodes of /dev/dri belong to a group of the host (render, or video), and the Engine's
+# account is none of its members. Two ways, one of them:
+#
+#   1. Join that group (this file): RENDER_GROUP_ID in .env is the numeric group of the render node,
+#      `stat -c %g /dev/dri/renderD128` on the host. The numeric id, because the container's
+#      /etc/group does not know the host's group names.
+#   2. Run the container as root: replace `group_add` below by `user: root`. It lifts the account
+#      restriction for everything in the container (the volumes, Chrome), so prefer the group.
+#
+# What the container then reports is in its log (runline-browser-probe) and in
+# `docker compose exec engine runline-browser-probe`. Mounting the device does not by itself make
+# the renderer a hardware one: see deploy/browser.md, "虛擬顯示的硬體 GL".
+
+services:
+  engine:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GROUP_ID:?set RENDER_GROUP_ID in .env to the group of /dev/dri/renderD128 (stat -c %g /dev/dri/renderD128)}"

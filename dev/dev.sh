@@ -134,6 +134,12 @@ export_engine_env() {
   export RUNLINE_RUNTIME_DIR="$DIST/run-runtime"
   export RUNLINE_MAX_CONCURRENT_RUNS=2
   export RUNLINE_SHARED_ROOT="$STATE/shared" RUNLINE_RUN_ROOT="$STATE/runs"
+  # 資源根目錄（必填）：使用者已匯出就以使用者的值為準；否則用專案內被忽略的 dev/.runline/resources
+  # （與共享、run 目錄並列，互不包含；clean 會一併刪除）。只建立預設目錄，不替使用者的路徑動手。
+  if [ -z "${RUNLINE_RESOURCE_ROOT:-}" ]; then
+    export RUNLINE_RESOURCE_ROOT="$STATE/resources"
+    mkdir -p "$RUNLINE_RESOURCE_ROOT"
+  fi
   export RUNLINE_WORKSPACE_MAX_BYTES=104857600
   export RUNLINE_FAILED_RUN_RETENTION_SECONDS=3600
   export RUNLINE_SHUTDOWN_GRACE_SECONDS=10

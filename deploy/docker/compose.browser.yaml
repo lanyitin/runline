@@ -1,0 +1,37 @@
+# The Engine with a real Google Chrome and a virtual display, for pipelines that drive a browser
+# (docs/stable/digest-rss/04-deployment.md, WI-1001). An overlay on compose.yaml:
+#
+#   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.yaml up --build -d
+#   (or COMPOSE_FILE=compose.yaml:compose.browser.yaml in .env)
+#
+# The image is linux/amd64 only (Google ships no other Chrome); on an arm64 host the Docker VM must
+# emulate amd64 with Rosetta (Colima: vmType vz, rosetta true).
+
+x-browser: &browser
+  image: runline-engine-browser:${RUNLINE_IMAGE_TAG:-local}
+  platform: linux/amd64
+  build:
+    target: browser
+    # The scripts of deploy/bin that the image copies in; the Dockerfile itself is outside the
+    # build context, so are they.
+    additional_contexts:
+      deploy: ..
+
+services:
+  migrate:
+    <<: *browser
+  engine:
+    <<: *browser
+    # PID 1 must reap the Chrome helpers that a cancelled run leaves behind; the JVM does not.
+    # Without it they stay as zombies and "the processes are gone" is never true (WI-1000).
+    init: true
+    environment:
+      # The root certificates of the operator's private CA, which the whole JVM trusts (FreshRSS,
+      # rqbit, streamexa over HTTPS). Put the PEM files in the host directory below; it may be
+      # empty. The directory is mounted read-only.
+      RUNLINE_TRUSTED_CA_DIR: /etc/runline/trusted-ca
+    volumes:
+      - type: bind
+        source: ${TRUSTED_CA_HOST_DIR:-./trusted-ca}
+        target: /etc/runline/trusted-ca
+        read_only: true

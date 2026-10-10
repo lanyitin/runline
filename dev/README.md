@@ -29,7 +29,7 @@ dev/dev.sh start
 
 腳本停在前景，**Ctrl-C 即關閉 Engine 並移除容器**。想把終端機還給自己：`dev/dev.sh start --detach`，之後用 `dev/dev.sh stop`。其他子命令：`status`、`logs`（跟隨 Engine 輸出）、`samples`（只重建示範 jar）、`clean`（stop 並刪除 `dev/.runline/`）。`start --no-build` 略過 Gradle（沿用現有產物）。
 
-Engine 的設定全由環境變數給（腳本把它們備齊；全是本機示範值）：`PORT`、`POSTGRES_URL`／`POSTGRES_USER`／`POSTGRES_PASSWORD`、`API_TOKENS`、`RUNLINE_RUNTIME_DIR`（`engine/build/engine-dist/run-runtime`）、`RUNLINE_MAX_CONCURRENT_RUNS=2` 等，詳見腳本的 `export_engine_env` 與根目錄 README。run 的目錄與 Engine 輸出在 `dev/.runline/`（已被 `.gitignore`）。
+Engine 的設定全由環境變數給（腳本把它們備齊；全是本機示範值）：`PORT`、`POSTGRES_URL`／`POSTGRES_USER`／`POSTGRES_PASSWORD`、`API_TOKENS`、`RUNLINE_RUNTIME_DIR`（`engine/build/engine-dist/run-runtime`）、`RUNLINE_MAX_CONCURRENT_RUNS=2` 等，詳見腳本的 `export_engine_env` 與根目錄 README。run 的目錄與 Engine 輸出在 `dev/.runline/`（已被 `.gitignore`）。`RUNLINE_RESOURCE_ROOT`（Engine 必填）預設為 `dev/.runline/resources`（同樣被忽略，`clean` 一併刪除）；先匯出 `RUNLINE_RESOURCE_ROOT` 則以你的值為準（腳本不會替你建立該目錄）。
 
 ## 登入
 
@@ -50,8 +50,9 @@ Engine 的設定全由環境變數給（腳本把它們備齊；全是本機示�
 | `demo-failing.jar` | `demo-failing` | SAFE。約 2 秒後丟 `IllegalStateException`，得 FAILED。參數 `reason` 可改訊息 | failure 面板（型別、訊息、堆疊） |
 | `demo-unsafe.jar` | `demo-unsafe` | **UNSAFE**：原因為網路與行程未設限（`UNRESTRICTED_ACCESS`）與 `java.io.File` 不在白名單（`NOT_ALLOW_LISTED`） | 判定原因；以開發人員建 run 得 409 `unsafe_not_allowed`；用 admin token 在 unsafe 設定允許後，run 才能建立並成功（只印出暫存目錄是否存在） |
 | `demo-resource.jar` | `demo-resource` | SAFE，宣告共享資源 `demo-printer`，持有約 20 秒 | 上傳後有警告「尚未定義」；建 run 得 409 `resources_unavailable`；admin 在共享資源頁定義 `demo-printer`（容量 1）後可建；連建兩個 run，第二個為 WAITING_FOR_RESOURCES；停用資源則等待中的 run 失敗、新 run 再得 409 |
-| `demo-typed.jar` | `demo-typed` | SAFE，宣告共享資源 `demo-printer` 並期望它是 `file` 型別 | `demo-printer` 定義為計數（counter）時，pipeline 頁的資源宣告顯示「已定義為其他型別」並有警告 `resource_type_mismatch`，建 run 被拒；資源頁的 `demo-printer` 卡片在宣告者中列出它與期望的型別（WI-49） |
+| `demo-typed.jar` | `demo-typed` | SAFE，宣告共享資源 `demo-printer` 並期望它是 `file` 型別 | `demo-printer` 定義為計數（counter）時，pipeline 頁的資源角色顯示「型別不符」並有警告 `resource_type_mismatch`，建 run 被拒；資源頁的 `demo-printer` 卡片在宣告者中列出它與期望的型別（WI-49） |
 | `demo-usage.jar` | `demo-pool-usage`、`demo-llm-usage` | SAFE，分別使用 `jdbc-pool` 資源 `demo-db`（查詢一次後持有連線 `holdSeconds` 秒）與 `openai-compatible` 資源 `demo-llm`（一次 chat completion） | 需先定義 `demo-db` 與 `demo-llm`；run 進行中，資源頁卡片顯示使用中的連線數與進行中的請求數（WI-50）；未定義時建 run 被拒 |
+| `demo-roles.jar` | `demo-roles` | SAFE，宣告三個資源角色：`report-store`（`file`，附用途）、`ticket-counter`（`counter`，附用途）、`scratch`（只有名稱）；不使用資源 | pipeline 詳情頁的資源角色（WI-1013）：用型別過濾的選單綁定、更換、解除；未綁定且無同名資源時標示不能建 run；管理員在多位上傳者間切換 |
 
 建議流程：
 
@@ -89,7 +90,7 @@ curl -s -X POST -H "$A" -H 'Content-Type: application/json' -d '{"name":"demo-pr
 - 前景執行：Ctrl-C。
 - 背景執行（`--detach`）或任何殘留：`dev/dev.sh stop`。它對 Engine 送 SIGTERM 等待優雅關閉（最久 60 秒，之後強制終止），並移除 PostgreSQL 容器；重複執行沒有副作用。
 - 資料（上傳的 jar、run、trigger、共享資源、白名單）存在容器內，**stop 後就沒了**，下次 start 是全新的資料庫。
-- `dev/dev.sh clean`：stop，並刪除 `dev/.runline/`（run 目錄、Engine 輸出）。示範 jar 在 `dev/sample-pipelines/build/`，可留著。
+- `dev/dev.sh clean`：stop，並刪除 `dev/.runline/`（run 目錄、資源根目錄、Engine 輸出）。示範 jar 在 `dev/sample-pipelines/build/`，可留著。
 - 確認乾淨：`docker ps -a --filter name=runline-dev` 應為空；`pgrep -fl engine.jar` 應無輸出。
 
 ## 常見問題

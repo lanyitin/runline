@@ -24,7 +24,7 @@
 1. **新增唯讀端點 `GET /api/v1/resource-types`**，回傳執行中 Engine 內建的型別描述。內容：
    - 封閉的型別集合，依 Engine 的固定順序列出。
    - `openai-compatible`：端點目錄的每個條目，包括識別名稱、所屬群組、HTTP 方法、相對路徑樣板、請求本文種類、回應種類、是否可串流、是否預設啟用、是否為有狀態或會刪除服務端資料的條目；可設定預設、鎖定或上限的請求參數清單，包括名稱與值的種類，以及是否可設上限。
-   - `jdbc-pool`：每個資料庫設定檔的種類識別，以及該設定檔允許的連線屬性與各屬性的值規則（例如長度上限、可選值）。
+   - `jdbc-pool`：每個資料庫設定檔的種類識別、該種類接受的位址欄位（`fields`；PostgreSQL 為主機、埠、資料庫名與帳號，SQLite 為資料庫檔的路徑，見 [ADR-024](../../digest-rss/adr/ADR-024-sqlite-run-store.md)、[WI-1003](../../digest-rss/work-items/WI-1003-sqlite-database-kind.md)，Console 的表單依它顯示欄位），以及該設定檔允許的連線屬性與各屬性的值規則（例如長度上限、可選值）。
    - 不含任何個別資源的設定、使用量或機密，也不含 Engine 的組態值（例如資源根目錄）。
 2. **唯一事實來源是 Engine 內部的型別描述**：端點回應、建立與修改資源時的驗證，以及 `invalid_endpoint`、`unsupported_database`、`property_not_allowed` 的判定，全部取自同一份描述，不得各自維護清單。
 3. **授權**：需要 Bearer，限管理員；開發人員得到 403，沒有 token 得到 401，與 `/api/v1/resources` 一致。理由是目前只有管理員的資源表單需要它；開發人員撰寫 pipeline 時以文件為準。

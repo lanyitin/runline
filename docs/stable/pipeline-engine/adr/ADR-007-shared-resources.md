@@ -1,6 +1,6 @@
 # ADR-007 跨 pipeline 共享資源由 Engine 在初始化階段協調
 
-狀態：已核可（2026-10-03）；由 [ADR-019](ADR-019-typed-shared-resources.md) 補充（2026-10-06），資源可對應實際的檔案、連線池與服務。回答：多個 pipeline 如何互斥或限流地使用同一個外部資源（例如 lemonade server）。
+狀態：已核可（2026-10-03）；由 [ADR-019](ADR-019-typed-shared-resources.md) 補充（2026-10-06），資源可對應實際的檔案、連線池與服務；由 [ADR-025](../../digest-rss/adr/ADR-025-resource-roles-and-binding.md) 補充（2026-10-08），pipeline 宣告的名稱是「資源角色」，實際資源由綁定決定。回答：多個 pipeline 如何互斥或限流地使用同一個外部資源（例如 lemonade server）。
 
 ## 背景
 每次 run 使用獨立 root class loader（[ADR-001](ADR-001-isolated-classloader.md)），run 內部的鎖無法彼此看見。共享資源的存取必須由 class loader 之外、Engine 持有的機制協調。
@@ -15,9 +15,9 @@
 ## 決策
 採用 A（使用者指定）。
 - 資源由管理員在 Engine 定義：名稱與容量（容量 1 即互斥，大於 1 即限流）。資源另有型別：`counter` 只有名稱與容量（即本 ADR 的語意），其他型別對應實際的實體並提供存取端，見 ADR-019；以下取得、等待與釋放的語意適用所有型別。
-- Pipeline 在 metadata 宣告所需資源名稱（可另指定型別，見 ADR-019）。
+- Pipeline 在 metadata 宣告所需資源名稱（可另指定型別，見 ADR-019）。這個名稱是「資源角色」：沒有綁定時就是同名資源（本 ADR 原本的語意），有綁定時由 Engine 解析到綁定的資源（[ADR-025](../../digest-rss/adr/ADR-025-resource-roles-and-binding.md)）；以下「資源」一詞在取得、等待與釋放的語意上都指解析後的實際資源。
 - Run 有獨立的「初始化」階段，位於 pipeline 本體執行之前，在此階段取得所有宣告的資源。
-- 取得是整體的：所有宣告的資源與並行額度同時可用時，run 才一併取得並開始執行；不做部分持有，因此沒有死結，也不會有 run 一邊占著資源一邊等額度。
+- 取得是整體的：所有宣告的資源與並行額度同時可用時，run 才一併取得並開始執行；不做部分持有，因此沒有死結，也不會有 run 一邊占著資源一邊等額度。同一個 run 的多個角色解析到同一個資源時，該資源的容量只取得一次（ADR-025）。
 - 等待者依先進先出順序；有等待逾時，由 Engine 組態設定，pipeline 不能自訂。逾時則 run 失敗並註明原因。
 - 等待中被取消的 run 從等待佇列移除。
 - Run 終止時（成功、失敗、取消、中斷）Engine 釋放該 run 持有的全部資源。

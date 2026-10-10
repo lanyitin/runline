@@ -56,6 +56,10 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.keystore.y
 
 以真實 Docker 驗證：`./gradlew :engine:packagedTest --tests '*DockerKeystoreMountTest*'` 用 `compose.yaml`、`compose.keystore.yaml`、Dockerfile 與以真實 `keytool` 做的金鑰庫建立整組服務：(1) Engine 啟動、`GET /api/v1/secrets` 列出別名；(2) 在容器內寫入金鑰庫目錄失敗，兩個掛載（金鑰庫與密碼 secret）的 `RW` 都是 `false`；(3) 容器環境變數、映像歷史與映像各層（`docker save` 的位元組）都找不到密碼；(4) 在宿主機以副本加更名原子替換金鑰庫後，`POST /api/v1/secrets/reload` 回報新別名；(5) 密碼錯誤時 Engine 容器以非 0 結束，log 含 `wrong_password` 而不含任何密碼。
 
+## 瀏覽器映像（驅動 Chrome 的 pipeline）
+
+為 digest-rss 這類在 Engine 主機上驅動有畫面的 Chrome 的 pipeline（[ADR-022](../digest-rss/adr/ADR-022-unsafe-pipeline-with-local-browser.md)），`Dockerfile` 另有 `browser` 階段，疊加檔 `deploy/docker/compose.browser.yaml` 使用它：真實的 Google Chrome（只有 `linux/amd64`）、Xvfb、init 為 PID 1、私有 CA 根憑證的 JVM 信任、啟動時的渲染器報告；`compose.browser-gpu.yaml` 把 `/dev/dri` 交給容器。`compose.yaml` 指定 `target: engine`，原本的映像與就緒探測都不變，Chrome 不可用不影響就緒。設定項目、驗證步驟與實測見 [瀏覽器部署手冊](../../../deploy/browser.md)；以真實 Docker 驗證：`./gradlew :engine:browserDeploymentTest`（需要 amd64 的 Docker，下載 Chrome，不屬於 `check`）。
+
 ## 已接受的限度
 
 - 單機 Docker 不因行程卡死（存活失敗）而重啟；以監控告警補位。

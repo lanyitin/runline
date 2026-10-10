@@ -55,6 +55,10 @@ Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD
 - 金鑰庫檔案權限 `0644` 時，啟動記錄警告 `The keystore file is readable by other users; restrict it to the service account`。
 - 沒有掛上 drop-in 的預設情形（不設金鑰庫）沒有在本次重新驗證；drop-in 之外沒有改動單元檔。
 
+## 瀏覽器（驅動 Chrome 的 pipeline）
+
+選用的 drop-in `deploy/systemd/runline-engine-browser.conf`（安裝為 `/etc/systemd/system/runline-engine.service.d/browser.conf`）讓 `ExecStart` 經由 `runline-entrypoint`：在服務的 control group 內啟動 Xvfb、建立 JVM 的私有 CA 信任、報告 Chrome 的渲染器，然後啟動 Engine；`CacheDirectory=runline` 提供可寫且可執行的 `java.io.tmpdir`（SQLite 驅動解開原生程式庫的地方）。主機要有 Google Chrome、Xvfb、`curl`、`procps`；GPU 需把服務帳號加進 `/dev/dri` 的群組。前置條件、變數、遺留行程的處理與目標主機上的驗證步驟見 [瀏覽器部署手冊](../../../deploy/browser.md)。這個 drop-in 在帶 systemd 的容器內實測過（啟動與就緒、Xvfb 隨服務停止、私有 CA 信任、SQLite 連續 10 個 run、`noexec` 的失敗與修正），**沒有在真實的 systemd 主機上實測**，細節與限度見手冊。
+
 ## 已接受的限度
 
 - 沒有選用的存活檢查時，systemd 的重啟只來自行程結束，與單機 Docker 相同；行程卡死由監控告警處理。

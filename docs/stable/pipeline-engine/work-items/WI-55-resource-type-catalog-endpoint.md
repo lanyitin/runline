@@ -13,7 +13,7 @@ Console 的資源表單目前內含端點目錄、請求參數清單與資料庫
   - 封閉的型別集合。
   - `openai-compatible` 端點目錄的每個條目：識別名稱、群組、方法、路徑樣板、請求與回應種類、是否可串流、是否預設啟用、是否有狀態。
   - `openai-compatible` 可設定預設、鎖定或上限的請求參數：名稱、值的種類、是否可設上限。
-  - `jdbc-pool` 每個資料庫設定檔的種類，以及其允許的連線屬性與值規則。
+  - `jdbc-pool` 每個資料庫設定檔的種類，以及其允許的連線屬性與值規則（另有各種類接受的位址欄位 `fields`，隨 [WI-1003](../../digest-rss/work-items/WI-1003-sqlite-database-kind.md) 加入）。
 - 開發人員取得 403，沒有 token 取得 401。
 - 回應不含任何資源的設定、使用量、機密別名或機密值，也不含 Engine 組態值。以含獨特標記的真實 PKCS12 金鑰庫驗證：標記不出現在回應中。
 - **與驗證一致**：
@@ -54,7 +54,7 @@ Console 的資源表單目前內含端點目錄、請求參數清單與資料庫
 
 **實作時的決定（超出條文之處，供審閱）。**
 
-- **回應結構**：`{"types": [{"type": ..., <型別的成員>}]}`；`openai-compatible` 為 `endpoints[]`（`id`、`group`、`method`、`path`、`request`：`none`／`json`／`multipart`、`response`：`json`／`binary`、`streams`、`defaultEnabled`、`stateful`）與 `requestParameters[]`（`name`、`kind`：`number`／`text`／`textOrList`／`object`、`ceiling`）；`jdbc-pool` 為 `databases[]`（`kind`、`properties[]`：`name`、`rule` 與其成員 `maxLength`／`values`／`pattern`）；`counter`、`file` 只有 `type`。細節見 08-api。
+- **回應結構**：`{"types": [{"type": ..., <型別的成員>}]}`；`openai-compatible` 為 `endpoints[]`（`id`、`group`、`method`、`path`、`request`：`none`／`json`／`multipart`、`response`：`json`／`binary`、`streams`、`defaultEnabled`、`stateful`）與 `requestParameters[]`（`name`、`kind`：`number`／`text`／`textOrList`／`object`、`ceiling`）；`jdbc-pool` 為 `databases[]`（`kind`、`fields[]`（WI-1003 加入）、`properties[]`：`name`、`rule` 與其成員 `maxLength`／`values`／`pattern`）；`counter`、`file` 只有 `type`。細節見 08-api。
 - **群組識別**：沿用 ADR-019 目錄表的群組，以英文識別名稱表示（`chat`、`completions`、`embeddings`、`models`、`responses`、`moderations`、`rerank`（含 `rerank` 與 `reranking`）、`images`、`audio`、`files`、`batches`）。Console 原樣顯示群組名稱，不另設翻譯，以免成為群組清單的複本。
 - **「有狀態」的範圍**：標為 `stateful` 的是會建立、取消或刪除服務端保存之物的條目：`responses.create`、`responses.delete`、`responses.cancel`、`files.create`、`files.delete`、`batches.create`、`batches.cancel`。`responses.create` 起初未標示（它主要是生成），因 OpenAI 相容服務預設會保存建立的回應，由 [WI-58](WI-58-responses-create-stateful.md) 改標為有狀態。這些條目原本就都不預設啟用，以測試保證「有狀態者不預設啟用」。
 - **`streams`**：事件串流的條目（`chat.completions`、`completions`、`responses.create`）與以位元組塊拉取的 `audio.speech` 都為 `true`；回應種類 `binary` 可分辨後者。

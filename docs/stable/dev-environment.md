@@ -33,6 +33,10 @@ colima 的 socket 不在 Testcontainers 預設尋找的位置，需要在執行�
 - 可由 shell 設定檔、IDE 執行組態，或其他環境管理工具提供；無論來源為何，必須讓執行 Gradle 的程序繼承到。
 - 環境變數未生效時，資料庫測試失敗於 Testcontainers 尋找 Docker 的階段，與專案程式碼無關。
 
+## 本機 Engine 的資源根目錄
+
+`dev/dev.sh` 與 `dev/verify-console-security.sh` 不需要事先設定任何環境變數。Engine 必填的 `RUNLINE_RESOURCE_ROOT` 預設為 `dev/.runline/resources`（專案內、被 `.gitignore` 忽略，`dev/dev.sh clean` 會刪除）；先匯出 `RUNLINE_RESOURCE_ROOT` 則以你的值為準。Engine 本身沒有預設值，這只是開發腳本的做法。
+
 ## 待確認問題
 
 - 是否在 devcontainer 內提供統一的容器執行環境，使本機不再需要個別設定。影響：開發環境說明可簡化。

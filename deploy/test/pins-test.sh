@@ -1,5 +1,5 @@
 #!/bin/bash
-# Checks of deploy/check-pins (WI-1102, ADR-029): it passes on the repository as it is, and it fails,
+# Checks of deploy/check-pins (WI-1102, ADR-032): it passes on the repository as it is, and it fails,
 # naming the file, on each kind of reference that is not pinned by hash. Each failing case is a copy of
 # the repository files with one pinned reference put back to a movable one. No Docker daemon needed.
 #

@@ -68,7 +68,7 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 
 驗證：`deploy/test/publish-test.sh`（不需 daemon）。其餘在 Colima（Rosetta）與本機 `registry:2` 上實測：從乾淨 clone 建置並推送，刪除本機映像後在只有範本、`.env` 與憑證檔的目錄 `docker compose up -d` 拉取並啟動，engine 就緒、`runline-browser-probe` 執行完成、在映像上跑一個 pipeline 確認 Engine 的類別對 run 不可見。**未實測**：amd64 原生的筆電、真實的 Forgejo registry（含認證）、GPU 疊加檔在有 `/dev/dri` 的主機。
 
-### 更新固定的雜湊（WI-1102、ADR-029）
+### 更新固定的雜湊（WI-1102、ADR-032）
 
 建置輸入都以內容雜湊引用，標籤只是旁邊給人讀的註解；上游重新發佈同一標籤不影響建置。代價是安全修補不會自動進來，由維運者決定何時升級。不使用自動更新工具。每個雜湊只定義一處：
 
@@ -78,7 +78,7 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 | Engine 基底映像 `eclipse-temurin:25-jre` | `docker/Dockerfile` 的 `FROM`（`deploy/publish-image` 的架構檢查讀同一行，所以檢查與建置是同一個映像） | 多平台索引的 `sha256:` |
 | PostgreSQL `postgres:17-alpine` | `docker/compose.yaml` 與 `docker/compose.registry.yaml` 的 `image:`。後者要單獨複製到部署端，所以兩個檔案各一行；`check-pins` 要求兩處相同 | 多平台索引的 `sha256:` |
 
-Chrome 不在其中：它以 `CHROME_VERSION` 固定版本號，從 Google 的網址下載，不驗證內容雜湊（ADR-029 已接受的限度）。
+Chrome 不在其中：它以 `CHROME_VERSION` 固定版本號，從 Google 的網址下載，不驗證內容雜湊（ADR-032 已接受的限度）。
 
 升級一個輸入時：
 

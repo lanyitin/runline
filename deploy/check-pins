@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fails when a build input is named by a movable reference instead of a content hash
-# (docs/stable/homelab-arr/work-items/WI-1102-pin-build-inputs.md, ADR-029). It reads:
+# (docs/stable/homelab-arr/work-items/WI-1102-pin-build-inputs.md, ADR-032). It reads:
 #
 #   .forgejo/workflows/*.yaml   every `uses:` of an action: must end in @<40-hex commit id>
 #   deploy/docker/Dockerfile    every FROM of an image: must carry @sha256:<64-hex> (FROM of an earlier

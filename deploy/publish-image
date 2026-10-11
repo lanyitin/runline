@@ -68,7 +68,7 @@ docker info >/dev/null 2>&1 || fail "the Docker daemon cannot be reached (is Doc
 
 # An amd64 container must run here. Only a run proves it; the architecture of the host does not.
 # The base image is the pinned one from the Dockerfile (name, tag and digest as written there), the same
-# reference docker build uses: the check runs on exactly what is built (ADR-029).
+# reference docker build uses: the check runs on exactly what is built (ADR-032).
 base="$(sed -n 's/^FROM \(eclipse-temurin[^ ]*\) AS engine$/\1/p' deploy/docker/Dockerfile)"
 [ -n "$base" ] || fail "cannot find the base image in deploy/docker/Dockerfile"
 # The base image is fetched first, apart from the probe: when it is not local Docker prints its download

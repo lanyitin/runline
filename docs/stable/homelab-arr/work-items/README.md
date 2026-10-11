@@ -4,8 +4,8 @@
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| [WI-1100](WI-1100-publishable-image.md) | 在筆電以單一入口交叉建置可推送到 registry 的 amd64 瀏覽器版 Engine 映像檔，並提供不在本機建置的 Compose 範本 | 無 | 未開始 |
-| [WI-1101](WI-1101-forgejo-action.md) | 推送 `v*` tag 時由 Forgejo Action 建置並推送映像檔，不自動上線 | WI-1100；runner 條件確認 | 未開始（待 runner 條件確認後才派工） |
-| [WI-1102](WI-1102-pin-build-inputs.md) | action 與容器映像以內容雜湊固定，附自動檢查與更新說明（[ADR-032](../adr/ADR-032-pin-build-inputs-by-hash.md)） | WI-1100、WI-1101 | 未開始 |
+| [WI-1100](WI-1100-publishable-image.md) | 在筆電以單一入口交叉建置可推送到 registry 的 amd64 瀏覽器版 Engine 映像檔，並提供不在本機建置的 Compose 範本 | 無 | 已完成（已部署到 arr 運作；乾淨 runner 暴露的架構檢查缺陷已修正） |
+| [WI-1101](WI-1101-forgejo-action.md) | 推送 `v*` tag 時由 Forgejo Action 建置並推送映像檔，不自動上線 | WI-1100；runner 條件確認 | 已完成（真實 runner 以 `v*` tag 建置並推送成功；runner 標籤須提供 Docker CLI） |
+| [WI-1102](WI-1102-pin-build-inputs.md) | action 與容器映像以內容雜湊固定，附自動檢查與更新說明（[ADR-032](../adr/ADR-032-pin-build-inputs-by-hash.md)） | WI-1100、WI-1101 | 已完成（固定後的 Action 在真實 runner 建置並已部署；PostgreSQL 雜湊在兩個範本各一處，由自動檢查保證一致） |
 
 arr 側的 Terraform、Traefik 路由、DNS 與憑證不是 runline 儲存庫的工作項，由 homelab-deployer 在 homelab 儲存庫執行；它需要的輸入是 WI-1100 產出的映像檔名稱與 tag、服務的組態清單、卷的位置與探測方式。

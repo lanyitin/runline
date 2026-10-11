@@ -1,0 +1,30 @@
+# The Engine trusts the private CA of the OpenID Connect provider (deploy/authentik.md). An overlay
+# on compose.yaml and compose.oidc.yaml:
+#
+#   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.oidc.yaml \
+#       -f deploy/docker/compose.oidc-ca.yaml up -d
+#
+# It is the mechanism of the browser image (deploy/browser.md, RUNLINE_TRUSTED_CA_DIR): a JVM
+# truststore with the JDK's own certificates plus the operator's, made by deploy/bin/runline-build-truststore
+# and given to the JVM with -Djavax.net.ssl.trustStore. The plain image has no entrypoint script to
+# build it at each start, so the file is made beforehand (the manual shows the command) and mounted
+# here, read-only, as a directory. Its password is that of the JDK's own cacerts; it protects
+# public certificates, nothing secret. The browser image does not need this file: it takes
+# RUNLINE_TRUSTED_CA_DIR (compose.browser.yaml).
+#
+# The directory holding truststore.p12 is TRUSTSTORE_HOST_DIR in .env (default ./truststore beside
+# this file); remake the file when the JDK of the image is updated (a new image brings new public
+# certificates), or when the CA changes.
+
+services:
+  engine:
+    environment:
+      JDK_JAVA_OPTIONS: >-
+        -Djavax.net.ssl.trustStore=/etc/runline/truststore/truststore.p12
+        -Djavax.net.ssl.trustStoreType=PKCS12
+        -Djavax.net.ssl.trustStorePassword=changeit
+    volumes:
+      - type: bind
+        source: ${TRUSTSTORE_HOST_DIR:-./truststore}
+        target: /etc/runline/truststore
+        read_only: true

@@ -73,6 +73,39 @@ describe('the pages of a developer', () => {
 
 });
 
+describe('the users page', () => {
+  const navHrefs = (view: HTMLElement) => [...view.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
+
+  test('is in the navigation of an admin when the Engine has login with a provider, and is the page', async () => {
+    const view = await withApp({ identity: admin, path: '/users', oidc: {} });
+
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toBe('Users'));
+    expect(navHrefs(view)).toContain('/users');
+    expect(view.querySelector('nav a[href="/users"]')!.getAttribute('aria-current')).toBe('page');
+  });
+
+  test('does not exist when the Engine has no login with a provider: not in the navigation, not found by address', async () => {
+    const view = await withApp({ identity: admin, path: '/users' });
+
+    expect(view.querySelector('main h1')!.textContent).toBe('Page not found');
+    expect(navHrefs(view)).not.toContain('/users');
+  });
+
+  test('is not in the navigation of a developer, and the address is turned away as an admin page', async () => {
+    const view = await withApp({ identity: developer, path: '/users', oidc: {} });
+
+    expect(navHrefs(view)).not.toContain('/users');
+    expect(view.querySelector('main h1')!.textContent).toBe('Admins only');
+  });
+
+  test('is there for an admin who signed in with the provider (the cookie, not a token)', async () => {
+    const view = await withApp({ path: '/users', oidc: { person: { name: 'dana', role: 'admin' } } });
+
+    await vi.waitFor(() => expect(view.querySelector('main h1')!.textContent).toBe('Users'));
+    expect(navHrefs(view)).toContain('/users');
+  });
+});
+
 describe('the pages of an admin', () => {
   test.each([
     ['/triggers', 'Triggers'],

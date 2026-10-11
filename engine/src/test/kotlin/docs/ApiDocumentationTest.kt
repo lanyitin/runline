@@ -24,6 +24,19 @@ import kotlin.test.*
 class ApiDocumentationTest {
   private data class Endpoint(val method: String, val path: String, val auth: String)
 
+  /**
+   * The settings that switch OIDC login on: the sign-in routes exist only then (ADR-029), and the
+   * document describes them all. Nothing here is contacted at start.
+   */
+  private val oidcOn =
+      mapOf(
+          "oidc.issuer" to "https://auth.example.test/application/o/runline/",
+          "oidc.clientId" to "runline",
+          "oidc.clientSecret" to "client-secret-value",
+          "oidc.publicBaseUrl" to "https://runline.example.test",
+          "session.encryptionKey" to "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      )
+
   private val documentText = Files.readString(Path.of(System.getProperty("runline.apiDoc")))
 
   private val documented: List<Endpoint> =
@@ -62,7 +75,7 @@ class ApiDocumentationTest {
 
   @Test
   fun `the documented endpoints are exactly the registered routes`() = testApplication {
-    configureEngine()
+    configureEngine(overrides = oidcOn)
     startApplication()
 
     val actual = registered().map { it.method to it.path }.toSet()
@@ -84,7 +97,7 @@ class ApiDocumentationTest {
   @Test
   fun `the Console is one documented mount point and nothing else is registered outside api and openapi`() =
       testApplication {
-        configureEngine()
+        configureEngine(overrides = oidcOn)
         startApplication()
 
         val outside =
@@ -103,7 +116,7 @@ class ApiDocumentationTest {
 
   @Test
   fun `each documented endpoint states the authentication its route requires`() = testApplication {
-    configureEngine()
+    configureEngine(overrides = oidcOn)
     startApplication()
 
     for (route in registered()) {
@@ -118,7 +131,7 @@ class ApiDocumentationTest {
   @Test
   fun `a Bearer endpoint answers 401 without a token and an administrator endpoint 403 to a developer`() =
       testApplication {
-        configureEngine()
+        configureEngine(overrides = oidcOn)
         startApplication()
         val rest = createClient { expectSuccess = false }
 
@@ -152,7 +165,7 @@ class ApiDocumentationTest {
 
   @Test
   fun `the webhook entry is not behind a Bearer token and says so`() = testApplication {
-    configureEngine()
+    configureEngine(overrides = oidcOn)
     startApplication()
     val webhook = documented.single { it.path == "/api/v1/webhooks/{name}" }
 

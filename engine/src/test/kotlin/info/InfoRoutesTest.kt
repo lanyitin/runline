@@ -113,9 +113,10 @@ class InfoRoutesTest {
     assertTrue(startedAt <= Instant.now(), "$startedAt")
     assertTrue(body["uptimeSeconds"]!!.jsonPrimitive.long >= 0)
     assertEquals(
-        setOf("name", "role"),
+        setOf("name", "role", "source"),
         body["caller"]!!.jsonObject.keys,
     )
+    assertEquals("token", body["caller"]!!.jsonObject["source"]!!.jsonPrimitive.content)
     assertEquals("alice", body["caller"]!!.jsonObject["name"]!!.jsonPrimitive.content)
     assertEquals("developer", body["caller"]!!.jsonObject["role"]!!.jsonPrimitive.content)
   }
@@ -165,7 +166,13 @@ class InfoRoutesTest {
         // name happens to be the system user's (`root` in a development container) is not taken
         // for the system user's name leaking.
         assertEquals(
-            JsonObject(mapOf("name" to JsonPrimitive("root"), "role" to JsonPrimitive("admin"))),
+            JsonObject(
+                mapOf(
+                    "name" to JsonPrimitive("root"),
+                    "role" to JsonPrimitive("admin"),
+                    "source" to JsonPrimitive("token"),
+                )
+            ),
             system["caller"],
         )
         val bodies =

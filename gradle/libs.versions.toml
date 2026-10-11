@@ -5,6 +5,7 @@ kotlinx-serialization = "1.11.0"
 kotlin = "2.4.0"
 ktfmt-gradle = "0.27.0"
 logback = "1.5.37"
+nimbus-oidc = "11.38.2"
 opentelemetry = "1.63.0"
 opentelemetry-ktor = "2.29.0-alpha"
 opentelemetry-semconv = "1.42.0"
@@ -18,6 +19,7 @@ flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+nimbus-oidc = { module = "com.nimbusds:oauth2-oidc-sdk", version.ref = "nimbus-oidc" }
 opentelemetry-exporterOtlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
 opentelemetry-ktorInstrumentation = { module = "io.opentelemetry.instrumentation:opentelemetry-ktor-3.0", version.ref = "opentelemetry-ktor" }
 opentelemetry-sdkTesting = { module = "io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }

@@ -10,6 +10,8 @@
 
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { FakeOidc, type FakeOidcOptions } from './fake-oidc';
+import { FakeUsers } from './fake-users';
 import { FakeBackend, type ApiAnswer, type FakeBackendOptions } from './fake-backend';
 
 export interface FakeEngineInfo {
@@ -36,6 +38,8 @@ export interface FakeEngineOptions extends FakeBackendOptions {
   /** Who may call `GET /api/v1/system`, by token. */
   callers?: FakeCaller[];
   system?: Partial<FakeSystemDetails>;
+  /** Login with an OpenID Connect provider is on (08-api.md): the endpoints exist, as on the Engine. */
+  oidc?: FakeOidcOptions;
 }
 
 /** An answer that is given instead of the real one, a number of times: the Engine failing. */
@@ -80,6 +84,8 @@ export class FakeEngine {
   requests = 0;
   /** The paths asked, in order, with the Authorization and X-Session-Code header each had (or null). */
   readonly log: Array<{ path: string; authorization: string | null; sessionCode: string | null }> = [];
+  /** The `X-CSRF-Token` each request carried (or null), in the order of `log`. */
+  readonly csrfTokens: Array<string | null> = [];
   /** What was asked, in order: the method, the path and the body as text (empty for none). */
   readonly received: Array<{ method: string; path: string; body: string }> = [];
   /** Who is known by token; a token removed from here is refused from then on (an expired session). */
@@ -88,6 +94,10 @@ export class FakeEngine {
   readonly backend: FakeBackend;
   /** Failures to give: the first fault that matches a request answers it. */
   readonly faults: FakeFault[] = [];
+  /** The sign-in with a provider, when the Engine has it on; null when it is off. */
+  oidc: FakeOidc | null = null;
+  /** The user administration, when the Engine has login on. */
+  users: FakeUsers | null = null;
 
   private constructor(
     private readonly server: Server,
@@ -104,8 +114,13 @@ export class FakeEngine {
     const server = createServer(async (request, response) => {
       // The tests run the Console in a page of another origin than the Fake (the real Engine is
       // the same origin as the Console and has no CORS): the browser engine of the tests asks.
-      response.setHeader('Access-Control-Allow-Origin', '*');
-      response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Session-Code');
+      // A call that carries cookies (a session of a provider) may only be answered to the origin that
+      // asked, with credentials allowed: the browser engine of the tests insists on it.
+      const asking = request.headers.origin;
+      response.setHeader('Access-Control-Allow-Origin', asking ?? '*');
+      if (asking) response.setHeader('Access-Control-Allow-Credentials', 'true');
+      response.setHeader('Vary', 'Origin');
+      response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Session-Code, X-CSRF-Token');
       response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE');
       if (request.method === 'OPTIONS') {
         // The question of the browser engine, not a request of the Console: not counted.
@@ -122,6 +137,8 @@ export class FakeEngine {
         authorization: request.headers.authorization ?? null,
         sessionCode: typeof sessionCode === 'string' ? sessionCode : null,
       });
+      const csrf = request.headers['x-csrf-token'];
+      engine.csrfTokens.push(typeof csrf === 'string' ? csrf : null);
       const body = await readBody(request);
       engine.received.push({ method: request.method ?? 'GET', path: request.url ?? '', body: body.toString('utf8') });
 
@@ -163,14 +180,37 @@ export class FakeEngine {
       }
       switch (engine.mode) {
         case 'normal': {
+          const header = (name: string) => {
+            const value = request.headers[name];
+            return typeof value === 'string' ? value : undefined;
+          };
+          if (path === '/api/v1/auth/methods' && request.method === 'GET') {
+            return reply(
+              engine.oidc?.methods() ?? {
+                status: 200,
+                json: { oidc: { enabled: false } },
+                headers: { 'Cache-Control': 'no-store' },
+              },
+            );
+          }
+          const auth = engine.oidc?.handle(
+            request.method ?? 'GET',
+            path,
+            url.searchParams,
+            header('cookie'),
+            header('origin'),
+            header('x-csrf-token'),
+          );
+          if (auth) return reply(auth);
+          if (path.startsWith('/api/v1/auth/')) {
+            response.writeHead(404, { 'Content-Length': 0 });
+            response.end();
+            return;
+          }
           if (isInfo && request.method === 'GET') return json(200, JSON.stringify(info));
           // The webhook entrance has no token: the secret of the trigger is the credential.
           const hook = request.method === 'POST' ? path.match(/^\/api\/v1\/webhooks\/([^/]+)$/) : null;
           if (hook) {
-            const header = (name: string) => {
-              const value = request.headers[name];
-              return typeof value === 'string' ? value : undefined;
-            };
             return reply(
               engine.backend.triggers.webhook(
                 decodeURIComponent(hook[1]),
@@ -186,9 +226,31 @@ export class FakeEngine {
           const token =
             /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1] ??
             (typeof sessionCode === 'string' ? sessionCode : undefined);
-          const caller = engine.callers.find((c) => c.token === token);
+          // A request without an Authorization header is the session's, if it has a cookie that is
+          // known (08-api.md, dual authentication); a change by a session passes the CSRF check.
+          const person =
+            request.headers.authorization === undefined && token === undefined
+              ? engine.oidc?.find(header('cookie'))
+              : null;
+          if (person) {
+            const refused = engine.oidc!.refusal(
+              request.method ?? 'GET',
+              header('cookie'),
+              header('origin'),
+              header('x-csrf-token'),
+            );
+            if (refused) return json(403, JSON.stringify({ error: refused, message: 'Refused.' }));
+          }
+          const caller = person
+            ? { name: person.name, role: person.role }
+            : engine.callers.find((c) => c.token === token);
           if (!caller) {
-            if (isInfo || isSystem || engine.backend.handles(request.method ?? '', path)) {
+            if (
+              isInfo ||
+              isSystem ||
+              engine.users?.handles(request.method ?? '', path) ||
+              engine.backend.handles(request.method ?? '', path)
+            ) {
               response.writeHead(401, {
                 'WWW-Authenticate': 'Bearer realm=runline',
                 'Content-Length': 0,
@@ -206,17 +268,20 @@ export class FakeEngine {
               JSON.stringify({
                 ...info,
                 ...system,
-                caller: { name: caller.name, role: caller.role },
+                caller: { name: caller.name, role: caller.role, source: person ? 'oidc' : 'token' },
               }),
             );
           }
-          const answered = engine.backend.handle({
+          const apiRequest = {
             method: request.method ?? 'GET',
             path,
             query: url.searchParams,
             caller: { name: caller.name, role: caller.role },
             body,
-          });
+          };
+          const answered =
+            engine.users?.handle(apiRequest.method, path, apiRequest) ??
+            engine.backend.handle(apiRequest);
           if (!answered) {
             response.writeHead(404, { 'Content-Length': 0 });
             response.end();
@@ -243,6 +308,10 @@ export class FakeEngine {
     const { port } = server.address() as AddressInfo;
     engine = new FakeEngine(server, `http://127.0.0.1:${port}`, backend);
     engine.callers = [...(options.callers ?? [])];
+    if (options.oidc) {
+      engine.oidc = new FakeOidc(() => engine.url, options.oidc);
+      engine.users = new FakeUsers(engine.oidc, () => engine.callers.map((c) => c.name));
+    }
     return engine;
   }
 

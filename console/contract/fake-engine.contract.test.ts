@@ -1,6 +1,8 @@
-import { afterAll, beforeAll } from 'vitest';
+import { afterAll, beforeAll, describe } from 'vitest';
 import { FakeEngine } from '../test-support/fake-engine';
 import { demoJars } from '../test-support/fake-jars';
+import { describeAuthMethodsContract, describeOidcSessionContract } from './auth-contract';
+import { describeUsersContract } from './users-contract';
 import { describeAdminContract } from './admin-contract';
 import { describeBindingsContract } from './bindings-contract';
 import { describeInfoContract } from './info-contract';
@@ -57,4 +59,43 @@ describeResourceTypesContract('the Fake Engine', {
   callers: () => callers,
   jars: demoJars,
   uploadLimitBytes,
+});
+
+// The Fake with login on and the Fake with login off are two servers: the endpoints exist only on
+// the first, as on the Engine.
+describeAuthMethodsContract('the Fake Engine without OIDC', {
+  baseUrl: () => engine.url,
+  oidcEnabled: false,
+});
+
+describe('the Fake Engine with OIDC', () => {
+  let withOidc: FakeEngine;
+  beforeAll(async () => {
+    withOidc = await FakeEngine.start(
+      { version: '0.4.2', commitHash: 'a3f9c1e2d93e4f5a6b7c8d9e0f1a2b3c4d5e6f70', dirty: false },
+      { oidc: {}, callers },
+    );
+  });
+  afterAll(() => withOidc.stop());
+  describeAuthMethodsContract('the Fake Engine with OIDC', {
+    baseUrl: () => withOidc.url,
+    oidcEnabled: true,
+  });
+  describeOidcSessionContract('the Fake Engine with OIDC', {
+    baseUrl: () => withOidc.url,
+    origin: () => withOidc.url,
+    signIn: async () => {
+      const name = `person-${Math.random().toString(36).slice(2, 8)}`;
+      return { cookie: withOidc.oidc!.signIn({ name, role: 'developer' }), name, role: 'developer' };
+    },
+  });
+  describeUsersContract('the Fake Engine with OIDC', {
+    baseUrl: () => withOidc.url,
+    origin: () => withOidc.url,
+    callers: () => callers,
+    signIn: async (role) => {
+      const name = `person-${Math.random().toString(36).slice(2, 8)}`;
+      return { cookie: withOidc.oidc!.signIn({ name, role }), name, role };
+    },
+  });
 });

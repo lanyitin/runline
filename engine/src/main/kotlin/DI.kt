@@ -7,7 +7,11 @@ import dev.lawlan.runline.accessors.jdbc.SqliteProfile
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
 import dev.lawlan.runline.engine.allowlist.*
 import dev.lawlan.runline.engine.artifact.*
+import dev.lawlan.runline.engine.auth.ApiIdentity
+import dev.lawlan.runline.engine.auth.AuthSource
 import dev.lawlan.runline.engine.auth.ConfiguredTokenAuthenticator
+import dev.lawlan.runline.engine.auth.SessionIdentities
+import dev.lawlan.runline.engine.auth.SessionIdentity
 import dev.lawlan.runline.engine.auth.TokenAuthenticator
 import dev.lawlan.runline.engine.config.EngineConfig
 import dev.lawlan.runline.engine.config.RunRuntime
@@ -25,6 +29,7 @@ import dev.lawlan.runline.engine.health.ShutdownCheck
 import dev.lawlan.runline.engine.health.StartupCheck
 import dev.lawlan.runline.engine.info.BuildInfo
 import dev.lawlan.runline.engine.info.SystemStatus
+import dev.lawlan.runline.engine.oidc.*
 import dev.lawlan.runline.engine.resource.*
 import dev.lawlan.runline.engine.retention.*
 import dev.lawlan.runline.engine.run.*
@@ -38,6 +43,7 @@ import io.opentelemetry.api.OpenTelemetry
 import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
+import java.util.Base64
 import javax.sql.DataSource
 
 /** The database check gives up before the platform's probe does (ADR-018: 3 seconds). */
@@ -45,6 +51,10 @@ private val PROBE_DATABASE_TIMEOUT = Duration.ofSeconds(2)
 
 /** How long the answer of the database check is remembered (ADR-018: seconds). */
 private val PROBE_DATABASE_CACHE = Duration.ofSeconds(2)
+
+/** The settings of login; only asked for by what exists when login is on. */
+private fun oidcSettings(config: EngineConfig) =
+    checkNotNull(config.oidc) { "OIDC login is not configured" }
 
 /**
  * Wires the Engine. Everything an implementation needs from the outside (database, tokens, allow
@@ -67,6 +77,70 @@ fun Application.configureDependencyInjection() {
     }
     provide<ConsoleAssets> { ClasspathConsoleAssets(CONSOLE_RESOURCE_ROOT) }
     provide<TokenAuthenticator> { ConfiguredTokenAuthenticator(resolve<EngineConfig>().tokens) }
+    provide<UserNames> { PostgresUserNames(resolve<DataSource>()) }
+    // Signing in with an OpenID Connect provider (WI-1200). Declared lazily like the rest: with
+    // login off nothing of this is ever made.
+    provide<AuthTelemetry> { AuthTelemetry(resolve<OpenTelemetry>()) }
+    provide<LoginAttemptStore> { PostgresLoginAttemptStore(resolve<DataSource>()) }
+    provide<SessionStore> { PostgresSessionStore(resolve<DataSource>()) }
+    provide<OidcProvider> { NimbusOidcProvider(oidcSettings(resolve<EngineConfig>())) }
+    provide<SessionCipher> {
+      SessionCipher(
+          Base64.getDecoder()
+              .decode(oidcSettings(resolve<EngineConfig>()).session.encryptionKey.reveal())
+      )
+    }
+    provide<LoginService> {
+      val config = resolve<EngineConfig>()
+      LoginService(
+          resolve<OidcProvider>(),
+          resolve<LoginAttemptStore>(),
+          resolve<SessionStore>(),
+          resolve<SessionCipher>(),
+          oidcSettings(config),
+          config.tokens.map { it.name }.toSet(),
+          resolve<Clock>(),
+          resolve<AuthTelemetry>(),
+      )
+    }
+    provide<SessionIdentities> {
+      val sessions = resolve<SessionService>()
+      SessionIdentities { id ->
+        sessions.find(id)?.let {
+          SessionIdentity(ApiIdentity(it.name, it.role, AuthSource.OIDC), it.csrfToken)
+        }
+      }
+    }
+    provide<UserAdminStore> { PostgresUserAdminStore(resolve<DataSource>()) }
+    provide<UserAdmin> {
+      val config = resolve<EngineConfig>()
+      UserAdmin(
+          resolve<UserAdminStore>(),
+          config.tokens.map { it.name }.toSet(),
+          oidcSettings(config).session.idle,
+          resolve<Clock>(),
+          resolve<AuthTelemetry>(),
+      )
+    }
+    provide<SessionRevalidator> {
+      SessionRevalidator(
+          resolve<SessionStore>(),
+          resolve<OidcProvider>(),
+          resolve<SessionCipher>(),
+          oidcSettings(resolve<EngineConfig>()),
+          resolve<Clock>(),
+          resolve<AuthTelemetry>(),
+      )
+    }
+    provide<SessionService> {
+      SessionService(
+          resolve<SessionStore>(),
+          oidcSettings(resolve<EngineConfig>()).session,
+          resolve<Clock>(),
+          resolve<AuthTelemetry>(),
+          resolve<SessionRevalidator>(),
+      )
+    }
     provide<AllowListStore> { PostgresAllowListStore(resolve<DataSource>()) }
     provide<AllowListProvider> { DatabaseAllowListProvider(resolve<AllowListStore>()) }
     provide<AllowListTelemetry> { AllowListTelemetry(resolve<OpenTelemetry>()) }

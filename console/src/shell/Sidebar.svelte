@@ -13,8 +13,8 @@
   }
   let { role }: Props = $props();
 
-  const { i18n } = useApp();
-  const groups = $derived(navGroups(role));
+  const { i18n, session } = useApp();
+  const groups = $derived(navGroups(role, { oidc: session.oidc !== null }));
 </script>
 
 <aside class="sidebar">

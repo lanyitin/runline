@@ -10,6 +10,7 @@ export type RouteId =
   | 'triggers'
   | 'allowlist'
   | 'resources'
+  | 'users'
   | 'engine'
   | 'pipeline'
   | 'runNew'
@@ -32,6 +33,11 @@ export interface AppRoute {
   /** Shown to admins only: the navigation hides it from developers, the shell refuses the path. */
   adminOnly: boolean;
   /**
+   * Exists only when the Engine has login with a provider (the user administration does not
+   * otherwise): without it the navigation does not list it and the path is no page.
+   */
+  needsOidc: boolean;
+  /**
    * Whether the navigation lists it. The page of one thing (a pipeline, a run) is reached from its
    * list, not from the navigation, and belongs to the group of the list.
    */
@@ -50,31 +56,33 @@ export interface MatchedRoute extends AppRoute {
 // would not get the entry page, so a name that pipelines may put a dot in (a pipeline name) is
 // never a segment of a path: it is in the query.
 export const ROUTES: readonly AppRoute[] = [
-  { id: 'overview', path: '/', group: 'workspace', adminOnly: false, nav: true, parent: null },
-  { id: 'pipelines', path: '/pipelines', group: 'workspace', adminOnly: false, nav: true, parent: null },
-  { id: 'runs', path: '/runs', group: 'workspace', adminOnly: false, nav: true, parent: null },
-  { id: 'upload', path: '/upload', group: 'workspace', adminOnly: false, nav: true, parent: null },
+  { id: 'overview', path: '/', group: 'workspace', adminOnly: false, needsOidc: false, nav: true, parent: null },
+  { id: 'pipelines', path: '/pipelines', group: 'workspace', adminOnly: false, needsOidc: false, nav: true, parent: null },
+  { id: 'runs', path: '/runs', group: 'workspace', adminOnly: false, needsOidc: false, nav: true, parent: null },
+  { id: 'upload', path: '/upload', group: 'workspace', adminOnly: false, needsOidc: false, nav: true, parent: null },
   // Open to developers: GET /api/v1/system, its data, is for developers and above.
-  { id: 'engine', path: '/engine', group: 'workspace', adminOnly: false, nav: true, parent: null },
-  { id: 'triggers', path: '/triggers', group: 'automation', adminOnly: true, nav: true, parent: null },
-  { id: 'allowlist', path: '/allowlist', group: 'admin', adminOnly: true, nav: true, parent: null },
-  { id: 'resources', path: '/resources', group: 'admin', adminOnly: true, nav: true, parent: null },
+  { id: 'engine', path: '/engine', group: 'workspace', adminOnly: false, needsOidc: false, nav: true, parent: null },
+  { id: 'triggers', path: '/triggers', group: 'automation', adminOnly: true, needsOidc: false, nav: true, parent: null },
+  { id: 'allowlist', path: '/allowlist', group: 'admin', adminOnly: true, needsOidc: false, nav: true, parent: null },
+  { id: 'resources', path: '/resources', group: 'admin', adminOnly: true, needsOidc: false, nav: true, parent: null },
+  { id: 'users', path: '/users', group: 'admin', adminOnly: true, needsOidc: true, nav: true, parent: null },
   {
     id: 'pipeline',
     path: '/pipelines/:contentHash',
     group: 'workspace',
     adminOnly: false,
+    needsOidc: false,
     nav: false,
     parent: 'pipelines',
   },
   // Before `run`: "new" is no run id.
-  { id: 'runNew', path: '/runs/new', group: 'workspace', adminOnly: false, nav: false, parent: 'runs' },
-  { id: 'run', path: '/runs/:runId', group: 'workspace', adminOnly: false, nav: false, parent: 'runs' },
+  { id: 'runNew', path: '/runs/new', group: 'workspace', adminOnly: false, needsOidc: false, nav: false, parent: 'runs' },
+  { id: 'run', path: '/runs/:runId', group: 'workspace', adminOnly: false, needsOidc: false, nav: false, parent: 'runs' },
   // The name of a trigger may have a dot, so it is in the query (`?name=`), as the name of a
   // pipeline is: the Engine would take a path with a dot for a file.
-  { id: 'triggerNew', path: '/triggers/new', group: 'automation', adminOnly: true, nav: false, parent: 'triggers' },
-  { id: 'triggerEdit', path: '/triggers/edit', group: 'automation', adminOnly: true, nav: false, parent: 'triggers' },
-  { id: 'trigger', path: '/triggers/detail', group: 'automation', adminOnly: true, nav: false, parent: 'triggers' },
+  { id: 'triggerNew', path: '/triggers/new', group: 'automation', adminOnly: true, needsOidc: false, nav: false, parent: 'triggers' },
+  { id: 'triggerEdit', path: '/triggers/edit', group: 'automation', adminOnly: true, needsOidc: false, nav: false, parent: 'triggers' },
+  { id: 'trigger', path: '/triggers/detail', group: 'automation', adminOnly: true, needsOidc: false, nav: false, parent: 'triggers' },
 ];
 
 const GROUP_ORDER: readonly NavGroupId[] = ['workspace', 'automation', 'admin'];
@@ -118,12 +126,18 @@ export interface NavGroup {
   routes: NavRoute[];
 }
 
+/** What the Engine has that decides which pages exist. */
+export interface Features {
+  /** Login with a provider is on. */
+  oidc: boolean;
+}
+
 /** The navigation for a role: only what the role may open, and no group left empty. */
-export function navGroups(role: Role): NavGroup[] {
+export function navGroups(role: Role, features: Features = { oidc: false }): NavGroup[] {
   return GROUP_ORDER.map((id) => ({
     id,
     routes: ROUTES.filter(isNavRoute).filter(
-      (r) => r.group === id && (role === 'admin' || !r.adminOnly),
+      (r) => r.group === id && (role === 'admin' || !r.adminOnly) && (features.oidc || !r.needsOidc),
     ),
   }))
     .filter((group) => group.routes.length > 0)

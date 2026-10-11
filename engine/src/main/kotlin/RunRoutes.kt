@@ -6,6 +6,7 @@ import dev.lawlan.runline.engine.artifact.VersionOutcome
 import dev.lawlan.runline.engine.artifact.visibility
 import dev.lawlan.runline.engine.auth.Role
 import dev.lawlan.runline.engine.auth.authorized
+import dev.lawlan.runline.engine.auth.bearerOnly
 import dev.lawlan.runline.engine.resource.ResourceProblemDoc
 import dev.lawlan.runline.engine.resource.ResourcesUnavailableResponse
 import dev.lawlan.runline.engine.run.*
@@ -166,6 +167,8 @@ fun Application.configureRunRoutes() {
           }
 
           route("/log/stream") {
+            // A browser's session is not enough here (ADR-029): the stream is for Bearer tokens.
+            bearerOnly()
             // Refuse the handshake like any other request, before the connection is upgraded.
             intercept(ApplicationCallPipeline.Call) {
               val id = call.runId()

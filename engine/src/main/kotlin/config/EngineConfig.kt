@@ -115,6 +115,8 @@ data class RetentionSettings(
     val interval: Duration,
     /** Most rows one statement of the clean-up removes. */
     val batchSize: Int,
+    /** A session not used for this long has expired (the idle time of sessions, WI-1200). */
+    val sessionIdle: Duration = Duration.ofSeconds(RetentionSettings.DEFAULT_SESSION_IDLE_SECONDS),
 ) {
   companion object {
     const val DEFAULT_RUN_SECONDS = 30L * 24 * 3600
@@ -122,6 +124,7 @@ data class RetentionSettings(
     const val DEFAULT_CRON_FIRING_SECONDS = 30L * 24 * 3600
     const val DEFAULT_INTERVAL_SECONDS = 3600L
     const val DEFAULT_BATCH_SIZE = 1000L
+    const val DEFAULT_SESSION_IDLE_SECONDS = 28800L
 
     /**
      * A caller that is told "not accepted" may send the delivery again for as long as its own retry
@@ -155,6 +158,8 @@ data class EngineConfig(
     val resources: ResourceSettings,
     /** Null when the Engine was given no keystore. */
     val secrets: SecretSettings? = null,
+    /** Null when OIDC login is not configured (ADR-029). */
+    val oidc: OidcSettings? = null,
 ) {
   companion object {
     private const val DEFAULT_MAX_UPLOAD_BYTES = 50L * 1024 * 1024
@@ -244,6 +249,7 @@ data class EngineConfig(
       fun seconds(key: String, default: Long?, min: Long): Duration? =
           (optionalNumber(key, min) ?: default)?.let(Duration::ofSeconds)
 
+      val oidc = OidcSettings.parse(::text, problems)
       val runRetention =
           seconds(
               "retention.runSeconds",
@@ -279,6 +285,9 @@ data class EngineConfig(
                       ?: RetentionSettings.DEFAULT_BATCH_SIZE)
                   .coerceAtMost(Int.MAX_VALUE.toLong())
                   .toInt(),
+              sessionIdle =
+                  oidc?.session?.idle
+                      ?: Duration.ofSeconds(RetentionSettings.DEFAULT_SESSION_IDLE_SECONDS),
           )
       val resourceRoot = required("resources.root")
       val maxReadBytes = optionalNumber("resources.maxReadBytes", min = 1) ?: DEFAULT_MAX_READ_BYTES
@@ -352,6 +361,7 @@ data class EngineConfig(
               certificateWarningDays,
           ),
           secrets,
+          oidc,
       )
     }
 

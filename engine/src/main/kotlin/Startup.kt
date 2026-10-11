@@ -4,6 +4,8 @@ import dev.lawlan.runline.engine.allowlist.AllowListAdmin
 import dev.lawlan.runline.engine.config.EngineConfig
 import dev.lawlan.runline.engine.config.RunRuntime
 import dev.lawlan.runline.engine.db.DatabaseMigrator
+import dev.lawlan.runline.engine.oidc.TokenNameCheck
+import dev.lawlan.runline.engine.oidc.UserNames
 import dev.lawlan.runline.engine.secret.SecretStore
 import io.ktor.server.application.*
 import io.ktor.server.plugins.di.*
@@ -17,6 +19,9 @@ import io.ktor.server.plugins.di.*
 fun Application.configureStartupChecks() {
   val config: EngineConfig by dependencies
   DatabaseMigrator(config.database).requireUpToDate()
+  // A name is one identity, whether it came from a token or from a sign-in (ADR-029).
+  val userNames: UserNames by dependencies
+  TokenNameCheck.require(config.tokens, userNames)
   // The first start gives the allow list its initial content; later starts leave it alone.
   val admin: AllowListAdmin by dependencies
   admin.initialize(config.initialAllowList)

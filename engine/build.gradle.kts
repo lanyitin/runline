@@ -25,6 +25,7 @@ dependencies {
   implementation(libs.flyway.core)
   implementation(libs.flyway.postgresql)
   implementation(libs.logback.classic)
+  implementation(libs.nimbus.oidc)
   implementation(libs.opentelemetry.exporterOtlp)
   implementation(libs.opentelemetry.ktorInstrumentation)
   implementation(libs.opentelemetry.sdkAutoconfigure)
@@ -86,10 +87,16 @@ tasks.test {
   // The configuration described in the README is checked against the code
   // (RetentionDocumentationTest).
   systemProperty("runline.readme", rootProject.file("README.md").absolutePath)
+  // The examples and the manual of deploy/ are checked against the settings (WI-1203).
+  systemProperty("runline.deployDir", rootProject.file("deploy").absolutePath)
   // Declared as inputs so that editing the document alone reruns that check.
   inputs.file(rootProject.file("docs/stable/pipeline-engine/08-api.md")).withPropertyName("apiDoc")
   inputs.dir(file("src/main/kotlin")).withPropertyName("engineSources")
   inputs.file(rootProject.file("README.md")).withPropertyName("readme")
+  inputs.dir(rootProject.file("deploy")).withPropertyName("deployDir")
+  inputs
+      .file(rootProject.file("docs/stable/pipeline-engine/04-deployment.md"))
+      .withPropertyName("deploymentDoc")
 }
 
 // One-off admin process: applies database migrations with the Engine's own code and configuration.

@@ -1,6 +1,6 @@
 # ADR-017 Console 的 log 即時顯示與 Bearer token 的瀏覽器保存
 
-狀態：已核可（2026-10-05）。不修改 [ADR-012](ADR-012-api-authentication.md) 的認證模型。回答：瀏覽器無法在 WebSocket 設定標頭時，Console 如何顯示 run 的即時 log；SPA 如何保存 Bearer token，以及 Console 的登入處理如何與憑證種類脫鉤。
+狀態：已核可（2026-10-05）；其中對「Cookie 工作階段」的否決，與「Token 登入是 Console 唯一方式」的前提，已被 [ADR-029](../../oidc-login/adr/ADR-029-oidc-login-with-server-session.md) 取代（輪詢取代 WebSocket、不把憑證放進網址、XSS 緩解不變）。不修改 [ADR-012](ADR-012-api-authentication.md) 的認證模型。回答：瀏覽器無法在 WebSocket 設定標頭時，Console 如何顯示 run 的即時 log；SPA 如何保存 Bearer token，以及 Console 的登入處理如何與憑證種類脫鉤。
 
 Token 登入是過渡機制：目前只用於快速驗證，日後 Console 預計整合 OIDC 與靜態帳號密碼（見「未來的 ADR」）。本 ADR 的決策以此為前提：保存方式從簡，但登入與工作階段處理必須可被替換。
 

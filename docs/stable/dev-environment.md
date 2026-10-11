@@ -9,6 +9,7 @@
 | JDK | 專案基準為 JDK 25。Gradle toolchain 會自動下載，不需手動安裝 |
 | Node | 前端（Console）建置用，只存在於建置期，不進入執行環境或發佈產物。版本固定在專案根目錄的 `.node-version`（單一來源，精確版本，目前為 Node 24 LTS 線）；devcontainer 與建置檢查都讀這個檔案，變更版本只改這一處 |
 | Docker 相容的容器執行環境 | 資料庫測試使用 Testcontainers 啟動真實 PostgreSQL，沒有容器環境時這類測試無法執行，也不會以替身取代 |
+| 取得 `quay.io/keycloak/keycloak` 映像檔的網路 | OIDC 登入的測試（[WI-1200](oidc-login/work-items/WI-1200-oidc-login-and-session.md)）以 Testcontainers 啟動真實的 Keycloak 當 OIDC provider（第一次需下載映像檔，啟動約數十秒）；開發環境本身不內建 OIDC provider，OIDC 預設關閉 |
 
 `./gradlew check` 以 root（開發容器的預設）或一般使用者執行都應通過；檔案權限相關的測試在 root 下也會被驗證（測試在放棄了略過檔案權限的能力的執行緒上執行）。Console 的真實瀏覽器腳本（`npm run e2e`）不屬於 `check`，它的前置條件（瀏覽器、金鑰庫項目、Fake 服務行程、全新資料庫）只寫在 [console/e2e/README.md](../../console/e2e/README.md)。
 

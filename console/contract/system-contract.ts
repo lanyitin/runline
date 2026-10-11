@@ -53,7 +53,8 @@ export function describeSystemContract(
         expect(response.headers.get('cache-control')).toContain('no-store');
 
         const body = await response.json();
-        expect(body.caller).toEqual({ name: who.name, role: who.role });
+        // `source` says which credential it was (WI-1201): a token here.
+        expect(body.caller).toEqual({ name: who.name, role: who.role, source: 'token' });
         expect(typeof body.version).toBe('string');
         expect(body.commitHash).toMatch(/^([0-9a-f]{40}|unknown)$/);
         expect(typeof body.dirty).toBe('boolean');

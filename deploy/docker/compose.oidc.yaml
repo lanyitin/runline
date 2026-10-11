@@ -1,0 +1,33 @@
+# Sign-in with an OpenID Connect provider such as authentik (docs/stable/oidc-login/, deploy/authentik.md).
+# An overlay on compose.yaml; without it, and without OIDC settings in .env, login is off:
+#
+#   mkdir -p deploy/docker/secrets
+#   (write the two files below; see deploy/authentik.md)
+#   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.oidc.yaml up -d
+#   (or COMPOSE_FILE=compose.yaml:compose.oidc.yaml in .env)
+#
+# The settings that are not secret (RUNLINE_OIDC_ISSUER, RUNLINE_OIDC_CLIENT_ID,
+# RUNLINE_PUBLIC_BASE_URL and the optional ones) are in .env, as .env.example says. The client secret
+# and the key that seals the refresh tokens kept with sessions come as Docker secrets: files under
+# /run/secrets that the Engine reads at start, never environment variables and never in the image.
+# Do not set RUNLINE_OIDC_CLIENT_SECRET or RUNLINE_SESSION_ENCRYPTION_KEY in .env as well: a value
+# and a file for the same setting is a configuration error and the Engine does not start.
+#
+# On a Linux host the Engine's account (uid 10001) must be able to read both files and nobody else
+# should: mode 0440 with a group the container maps to, or 0444 in a directory only you can enter.
+# The two host paths are set in .env; the defaults are beside this file and ignored by git.
+
+services:
+  engine:
+    environment:
+      RUNLINE_OIDC_CLIENT_SECRET_FILE: /run/secrets/runline_oidc_client_secret
+      RUNLINE_SESSION_ENCRYPTION_KEY_FILE: /run/secrets/runline_session_encryption_key
+    secrets:
+      - runline_oidc_client_secret
+      - runline_session_encryption_key
+
+secrets:
+  runline_oidc_client_secret:
+    file: ${OIDC_CLIENT_SECRET_HOST_FILE:-./secrets/oidc-client-secret}
+  runline_session_encryption_key:
+    file: ${SESSION_ENCRYPTION_KEY_HOST_FILE:-./secrets/session-encryption-key}

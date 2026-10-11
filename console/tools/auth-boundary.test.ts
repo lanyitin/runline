@@ -20,6 +20,9 @@ describe('what only the authentication boundary may do', () => {
     ['opens a WebSocket', "new WebSocket('ws://x')", 'WebSocket'],
     ['opens an EventSource', "new EventSource('/x')", 'EventSource'],
     ['uses XMLHttpRequest', 'new XMLHttpRequest()', 'XMLHttpRequest'],
+    ['reads the cookies of the page', "const c = document.cookie;", 'cookies'],
+    ['sets the CSRF header', "headers: { 'X-CSRF-Token': t }", 'the CSRF token'],
+    ['asks for credentials of a call', "{ credentials: 'include' }", 'credentials of a call'],
   ])('a screen that %s is a violation', (_what, source, rule) => {
     expect(rules(source)).toEqual([rule]);
   });

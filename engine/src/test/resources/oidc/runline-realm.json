@@ -1,0 +1,127 @@
+{
+  "realm": "runline",
+  "enabled": true,
+  "sslRequired": "none",
+  "editUsernameAllowed": true,
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "groups": [
+    {
+      "name": "runline-admin"
+    },
+    {
+      "name": "runline-developer"
+    },
+    {
+      "name": "staff"
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "runline",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "client-secret-for-tests",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:18080/api/v1/auth/oidc/callback",
+        "https://runline.example.test/api/v1/auth/oidc/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "client.offline.session.idle.timeout": "0"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "runline-direct",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "direct-secret-for-tests",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "3"
+      }
+    },
+    {
+      "clientId": "runline-norefresh",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "client-secret-for-tests",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:18080/api/v1/auth/oidc/callback",
+        "https://runline.example.test/api/v1/auth/oidc/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "client.offline.session.idle.timeout": "0",
+        "use.refresh.tokens": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "runline-hs256",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "client-secret-for-tests",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:18080/api/v1/auth/oidc/callback",
+        "https://runline.example.test/api/v1/auth/oidc/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "client.offline.session.idle.timeout": "0",
+        "id.token.signed.response.alg": "HS256"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

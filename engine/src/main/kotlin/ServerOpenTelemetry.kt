@@ -1,5 +1,6 @@
 package dev.lawlan.runline.engine
 
+import dev.lawlan.runline.engine.config.OidcSettings
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.di.*
@@ -22,7 +23,12 @@ fun Application.configureOpenTelemetry() {
     }
     attributesExtractor {
       onStart { attributes.put("start-time", System.currentTimeMillis()) }
-      onEnd { attributes.put("end-time", System.currentTimeMillis()) }
+      onEnd {
+        attributes.put("end-time", System.currentTimeMillis())
+        // The address the provider sends the browser back to carries the authorization code and the
+        // state; they are not recorded (WI-1200). The attribute is replaced when the span ends.
+        if (request.path() == OidcSettings.CALLBACK_PATH) attributes.put("url.query", "[redacted]")
+      }
     }
   }
 }

@@ -14,6 +14,8 @@ import { SESSION_STORAGE_KEY } from '../src/auth/credential-store';
 import type { AuthMethod } from '../src/auth/method';
 import { createSession } from '../src/auth/session.svelte';
 import { createTabSync } from '../src/auth/tab-sync';
+import { createBrowser, type TestBrowser } from './browser-fetch';
+import type { FakePerson } from './fake-oidc';
 import { createTokenMethod } from '../src/auth/token-method';
 import { createEngineInfo } from '../src/engine/info-source.svelte';
 import { catalogs, type MessageKey } from '../src/i18n/catalogs';
@@ -28,6 +30,8 @@ export interface TestApp {
   context: AppContext;
   session: AppContext['session'];
   engine: FakeEngine;
+  /** The browser around the Console's calls: its cookies, and the Origin of its changes. */
+  browser: TestBrowser;
   mount<P extends Record<string, unknown>>(component: Component<P>, props?: P): HTMLElement;
   dispose(): Promise<void>;
 }
@@ -46,6 +50,11 @@ export async function createTestApp(
     method?: AuthMethod;
     /** How long a tab without a session waits for another tab to give it one. */
     askTimeoutMs?: number;
+    /**
+     * The Engine has login with a provider on (`label`: the name of the button it gives). With a
+     * `person` that person has signed in with the provider already: the browser holds the cookie.
+     */
+    oidc?: { label?: string; person?: FakePerson };
   } = {},
 ): Promise<TestApp> {
   localStorage.clear();
@@ -60,8 +69,14 @@ export async function createTestApp(
     },
     {
       callers: options.identity ? [{ ...options.identity, token: TEST_TOKEN }] : [],
+      ...(options.oidc ? { oidc: { label: options.oidc.label } } : {}),
     },
   );
+  // The Console is served by the Engine (ADR-015): its page and the Engine are one origin.
+  const browser = createBrowser(engine.url);
+  if (options.oidc?.person) {
+    browser.setCookie('runline_session', engine.oidc!.signIn(options.oidc.person));
+  }
 
   // With nobody to sign in the Engine misbehaves from the start; to sign someone in it must work first.
   if (!options.identity) engine.mode = options.engineMode ?? 'normal';
@@ -72,7 +87,9 @@ export async function createTestApp(
     storage: sessionStorage,
     sync: createTabSync(),
     baseUrl: engine.url,
+    fetch: browser.fetch,
     askTimeoutMs: options.askTimeoutMs ?? 20,
+    oidcTimeoutMs: 300,
     onOutcome: (ok) => connection.record(ok),
   });
   const context: AppContext = {
@@ -100,6 +117,7 @@ export async function createTestApp(
     context,
     session,
     engine,
+    browser,
     mount(component, props) {
       const target = document.createElement('div');
       document.body.append(target);

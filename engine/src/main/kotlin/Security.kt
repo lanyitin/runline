@@ -1,7 +1,11 @@
 package dev.lawlan.runline.engine
 
+import dev.lawlan.runline.engine.auth.ApiAuthenticationProvider
 import dev.lawlan.runline.engine.auth.ApiIdentity
+import dev.lawlan.runline.engine.auth.CsrfGuard
+import dev.lawlan.runline.engine.auth.SessionIdentities
 import dev.lawlan.runline.engine.auth.TokenAuthenticator
+import dev.lawlan.runline.engine.config.EngineConfig
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.plugins.di.*
@@ -17,11 +21,25 @@ const val API_AUTHENTICATION = "api"
  */
 fun Application.configureSecurity() {
   val authenticator: TokenAuthenticator by dependencies
+  val config: EngineConfig by dependencies
+  val oidc = config.oidc
+  // Sessions exist only when login is configured; without it the API is the Bearer API it was.
+  val identities: SessionIdentities? =
+      if (oidc != null) {
+        val found: SessionIdentities by dependencies
+        found
+      } else null
   install(Authentication) {
-    bearer(API_AUTHENTICATION) {
-      realm = "runline"
-      authenticate { credential -> authenticator.authenticate(credential.token) }
-    }
+    register(
+        ApiAuthenticationProvider(
+            ApiAuthenticationProvider.Config(API_AUTHENTICATION).apply {
+              realm = "runline"
+              tokens = authenticator
+              sessions = identities
+              csrf = oidc?.let { CsrfGuard(it.publicBaseUrl) }
+            }
+        )
+    )
   }
 }
 

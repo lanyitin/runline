@@ -23,6 +23,11 @@ const RULES: ReadonlyArray<{ rule: string; pattern: RegExp }> = [
   { rule: 'WebSocket', pattern: /\bWebSocket\b/ },
   { rule: 'EventSource', pattern: /\bEventSource\b/ },
   { rule: 'XMLHttpRequest', pattern: /\bXMLHttpRequest\b/ },
+  // The session of a person who signed in with a provider is a cookie the Engine sets and scripts
+  // cannot read; the CSRF token of it is the boundary's, added to a change in its one way out.
+  { rule: 'cookies', pattern: /\bdocument\s*\.\s*cookie\b/ },
+  { rule: 'the CSRF token', pattern: /X-CSRF-Token/i },
+  { rule: 'credentials of a call', pattern: /\bcredentials\s*:/ },
   {
     rule: 'an import of the authentication boundary',
     pattern: /^\s*import\s+(?!type\b)[^;]*from\s+['"][^'"]*\/auth\//,

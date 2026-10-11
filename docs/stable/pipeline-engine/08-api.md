@@ -10,7 +10,7 @@
 
 | 情況 | 回應 |
 |---|---|
-| 沒有 token、token 無效、或不是 Bearer 格式 | 401，帶 `WWW-Authenticate: Bearer realm="runline"`，沒有 JSON 本文 |
+| 沒有 token（也沒有有效的工作階段 cookie）、token 無效、或不是 Bearer 格式 | 401，帶 `WWW-Authenticate: Bearer realm="runline"`，沒有 JSON 本文 |
 | token 有效但角色不足 | 403 `forbidden` |
 
 **可見範圍。** 開發人員只看得到、也只能對自己上傳的版本建立 run；管理員看得到全部。開發人員查詢不屬於自己的版本或 run，得到的回應與「不存在」相同（404）。
@@ -22,6 +22,14 @@
 **關閉中。** Engine 收到終止訊號後不再接受新請求：新的請求回應 503 `shutting_down`（並關閉連線），進行中的請求在寬限時間（`RUNLINE_SHUTDOWN_GRACE_SECONDS`，預設 30 秒）內完成；超過寬限時間仍未完成的請求被中止。已開啟的 WebSocket 不計入進行中的請求，關閉時一併中斷。呼叫端遇到 503 `shutting_down` 時，稍後重試即可。兩個探測端點（`GET /api/v1/health/live`、`GET /api/v1/health/ready`）是例外：關閉期間 `live` 仍回 200，`ready` 回 503 且 `status` 為 `shutting_down`，兩者都不關閉連線（[ADR-018](adr/ADR-018-liveness-readiness-probes.md)）。
 
 **路徑範圍。** `/api` 之下不存在的路徑一律回 404，不回傳 Console 的入口頁（[ADR-015](adr/ADR-015-console-frontend.md)）。
+
+**工作階段（OIDC 登入）。** 人的瀏覽器可用 OIDC provider 登入（[ADR-029](../oidc-login/adr/ADR-029-oidc-login-with-server-session.md)），登入後以 cookie `runline_session` 維持（`HttpOnly`、`SameSite=Lax`，對外網址為 https 時加 `Secure`，值是不可預測的不透明識別碼）。OIDC 設定全部未設時這項功能關閉，下面「登入（OIDC）」一節只有 `GET /api/v1/auth/methods` 存在，其餘端點回 404，API 與以前完全相同。
+
+**雙認證。** 本文標示 Bearer 的端點同時接受工作階段（OIDC 登入已啟用時），兩種來源得到同樣的「名稱與角色」，角色要求、可見範圍、擁有權、稽核欄位與 [ADR-020](adr/ADR-020-per-uploader-artifact-versions.md) 的規則完全不分來源（工作階段使用者看不到他人的版本，回應與不存在相同）。解析順序：請求帶 `Authorization` 標頭時只依 Bearer，無效即 401，不退而看 cookie（帶非 Bearer 的標頭也是 401）；沒有該標頭時依 `runline_session` cookie；兩者皆無或無效回 401，帶同樣的 `WWW-Authenticate: Bearer realm="runline"`。例外：Webhook 入口維持專用標頭認證，工作階段不是它的憑證；`GET /api/v1/runs/{runId}/log/stream`（WebSocket）只接受 Bearer，帶 cookie 而無 Bearer 回 401。
+
+**重新驗證。**工作階段被使用、且距上次成功驗證超過 `RUNLINE_SESSION_REVALIDATE_SECONDS`（預設 60 秒）時，Engine 先以工作階段的 refresh token 向 provider 重新驗證再處理該請求（間隔內的請求不呼叫 provider，閒置的工作階段不被主動驗證，同一工作階段的並行請求只驗證一次）：仍屬 admin／developer 群組 → 角色以新的為準（降權後下一個請求就不能使用管理 API，升權同理）；不再屬於任何允許群組、provider 停用該使用者或撤銷其工作階段（拒絕 refresh）、ID token 不合格、工作階段沒有可用的 refresh token → 刪除工作階段，該請求回 401；provider 無法連線 → 自上次成功驗證起 `RUNLINE_SESSION_REVALIDATE_GRACE_SECONDS`（預設 900 秒）內仍有效（每個間隔最多嘗試一次），超過則刪除並回 401，寬限為 0 時任何失敗即失效。因此權限在 provider 被收回後，最久經過一個間隔再加一次請求就失效（實測見 WI-1205 報告）。Bearer 請求不受影響。
+
+**CSRF（工作階段）。** 以工作階段認證的 POST、PUT、PATCH、DELETE（含 `POST /api/v1/auth/logout`）須帶請求標頭 `X-CSRF-Token`（值為工作階段查詢回傳的 `csrfToken`）且 `Origin` 與對外網址（`RUNLINE_PUBLIC_BASE_URL`）同源（協定、主機、埠比對，大小寫與預設埠不影響）；缺少或不符回 403，且不執行任何動作：`origin_invalid`（沒有 `Origin` 或不是本站）或 `csrf_invalid`（沒有 token 或不符）。GET 不改變狀態，不受此限；Bearer 請求不受此限。CSRF token 只在工作階段查詢的回應中出現。
 
 **版本資訊與登入。** `GET /api/v1/info` 免認證；`GET /api/v1/system` 需要 Bearer，Console 以它驗證 token 並取得呼叫者的名稱與角色（[ADR-016](adr/ADR-016-engine-build-info-endpoint.md)）。
 
@@ -54,7 +62,7 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 | `jdk` | 執行環境的 JDK 版本 |
 | `startedAt`、`uptimeSeconds` | Engine 啟動的時間與已運行的秒數 |
 | `allowListVersion` | 目前生效的白名單版本（文字） |
-| `caller` | `{name, role}`：token 對應的名稱與角色（`developer` 或 `admin`） |
+| `caller` | `{name, role, source}`：呼叫者的名稱與角色（`developer` 或 `admin`），以及認證來源 `source`（`token` 或 `oidc`）；不含任何憑證 |
 
 ### `GET /api/v1/health/live`
 
@@ -76,6 +84,104 @@ Engine 的詳細資訊與呼叫者身分。Console 以它驗證 token：401 即 
 | `shutdown` | Engine 未處於關閉流程中 |
 
 收到終止訊號後立即轉為 503，`status` 為 `shutting_down`，早於寬限時間開始。就緒只影響導流，不停止 run 或排程。
+
+## 登入（OIDC）
+
+契約與流程見 [oidc-login/05-ipc.md](../oidc-login/05-ipc.md)。這一節的端點都不要求 Bearer；`GET /api/v1/auth/methods` 恆存在，其餘只在設定了 OIDC 時存在（否則 404）。這些端點的回應都不快取（`Cache-Control: no-store`）。
+
+### `GET /api/v1/auth/methods`
+
+認證：無
+
+人可以用哪些方式登入，供 Console 的登入頁決定顯示什麼。本文 `{"oidc": {"enabled": <布林>}}`。
+
+### `GET /api/v1/auth/oidc/login`
+
+認證：無
+
+開始登入：Engine 產生 state、nonce 與 PKCE，暫存於資料庫（10 分鐘內有效、只能用一次），回應 302 到 provider 的授權頁。待處理的暫存有數量上限（`RUNLINE_OIDC_MAX_PENDING_LOGINS`，預設 200）：達上限時 302 到 Console 的登入頁 `/?login_error=too_many_logins`（不回 JSON，也沒有 `Retry-After`），不寫入新暫存；既有暫存與進行中的登入（callback）不受影響，暫存過期後名額立即恢復（不依賴清理）。查詢參數 `return` 是登入後回到的位置，只接受本站的相對路徑（以單一 `/` 開頭）；絕對網址、協定相對網址（`//`）、反斜線、含控制字元或空白、過長的值一律忽略，改回 `/`。OIDC 未啟用回 404。Provider 無法使用（連不上、探索文件不能用、issuer 不符）時 302 到 `/?login_error=provider_unavailable`（不回 JSON），不建立任何暫存。這兩種失敗的呈現與 callback 的失敗一致（[ADR-031](../oidc-login/adr/ADR-031-console-contract-alignment.md)）；回應不含 state、nonce 或任何機密。
+
+### `GET /api/v1/auth/oidc/callback`
+
+認證：無（以 state 證明）
+
+Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engine 在後端用 code 向 provider 換 ID token（只換一次，不重試），驗證簽章、issuer、audience、到期與 nonce，依群組 claim 決定角色（admin 群組優先於 developer 群組；兩者都不在、或沒有群組 claim，拒絕且不建立使用者與工作階段），建立或更新使用者與工作階段。群組只讀自已驗證的 ID token。
+
+成功：302 到登入時給的返回路徑，並 `Set-Cookie: runline_session`。失敗：302 到 Console 的登入頁 `/?login_error=<代碼>`，不設 cookie：
+
+| 代碼 | 意義 |
+|---|---|
+| `access_denied` | 使用者在 provider 取消或拒絕 |
+| `invalid_state` | state 不存在、已用過（同一個 callback 重送）或逾時（超過 10 分鐘） |
+| `invalid_token` | 缺少 code、provider 拒絕 code（用過、過期、PKCE 或 client 不符），或 ID token 驗證失敗；ID token 只接受非對稱簽章（RS256），以 client secret 簽章（HS256 等）的一律拒絕，log 指出演算法不被接受（[ADR-030](../oidc-login/adr/ADR-030-signing-and-refresh-token-requirements.md)） |
+| `refresh_unavailable` | provider 的換 token 回應沒有 refresh token：沒有它的工作階段無法被收回權限，所以失敗關閉，不建立使用者與工作階段（已存在的使用者資料不變）。是 provider 設定問題：log 指出應檢查 client 可否使用 `offline_access` 與 provider 是否對該 client 發 refresh token |
+| `not_authorized` | 不在任何允許的群組（含沒有群組 claim） |
+| `name_conflict` | 首次登入的 `preferred_username` 已是 `API_TOKENS` 的名稱或另一位使用者的名稱；ID token 沒有 `preferred_username` 時為 `invalid_token` |
+| `provider_unavailable` | 換 token 時 provider 無法連線或回 5xx；登入起點取不到探索文件或簽章金鑰時也是此代碼 |
+| `too_many_logins` | 只出現在登入起點：待處理的登入已達上限，沒有建立暫存 |
+| `user_disabled` | 管理員在 runline 停用了這位使用者：即使 provider 允許也不能登入，直到被啟用 |
+
+同一個 callback 重送不會建立第二個工作階段（第二次為 `invalid_state`）。
+
+### `GET /api/v1/auth/session`
+
+認證：無（工作階段 cookie）
+
+有效的工作階段回 200，本文 `{"name", "role", "displayName", "csrfToken"}`：`role` 為 `developer` 或 `admin`（登入當下的角色），`csrfToken` 是這個工作階段專屬的 token。這次請求算「使用」，閒置時間從此刻重新計算（使用時間降頻寫入：一分鐘內的連續請求只寫一次，閒置期限因此最多提早一分鐘生效）。沒有 cookie、cookie 不明、工作階段已過期（閒置或絕對時間，不依賴清理）或已登出，回 401 `unauthorized`。
+
+### `POST /api/v1/auth/logout`
+
+認證：無（工作階段 cookie）
+
+刪除 cookie 所指的工作階段並清除 cookie（`Max-Age=0`），回 204。有效的工作階段須帶 `X-CSRF-Token` 與同源的 `Origin`，否則 403（`csrf_invalid`、`origin_invalid`）且工作階段不變；沒有 cookie 或工作階段已不存在也回 204（冪等，沒有可保護的東西）。只結束 runline 的工作階段，不登出 provider。
+
+## 使用者與工作階段管理（管理員）
+
+只在設定了 OIDC 時存在（否則 404）。認證：Bearer（admin）或工作階段（admin；改狀態請求須帶 CSRF token 與同源 `Origin`，見通則）。developer 得到 403，且不論名稱是否存在回應都相同，不洩漏誰存在。管理員可停用自己或結束自己的工作階段；`API_TOKENS` 的管理員 token 不受任何影響，這是還原途徑（不會因此沒有可用的管理途徑）。
+
+使用者物件：`{name, displayName, disabled, statusChangedBy, statusChangedAt, createdAt, lastLoginAt, sessions}`（`sessions` 為目前有效的工作階段數；`statusChangedBy`／`statusChangedAt` 為最近一次停用或啟用的操作者與時間，從未操作則為 `null`）。工作階段物件：`{id, createdAt, lastUsedAt}`，`id` 是管理用的代號，不是工作階段識別碼，不能用來登入；任何回應都不含工作階段識別碼、CSRF token 或 refresh token。
+
+### `GET /api/v1/users`
+
+認證：Bearer（admin）
+
+列出登入過的使用者，本文 `{"users": [...]}`，依名稱排序。
+
+### `GET /api/v1/users/{name}`
+
+認證：Bearer（admin）
+
+一位使用者。404 `user_not_found`。
+
+### `POST /api/v1/users/{name}/disable`
+
+認證：Bearer（admin）
+
+停用：在同一交易內刪除該使用者所有工作階段（下一個請求得到 401），並拒絕其登入（`user_disabled`）直到啟用，即使 provider 仍允許；與並行的登入或重新驗證競爭時也不會留下有效的工作階段。回 200 使用者物件，另含 `sessionsEnded`。記錄操作者與時間。404 `user_not_found`；名稱屬於 `API_TOKENS` 回 409 `not_an_oidc_user`（停用只針對 OIDC 使用者，token 的撤銷仍是修改組態並重啟）。
+
+### `POST /api/v1/users/{name}/enable`
+
+認證：Bearer（admin）
+
+啟用：恢復登入資格（不恢復已刪除的工作階段）。回 200 使用者物件。錯誤同上。
+
+### `GET /api/v1/users/{name}/sessions`
+
+認證：Bearer（admin）
+
+列出該使用者目前有效的工作階段，本文 `{"sessions": [...]}`。404 `user_not_found`。
+
+### `DELETE /api/v1/users/{name}/sessions`
+
+認證：Bearer（admin）
+
+結束該使用者所有的工作階段，回 200 `{"ended": <數量>}`。404 `user_not_found`。
+
+### `DELETE /api/v1/users/{name}/sessions/{id}`
+
+認證：Bearer（admin）
+
+結束其中一個（以工作階段物件的 `id` 指名），回 204；找不到（或不屬於該使用者）回 404 `session_not_found`。
 
 ## 上傳與查詢
 

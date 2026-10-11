@@ -3,8 +3,20 @@ package dev.lawlan.runline.engine.auth
 import dev.lawlan.runline.engine.config.ApiToken
 import java.security.MessageDigest
 
-/** Who a caller is: the name recorded as uploader and in audit fields, and the role held. */
-data class ApiIdentity(val name: String, val role: Role)
+/** How a caller proved who they are; it changes nothing about what they may do (ADR-029). */
+enum class AuthSource(val wire: String) {
+  /** A Bearer token of `API_TOKENS`. */
+  TOKEN("token"),
+  /** The session of a person who signed in with the OIDC provider. */
+  OIDC("oidc"),
+}
+
+/**
+ * Who a caller is: the name recorded as uploader and in audit fields, and the role held. Both
+ * sources give the same thing, and every rule of visibility, ownership and role is made of the name
+ * and the role alone; [source] is only said back to the caller.
+ */
+data class ApiIdentity(val name: String, val role: Role, val source: AuthSource = AuthSource.TOKEN)
 
 /**
  * Turns a presented Bearer token into an identity. Role and identity semantics are fixed (ADR-012);

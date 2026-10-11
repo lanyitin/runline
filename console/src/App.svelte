@@ -17,6 +17,7 @@
   import RunDetailPage from './pages/RunDetailPage.svelte';
   import RunsPage from './pages/RunsPage.svelte';
   import UploadPage from './pages/UploadPage.svelte';
+  import UsersPage from './pages/UsersPage.svelte';
   import SignIn from './pages/SignIn.svelte';
   import AppShell from './shell/AppShell.svelte';
   import type { Crumb } from './shell/Breadcrumb.svelte';
@@ -24,7 +25,11 @@
 
   const { i18n, session, router } = useApp();
 
-  const route = $derived<MatchedRoute | null>(matchRoute(router.path));
+  // A page that exists only with login through a provider is no page without it.
+  const route = $derived.by<MatchedRoute | null>(() => {
+    const matched = matchRoute(router.path);
+    return matched?.needsOidc && session.oidc === null ? null : matched;
+  });
   const signedIn = $derived(session.state.status === 'authenticated' ? session.state.identity : null);
   const allowed = $derived(route !== null && (!route.adminOnly || signedIn?.role === 'admin'));
 
@@ -92,6 +97,8 @@
           <AllowListPage />
         {:else if route.id === 'resources'}
           <ResourcesPage />
+        {:else if route.id === 'users'}
+          <UsersPage />
         {:else if route.id === 'triggers'}
           <TriggersPage />
         {:else if route.id === 'triggerNew'}

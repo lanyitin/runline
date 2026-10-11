@@ -1,13 +1,23 @@
 <script lang="ts">
   import { useApp } from '../app/context';
+  import { takeLoginError } from '../app/login-error';
 
   // The page before anyone is signed in: the frame of the sign-in, whichever method signs in. It
   // says what happened to a session that is gone, and gives the place to the screen of the method
   // (the session knows which one). The page asked for stays in the address; signing in lands on it.
-  const { i18n, session } = useApp();
+  const { i18n, session, router } = useApp();
+
+  // A login that failed brings the person back with its code in the address (see login-error.ts):
+  // read once, shown, and taken out of the address so that signing in again does not carry it.
+  const failed = takeLoginError(router.search);
+  if (failed.error !== null) router.replace(router.path + failed.rest);
+  const loginError = failed.error;
 
   const state = $derived(session.state);
   const View = $derived(session.SignIn);
+  const OidcView = $derived(session.OidcSignIn);
+  // Where signing in leads to: the page asked for, which stays in the address.
+  const target = $derived(router.path + router.search);
   const notice = $derived(
     state.status === 'anonymous' && state.reason === 'expired'
       ? i18n.t('signIn.expired')
@@ -25,6 +35,10 @@
     {#if notice}
       <p class="notice reason" role="status">{notice}</p>
     {/if}
+    {#if loginError}
+      <p class="failure" role="alert" data-login-error>{i18n.t(`signIn.error.${loginError}`)}</p>
+    {/if}
+    <OidcView {target} />
     <View signIn={session.signIn} />
   {/if}
 </section>
@@ -58,6 +72,14 @@
   .notice {
     margin: 0 0 var(--space-4);
     color: var(--text-secondary);
+  }
+  .failure {
+    margin: 0 0 var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--danger-tint);
+    color: var(--danger-text);
+    font-size: var(--text-xs);
   }
   .reason {
     padding: var(--space-2) var(--space-3);

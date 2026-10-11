@@ -30,7 +30,7 @@ class SystemStatus(
         startedAt = startedAt.toString(),
         uptimeSeconds = Duration.between(startedAt, now).seconds,
         allowListVersion = allowList.number.toString(),
-        caller = CallerResponse(caller.name, caller.role.name.lowercase()),
+        caller = CallerResponse(caller.name, caller.role.name.lowercase(), caller.source.wire),
     )
   }
 }

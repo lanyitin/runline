@@ -24,6 +24,8 @@ ktor:
       - dev.lawlan.runline.engine.ServerOpenTelemetryKt.configureOpenTelemetry
       - dev.lawlan.runline.engine.RunRecoveryKt.configureRunRecovery
       - dev.lawlan.runline.engine.InfoRoutesKt.configureInfoRoutes
+      - dev.lawlan.runline.engine.AuthRoutesKt.configureAuthRoutes
+      - dev.lawlan.runline.engine.UserRoutesKt.configureUserRoutes
       - dev.lawlan.runline.engine.HealthRoutesKt.configureHealthRoutes
       - dev.lawlan.runline.engine.ArtifactRoutesKt.configureArtifactRoutes
       - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
@@ -151,3 +153,42 @@ secrets:
   keystorePath: "$RUNLINE_KEYSTORE_PATH:"
   passwordFile: "$RUNLINE_KEYSTORE_PASSWORD_FILE:"
   password: "$RUNLINE_KEYSTORE_PASSWORD:"
+
+# Sign-in with an OpenID Connect provider such as authentik (ADR-029). All unset: login is off and
+# the Engine behaves as without it; a part of them stops the start. RUNLINE_OIDC_ISSUER is the
+# issuer address of the provider (the Engine finds the rest through its discovery document, the
+# first time somebody signs in, never at start), RUNLINE_OIDC_CLIENT_ID and the client secret, given
+# by RUNLINE_OIDC_CLIENT_SECRET_FILE (a file whose first line it is; preferred) or by
+# RUNLINE_OIDC_CLIENT_SECRET, not both. RUNLINE_PUBLIC_BASE_URL is the address people use for the
+# Engine (no path); the redirect address is derived from it, and cookies are `Secure` for https.
+# The role comes from the groups claim (RUNLINE_OIDC_GROUPS_CLAIM, default groups): a member of
+# RUNLINE_OIDC_ADMIN_GROUP (default runline-admin) is an administrator, else a member of
+# RUNLINE_OIDC_DEVELOPER_GROUP (default runline-developer) a developer, anybody else is refused.
+# RUNLINE_OIDC_MAX_PENDING_LOGINS (default 200) is how many sign-ins may be under way at once (a
+# person has ten minutes to come back); beyond it a new sign-in is answered 429 with Retry-After.
+oidc:
+  issuer: "$RUNLINE_OIDC_ISSUER:"
+  clientId: "$RUNLINE_OIDC_CLIENT_ID:"
+  clientSecret: "$RUNLINE_OIDC_CLIENT_SECRET:"
+  clientSecretFile: "$RUNLINE_OIDC_CLIENT_SECRET_FILE:"
+  publicBaseUrl: "$RUNLINE_PUBLIC_BASE_URL:"
+  groupsClaim: "$RUNLINE_OIDC_GROUPS_CLAIM:"
+  adminGroup: "$RUNLINE_OIDC_ADMIN_GROUP:"
+  developerGroup: "$RUNLINE_OIDC_DEVELOPER_GROUP:"
+  maxPendingLogins: "$RUNLINE_OIDC_MAX_PENDING_LOGINS:"
+
+# Sessions of people signed in (ADR-029). RUNLINE_SESSION_IDLE_SECONDS (default 28800) is how long
+# without a request ends a session, RUNLINE_SESSION_ABSOLUTE_SECONDS (default 604800) the longest it
+# lives. RUNLINE_SESSION_REVALIDATE_SECONDS (default 60, at least 10) and
+# RUNLINE_SESSION_REVALIDATE_GRACE_SECONDS (default 900, 0 is strict) are for the re-checking with
+# the provider. RUNLINE_SESSION_ENCRYPTION_KEY_FILE (a file whose first line it is; preferred) or
+# RUNLINE_SESSION_ENCRYPTION_KEY, not both: 32 random bytes in base64 (for example `openssl rand
+# -base64 32`), the key that seals refresh tokens kept with sessions; required with login. A new key
+# ends the sessions that exist.
+session:
+  idleSeconds: "$RUNLINE_SESSION_IDLE_SECONDS:"
+  absoluteSeconds: "$RUNLINE_SESSION_ABSOLUTE_SECONDS:"
+  revalidateSeconds: "$RUNLINE_SESSION_REVALIDATE_SECONDS:"
+  revalidateGraceSeconds: "$RUNLINE_SESSION_REVALIDATE_GRACE_SECONDS:"
+  encryptionKey: "$RUNLINE_SESSION_ENCRYPTION_KEY:"
+  encryptionKeyFile: "$RUNLINE_SESSION_ENCRYPTION_KEY_FILE:"

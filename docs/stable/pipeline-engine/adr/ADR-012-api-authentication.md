@@ -1,6 +1,6 @@
 # ADR-012 管理與上傳 API 以設定檔提供的 token 認證
 
-狀態：已核可（2026-10-05）。免認證端點清單由 [ADR-015](ADR-015-console-frontend.md)、[ADR-016](ADR-016-engine-build-info-endpoint.md)、[ADR-018](ADR-018-liveness-readiness-probes.md) 補充。回答：上傳與管理 API 如何辨識呼叫者與其角色，以及哪些端點不需要認證。
+狀態：已核可（2026-10-05）；認證範圍與免認證清單由 [ADR-029](../../oidc-login/adr/ADR-029-oidc-login-with-server-session.md) 修訂（Bearer 之外新增 OIDC 登入的工作階段，API 同時接受兩者；免認證清單新增登入方式查詢、登入起點、callback 與登出，登出對有效的工作階段須帶 CSRF token）。免認證端點清單由 [ADR-015](ADR-015-console-frontend.md)、[ADR-016](ADR-016-engine-build-info-endpoint.md)、[ADR-018](ADR-018-liveness-readiness-probes.md) 補充。回答：上傳與管理 API 如何辨識呼叫者與其角色，以及哪些端點不需要認證。
 
 ## 背景
 

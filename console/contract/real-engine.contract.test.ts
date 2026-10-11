@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { FakeEngine } from '../test-support/fake-engine';
 import { storedZip } from '../test-support/zip';
 import type { DemoJars } from '../test-support/fake-jars';
+import { describeAuthMethodsContract } from './auth-contract';
 import { describeAdminContract } from './admin-contract';
 import { describeBindingsContract } from './bindings-contract';
 import { describeInfoContract } from './info-contract';
@@ -52,6 +53,12 @@ const jars = (): DemoJars => ({
 });
 
 describeInfoContract('the real Engine', () => url);
+// Whether the Engine has login with a provider on: RUNLINE_CONTRACT_OIDC=true says it has (the
+// sign-in endpoints themselves are held to the contract by e2e/oidc.e2e.ts, which can sign in).
+describeAuthMethodsContract('the real Engine', {
+  baseUrl: () => url,
+  oidcEnabled: process.env.RUNLINE_CONTRACT_OIDC === 'true',
+});
 describeSystemContract('the real Engine', () => url, () => callers);
 describePipelinesContract('the real Engine', {
   baseUrl: () => url,

@@ -6,6 +6,8 @@ data class RetentionReport(
     val logEntries: Int = 0,
     val webhookFirings: Int = 0,
     val cronFirings: Int = 0,
+    val sessions: Int = 0,
+    val loginAttempts: Int = 0,
     /** More expired rows were left for the next pass, because this one reached its batch limit. */
     val backlogRemains: Boolean = false,
     /** The steps that failed; the others were done regardless. */
@@ -20,4 +22,6 @@ enum class RetentionStep(val label: String) {
   RUNS("runs"),
   WEBHOOK_FIRINGS("webhook_firings"),
   CRON_FIRINGS("cron_firings"),
+  SESSIONS("sessions"),
+  LOGIN_ATTEMPTS("login_attempts"),
 }

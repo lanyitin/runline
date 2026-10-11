@@ -13,6 +13,9 @@ class RetentionTelemetry(openTelemetry: OpenTelemetry) {
   private val runs = meter.counterBuilder("runline.retention.runs.removed").build()
   private val logEntries = meter.counterBuilder("runline.retention.log_entries.removed").build()
   private val firings = meter.counterBuilder("runline.retention.trigger_firings.removed").build()
+  private val sessions = meter.counterBuilder("runline.retention.sessions.removed").build()
+  private val loginAttempts =
+      meter.counterBuilder("runline.retention.login_attempts.removed").build()
   private val failures = meter.counterBuilder("runline.retention.failures").build()
   private val passes = meter.counterBuilder("runline.retention.passes").build()
   private val duration = meter.histogramBuilder("runline.retention.duration").setUnit("s").build()
@@ -25,6 +28,8 @@ class RetentionTelemetry(openTelemetry: OpenTelemetry) {
       RetentionStep.LOG_ENTRIES -> logEntries.add(n)
       RetentionStep.WEBHOOK_FIRINGS -> firings.add(n, Attributes.of(KIND, "webhook"))
       RetentionStep.CRON_FIRINGS -> firings.add(n, Attributes.of(KIND, "cron"))
+      RetentionStep.SESSIONS -> sessions.add(n)
+      RetentionStep.LOGIN_ATTEMPTS -> loginAttempts.add(n)
     }
   }
 

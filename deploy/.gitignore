@@ -6,3 +6,4 @@ docker/keystore/
 docker/secrets/
 # The private CA's root certificates of the browser overlay (docker/compose.browser.yaml).
 docker/trusted-ca/
+docker/truststore/

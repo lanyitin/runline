@@ -96,8 +96,18 @@ describe('navGroups', () => {
     expect(groups.find((g) => g.id === 'admin')!.adminOnly).toBe(true);
   });
 
+  test('the users are in the admin group only when the Engine has login with a provider, and for admins only', () => {
+    const admin = (oidc: boolean) =>
+      navGroups('admin', { oidc }).find((g) => g.id === 'admin')!.routes.map((r) => r.id);
+    expect(admin(false)).toEqual(['allowlist', 'resources']);
+    expect(admin(true)).toEqual(['allowlist', 'resources', 'users']);
+    expect(navGroups('developer', { oidc: true }).flatMap((g) => g.routes.map((r) => r.id))).not.toContain('users');
+    expect(matchRoute('/users')).toMatchObject({ id: 'users', group: 'admin', adminOnly: true, nav: true, needsOidc: true });
+    expect(matchRoute('/allowlist')).toMatchObject({ needsOidc: false });
+  });
+
   test('every route is in the navigation of an admin exactly once', () => {
-    const shown = navGroups('admin').flatMap((g) => g.routes.map((r) => r.id));
+    const shown = navGroups('admin', { oidc: true }).flatMap((g) => g.routes.map((r) => r.id));
     expect(shown.sort()).toEqual(ROUTES.filter((r) => r.nav).map((r) => r.id).sort());
   });
 });

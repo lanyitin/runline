@@ -69,6 +69,28 @@ class PostgresRetentionStore(private val dataSource: DataSource) : RetentionStor
         it.setInt(2, limit)
       }
 
+  // Found through user_session_expires and user_session_last_used; a delete locks only the rows it
+  // removes, and a session being used locks its own row, so neither waits for the other for long.
+  override fun deleteExpiredSessions(now: Instant, idleBefore: Instant, limit: Int): Int =
+      delete(
+          "DELETE FROM user_session WHERE id_hash IN (" +
+              "SELECT id_hash FROM user_session WHERE expires_at <= ? OR last_used_at <= ? " +
+              "LIMIT ?)"
+      ) {
+        it.setObject(1, now.atOffset(ZoneOffset.UTC))
+        it.setObject(2, idleBefore.atOffset(ZoneOffset.UTC))
+        it.setInt(3, limit)
+      }
+
+  override fun deleteExpiredLoginAttempts(startedBefore: Instant, limit: Int): Int =
+      delete(
+          "DELETE FROM login_attempt WHERE state IN (" +
+              "SELECT state FROM login_attempt WHERE created_at < ? ORDER BY created_at LIMIT ?)"
+      ) {
+        it.setObject(1, startedBefore.atOffset(ZoneOffset.UTC))
+        it.setInt(2, limit)
+      }
+
   private fun delete(sql: String, bind: (PreparedStatement) -> Unit): Int =
       dataSource.connection.use { connection ->
         connection.prepareStatement(sql).use {

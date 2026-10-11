@@ -40,3 +40,54 @@ object ArtifactContentLock {
     }
   }
 }
+
+/**
+ * Serializes the sign-ins of one person (WI-1200): the person is told apart by the provider and the
+ * subject, and the name they get is unique. Without the lock, two first sign-ins of one person at
+ * the same time can both reach the unique name before either sees the other's row, and one would be
+ * turned away as if another person had the name. Transaction-scoped, per person.
+ */
+object OidcSignInLock {
+  private const val NAMESPACE = 7_103
+
+  fun lock(connection: Connection, issuer: String, subject: String) {
+    connection.prepareStatement("SELECT pg_advisory_xact_lock(?, hashtext(?))").use {
+      it.setInt(1, NAMESPACE)
+      it.setString(2, "$issuer\n$subject")
+      it.execute()
+    }
+  }
+}
+
+/**
+ * Serializes the keeping of sign-ins under way (WI-1201): the room for them is counted and then
+ * used, and without the lock callers at the same moment could all find room for one more.
+ * Transaction-scoped.
+ */
+object LoginAttemptLock {
+  private const val KEY = 7_104_001L
+
+  fun lock(connection: Connection) {
+    connection.prepareStatement("SELECT pg_advisory_xact_lock(?)").use {
+      it.setLong(1, KEY)
+      it.execute()
+    }
+  }
+}
+
+/**
+ * Makes the requests of one session take turns while the session is checked with the provider
+ * (WI-1205): the first asks, the others wait and then find it done. Transaction-scoped, per
+ * session, and it works across processes because the database holds it.
+ */
+object SessionCheckLock {
+  private const val NAMESPACE = 7_105
+
+  fun lock(connection: Connection, idHash: ByteArray) {
+    connection.prepareStatement("SELECT pg_advisory_xact_lock(?, hashtext(?))").use {
+      it.setInt(1, NAMESPACE)
+      it.setString(2, idHash.joinToString("") { b -> "%02x".format(b) })
+      it.execute()
+    }
+  }
+}

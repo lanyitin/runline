@@ -25,4 +25,13 @@ interface RetentionStore {
 
   /** Removes cron firings from before [firedBefore], except those still pending. */
   fun deleteExpiredCronFirings(firedBefore: Instant, limit: Int): Int
+
+  /**
+   * Removes sessions that have expired at [now] or were last used before [idleBefore]. Such a
+   * session is not valid before this removes it; this only frees the rows.
+   */
+  fun deleteExpiredSessions(now: Instant, idleBefore: Instant, limit: Int): Int
+
+  /** Removes sign-ins that were started before [startedBefore] and never finished. */
+  fun deleteExpiredLoginAttempts(startedBefore: Instant, limit: Int): Int
 }

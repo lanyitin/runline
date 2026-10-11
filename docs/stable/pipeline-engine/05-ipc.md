@@ -18,7 +18,9 @@
 | 任何已授權者 | run log 串流 | 以 WebSocket 或 SSE 推送；客戶端中斷不影響 run（背壓：緩衝有上限，超過則丟棄舊 log 並標記） |
 | 任何已授權者 | 取消 run | 協作式取消（見 [07](07-nfr-risks.md)） |
 
-認證：管理與上傳 API 用既有 Ktor 認證機制；webhook 用 per-trigger 密鑰。重試與逾時：webhook 由呼叫端重試；Engine 不自動重跑 run。API 版本以路徑前綴區分。
+| 瀏覽器（人） | OIDC 登入 | 登入起點把瀏覽器導向 provider；provider 帶 code 與 state 回到 callback，Engine 在後端用 code（加 PKCE 與 client secret，只換一次）換 ID token、驗證後依群組決定角色、建立工作階段並設定 cookie。細節見 [oidc-login/05-ipc.md](../oidc-login/05-ipc.md) 與 [08](08-api.md) |
+
+認證：管理與上傳 API 用既有 Ktor 認證機制（Bearer token）；人的瀏覽器登入由 Engine 當 OIDC client 完成並維持伺服器端工作階段（[ADR-029](../oidc-login/adr/ADR-029-oidc-login-with-server-session.md)；API 同時接受兩者：帶 `Authorization` 標頭只依 Bearer，否則依工作階段 cookie；工作階段認證的改狀態請求須帶 CSRF token 與同源的 `Origin`，WebSocket log 串流只接受 Bearer，見 [08](08-api.md)）；webhook 用 per-trigger 密鑰。對 provider 的呼叫有逾時，授權碼只換一次、不重試。重新驗證（[WI-1205](../oidc-login/work-items/WI-1205-revalidation-and-user-disable.md)）：工作階段被使用且距上次成功驗證超過 `RUNLINE_SESSION_REVALIDATE_SECONDS` 時，先以 refresh token 向 provider 重新驗證；結果與寬限見 [08](08-api.md)。管理員可停用使用者、列出與結束工作階段（`/api/v1/users`，只有 admin）。失敗關閉：換 token 回應沒有 refresh token（`refresh_unavailable`），或 ID token 不是非對稱簽章（`invalid_token`），登入不成立（[ADR-030](../oidc-login/adr/ADR-030-signing-and-refresh-token-requirements.md)）。重試與逾時：webhook 由呼叫端重試；Engine 不自動重跑 run。API 版本以路徑前綴區分。
 
 ## Engine 與 Runner 的內部邊界
 

@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.retention
 
 import dev.lawlan.runline.engine.config.RetentionSettings
+import dev.lawlan.runline.engine.oidc.LOGIN_ATTEMPT_TTL
 import java.time.Clock
 import java.time.Instant
 import java.util.EnumMap
@@ -57,6 +58,14 @@ class RetentionCleaner(
                 now - settings.cronFiringRetention,
                 store::deleteExpiredCronFirings,
             ),
+            Plan(RetentionStep.SESSIONS, now - settings.sessionIdle) { idleBefore, rows ->
+              store.deleteExpiredSessions(now, idleBefore, rows)
+            },
+            Plan(
+                RetentionStep.LOGIN_ATTEMPTS,
+                now - LOGIN_ATTEMPT_TTL,
+                store::deleteExpiredLoginAttempts,
+            ),
         )
     val removed = EnumMap<RetentionStep, Int>(RetentionStep::class.java)
     val failed = mutableListOf<RetentionStep>()
@@ -73,6 +82,8 @@ class RetentionCleaner(
             logEntries = removed.getValue(RetentionStep.LOG_ENTRIES),
             webhookFirings = removed.getValue(RetentionStep.WEBHOOK_FIRINGS),
             cronFirings = removed.getValue(RetentionStep.CRON_FIRINGS),
+            sessions = removed.getValue(RetentionStep.SESSIONS),
+            loginAttempts = removed.getValue(RetentionStep.LOGIN_ATTEMPTS),
             backlogRemains = backlog,
             failedSteps = failed,
         )
@@ -106,16 +117,25 @@ class RetentionCleaner(
   private fun logPass(report: RetentionReport, seconds: Double) {
     val millis = (seconds * 1000).toLong()
     val message =
-        "Retention clean-up removed {} runs, {} log entries, {} webhook firings and {} cron firings in {} ms"
+        "Retention clean-up removed {} runs, {} log entries, {} webhook firings, {} cron firings, " +
+            "{} sessions and {} sign-ins in {} ms"
     val args =
         arrayOf<Any>(
             report.runs,
             report.logEntries,
             report.webhookFirings,
             report.cronFirings,
+            report.sessions,
+            report.loginAttempts,
             millis,
         )
-    val nothing = report.runs + report.logEntries + report.webhookFirings + report.cronFirings == 0
+    val nothing =
+        report.runs +
+            report.logEntries +
+            report.webhookFirings +
+            report.cronFirings +
+            report.sessions +
+            report.loginAttempts == 0
     if (nothing) log.debug(message, *args) else log.info(message, *args)
     if (report.backlogRemains) {
       log.warn("Retention clean-up reached its batch limit; more is left for the next pass")

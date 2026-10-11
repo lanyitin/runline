@@ -55,6 +55,12 @@ Engine 側的組態項目（`RUNLINE_KEYSTORE_PATH`、`RUNLINE_KEYSTORE_PASSWORD
 - 金鑰庫檔案權限 `0644` 時，啟動記錄警告 `The keystore file is readable by other users; restrict it to the service account`。
 - 沒有掛上 drop-in 的預設情形（不設金鑰庫）沒有在本次重新驗證；drop-in 之外沒有改動單元檔。
 
+## OIDC 登入（選用）
+
+啟用方式與 authentik 端的設定見 [authentik 設定手冊](../../../deploy/authentik.md)；設定項目見 [04](04-deployment.md)。不啟用是預設。啟用時：不機密的項目寫在 `/etc/runline/runline.env`（`runline.env.example` 的 OIDC 區段，全部註解掉、只放占位符）；client secret 與加密 refresh token 的金鑰是 systemd 憑證，由選用的 drop-in `deploy/systemd/runline-engine-oidc.conf`（安裝為 `/etc/systemd/system/runline-engine.service.d/oidc.conf`）以 `LoadCredential` 從 `/etc/runline/oidc-client-secret`、`/etc/runline/session-encryption-key`（`root:root` `0600`）交給服務，`RUNLINE_OIDC_CLIENT_SECRET_FILE=%d/oidc-client-secret`、`RUNLINE_SESSION_ENCRYPTION_KEY_FILE=%d/session-encryption-key`，與金鑰庫密碼同一做法。provider 使用私有 CA 時，以 `runline-build-truststore` 做 JVM 信任庫並在 `runline.env` 設 `JDK_JAVA_OPTIONS`（已用瀏覽器 drop-in 時改用其 `RUNLINE_TRUSTED_CA_DIR`）。
+
+驗證限度：drop-in 只做過 `systemd-analyze verify`（與金鑰庫的 drop-in 相同，只有 `Type=simple`、`ExecStartPost=` 與憑證的既有警告），**沒有在 systemd 主機上啟動過**；信任與登入的機制以 Docker 版驗證（見 [Docker](04-deployment-docker.md)）。
+
 ## 瀏覽器（驅動 Chrome 的 pipeline）
 
 選用的 drop-in `deploy/systemd/runline-engine-browser.conf`（安裝為 `/etc/systemd/system/runline-engine.service.d/browser.conf`）讓 `ExecStart` 經由 `runline-entrypoint`：在服務的 control group 內啟動 Xvfb、建立 JVM 的私有 CA 信任、報告 Chrome 的渲染器，然後啟動 Engine；`CacheDirectory=runline` 提供可寫且可執行的 `java.io.tmpdir`（SQLite 驅動解開原生程式庫的地方）。主機要有 Google Chrome、Xvfb、`curl`、`procps`；GPU 需把服務帳號加進 `/dev/dri` 的群組。前置條件、變數、遺留行程的處理與目標主機上的驗證步驟見 [瀏覽器部署手冊](../../../deploy/browser.md)。這個 drop-in 在帶 systemd 的容器內實測過（啟動與就緒、Xvfb 隨服務停止、私有 CA 信任、SQLite 連續 10 個 run、`noexec` 的失敗與修正），**沒有在真實的 systemd 主機上實測**，細節與限度見手冊。

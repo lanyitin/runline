@@ -56,6 +56,15 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.keystore.y
 
 以真實 Docker 驗證：`./gradlew :engine:packagedTest --tests '*DockerKeystoreMountTest*'` 用 `compose.yaml`、`compose.keystore.yaml`、Dockerfile 與以真實 `keytool` 做的金鑰庫建立整組服務：(1) Engine 啟動、`GET /api/v1/secrets` 列出別名；(2) 在容器內寫入金鑰庫目錄失敗，兩個掛載（金鑰庫與密碼 secret）的 `RW` 都是 `false`；(3) 容器環境變數、映像歷史與映像各層（`docker save` 的位元組）都找不到密碼；(4) 在宿主機以副本加更名原子替換金鑰庫後，`POST /api/v1/secrets/reload` 回報新別名；(5) 密碼錯誤時 Engine 容器以非 0 結束，log 含 `wrong_password` 而不含任何密碼。
 
+## OIDC 登入（選用）
+
+啟用方式與 authentik 端的設定見 [authentik 設定手冊](../../../deploy/authentik.md)；設定項目見 [04](04-deployment.md)。不啟用是預設：`.env` 沒有任何 OIDC 設定時 Engine 與以前完全相同。啟用時：
+
+- 不機密的項目（issuer、client ID、`RUNLINE_PUBLIC_BASE_URL` 與選用項）寫在 `.env`（`.env.example` 的 OIDC 區段，全部註解掉、只放占位符）。`RUNLINE_PUBLIC_BASE_URL` 必須與使用者在瀏覽器看到的網址一致；為 https 時 cookie 帶 `Secure`，Engine 之前的 TLS 終止不影響這個判斷（只看這個設定）。
+- client secret 與加密 refresh token 的金鑰以檔案提供：疊加 `deploy/docker/compose.oidc.yaml`，把 `docker/secrets/oidc-client-secret` 與 `docker/secrets/session-encryption-key`（路徑可用 `OIDC_CLIENT_SECRET_HOST_FILE`、`SESSION_ENCRYPTION_KEY_HOST_FILE` 改）掛成 Docker secret，並設 `RUNLINE_OIDC_CLIENT_SECRET_FILE`、`RUNLINE_SESSION_ENCRYPTION_KEY_FILE`，與金鑰庫密碼同一做法；機密不在映像、環境變數與 log。
+- provider 使用私有 CA：再疊加 `compose.oidc-ca.yaml`，掛載以 `deploy/bin/runline-build-truststore` 做的 JVM 信任庫並設 `JDK_JAVA_OPTIONS`（瀏覽器映像改用 `RUNLINE_TRUSTED_CA_DIR`）。
+- 驗證：`DockerOidcPrivateCaTest`（`packagedTest`，真實的 Compose 檔、PostgreSQL 與以自建 CA 提供 https 的 Keycloak）：未信任該 CA 時登入起點回 `provider_unavailable`；用手冊的做法做出信任庫後，登入成功並取得群組對應的角色。未用真實 authentik 驗證（WI-1204）。
+
 ## 瀏覽器映像（驅動 Chrome 的 pipeline）
 
 為 digest-rss 這類在 Engine 主機上驅動有畫面的 Chrome 的 pipeline（[ADR-022](../digest-rss/adr/ADR-022-unsafe-pipeline-with-local-browser.md)），`Dockerfile` 另有 `browser` 階段，疊加檔 `deploy/docker/compose.browser.yaml` 使用它：真實的 Google Chrome（只有 `linux/amd64`）、Xvfb、init 為 PID 1、私有 CA 根憑證的 JVM 信任、啟動時的渲染器報告；`compose.browser-gpu.yaml` 把 `/dev/dri` 交給容器。`compose.yaml` 指定 `target: engine`，原本的映像與就緒探測都不變，Chrome 不可用不影響就緒。設定項目、驗證步驟與實測見 [瀏覽器部署手冊](../../../deploy/browser.md)；以真實 Docker 驗證：`./gradlew :engine:browserDeploymentTest`（需要 amd64 的 Docker，下載 Chrome，不屬於 `check`）。

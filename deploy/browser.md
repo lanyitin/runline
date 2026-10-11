@@ -49,7 +49,7 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 | `REGISTRY_USER` | 機密 | 持有權杖的帳號 |
 | `REGISTRY_TOKEN` | 機密 | 只授與 `write:package` 的存取權杖 |
 
-登入以標準輸入傳權杖，job 結束時（含失敗）登出。工作流程的 `runs-on: docker` 是 runner 的標籤，依實際 runner 調整；runner 須為 amd64、能存取 Docker daemon。
+登入以標準輸入傳權杖，job 結束時（含失敗）登出。工作流程的 `runs-on: ubuntu-latest` 是 runner 上提供 Docker CLI 並連到 Docker daemon 的標籤（同一個 Forgejo 的 streamexa 發佈流程用同一標籤）；`docker` 標籤的環境沒有 Docker CLI（首次 run 以 exit code 127 失敗）。工作一開始（安裝 JDK、Node 之前）先執行 `docker version`，不可用就以明確訊息立即失敗。Docker CLI 由 runner 提供，工作流程不安裝；runner 須為 amd64。
 
 部署端只需要 `docker/compose.registry.yaml`、`.env`（由 `docker/.env.example` 複製，置換佔位值）與下列變數，不需要原始碼：
 

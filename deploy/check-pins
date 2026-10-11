@@ -1,0 +1,57 @@
+#!/bin/bash
+# Fails when a build input is named by a movable reference instead of a content hash
+# (docs/stable/homelab-arr/work-items/WI-1102-pin-build-inputs.md, ADR-029). It reads:
+#
+#   .forgejo/workflows/*.yaml   every `uses:` of an action: must end in @<40-hex commit id>
+#   deploy/docker/Dockerfile    every FROM of an image: must carry @sha256:<64-hex> (FROM of an earlier
+#                               stage is not an image)
+#   deploy/docker/compose*.yaml every `image:`: must carry @sha256:<64-hex>. Two names are not external
+#                               inputs and are exempt: the image this repository builds (runline-engine*)
+#                               and the published image an operator names (${RUNLINE_IMAGE...})
+#
+# The same image written in two Compose templates must carry the same hash. The templates are separate
+# files because the registry template is copied alone to a host, so each carries its own line.
+#
+#   deploy/check-pins [root]     root defaults to the repository containing this script
+set -euo pipefail
+
+root="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$root"
+problems=0
+problem() { printf 'check-pins: %s: %s\n' "$1" "$2" >&2; problems=$((problems + 1)); }
+
+digest_re='@sha256:[0-9a-f]{64}$'
+
+for f in .forgejo/workflows/*.yaml; do
+  [ -e "$f" ] || continue
+  while read -r ref; do
+    [[ "$ref" =~ @[0-9a-f]{40}$ ]] || problem "$f" "action '$ref' is not pinned to a full commit id"
+  done < <(sed -nE 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*([^[:space:]#]+).*/\2/p' "$f")
+done
+
+dockerfile=deploy/docker/Dockerfile
+stages=()
+if [ -e "$dockerfile" ]; then
+  while read -r image stage; do
+    if [[ " ${stages[*]:-} " == *" $image "* ]]; then :
+    elif ! [[ "$image" =~ $digest_re ]]; then problem "$dockerfile" "image '$image' has no sha256 digest"
+    fi
+    [ -z "$stage" ] || stages+=("$stage")
+  done < <(sed -nE 's/^FROM[[:space:]]+(--[^[:space:]]+[[:space:]]+)*([^[:space:]]+)([[:space:]]+[Aa][Ss][[:space:]]+([^[:space:]]+))?.*/\2 \4/p' "$dockerfile")
+fi
+
+postgres_refs=()
+for f in deploy/docker/compose*.yaml; do
+  [ -e "$f" ] || continue
+  while read -r ref; do
+    case "$ref" in runline-engine*|'${RUNLINE_IMAGE'*) continue ;; esac
+    [[ "$ref" =~ $digest_re ]] || problem "$f" "image '$ref' has no sha256 digest"
+    case "$ref" in postgres:*) postgres_refs+=("$ref") ;; esac
+  done < <(sed -nE 's/^[[:space:]]*image:[[:space:]]*([^[:space:]#]+).*/\1/p' "$f")
+done
+if [ "${#postgres_refs[@]}" -gt 0 ] && [ "$(printf '%s\n' "${postgres_refs[@]}" | sort -u | wc -l)" -gt 1 ]; then
+  problem "deploy/docker" "the Compose templates name different PostgreSQL images: $(printf '%s ' "${postgres_refs[@]}")"
+fi
+
+[ "$problems" -eq 0 ] || exit 1
+echo "check-pins: every action and container image is pinned by hash"

@@ -14,6 +14,8 @@
 | `publish-image` | 建置入口：在筆電交叉建置 `linux/amd64` 的瀏覽器版映像並以 commit 為 tag 推到 registry |
 | `docker/compose.registry.yaml` | 獨立範本：引用已發佈的映像（不建置），含 PostgreSQL、`init`、migrate、engine |
 | `docker/compose.registry-gpu.yaml` | `compose.registry.yaml` 的疊加檔：GPU 裝置與群組 |
+| `check-pins` | 自動檢查：工作流程的 action、Dockerfile 與各 Compose 範本的映像任何一個沒有帶雜湊就失敗（見「更新固定的雜湊」） |
+| `test/pins-test.sh` | `check-pins` 的檢查：對目前的檔案通過，對故意放回標籤的各種情形失敗 |
 | `test/publish-test.sh` | 不需 Docker daemon 的檢查：建置入口的拒絕條件、範本展開後的內容 |
 | `bin/runline-entrypoint` | 容器（與 systemd 選用）的啟動：虛擬顯示、JVM 信任、啟動時的渲染器報告，然後以 `exec` 啟動 Engine |
 | `bin/runline-browser-probe` | 讀出 Chrome 取得的 WebGL 渲染器；可要求硬體渲染 |
@@ -66,6 +68,27 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 
 驗證：`deploy/test/publish-test.sh`（不需 daemon）。其餘在 Colima（Rosetta）與本機 `registry:2` 上實測：從乾淨 clone 建置並推送，刪除本機映像後在只有範本、`.env` 與憑證檔的目錄 `docker compose up -d` 拉取並啟動，engine 就緒、`runline-browser-probe` 執行完成、在映像上跑一個 pipeline 確認 Engine 的類別對 run 不可見。**未實測**：amd64 原生的筆電、真實的 Forgejo registry（含認證）、GPU 疊加檔在有 `/dev/dri` 的主機。
 
+### 更新固定的雜湊（WI-1102、ADR-029）
+
+建置輸入都以內容雜湊引用，標籤只是旁邊給人讀的註解；上游重新發佈同一標籤不影響建置。代價是安全修補不會自動進來，由維運者決定何時升級。不使用自動更新工具。每個雜湊只定義一處：
+
+| 輸入 | 定義處 | 雜湊的種類 |
+|---|---|---|
+| 工作流程的 action（checkout、setup-java、setup-node） | `.forgejo/workflows/publish-image.yaml` 的 `uses:` | 完整提交識別（40 碼），註解標明版本 |
+| Engine 基底映像 `eclipse-temurin:25-jre` | `docker/Dockerfile` 的 `FROM`（`deploy/publish-image` 的架構檢查讀同一行，所以檢查與建置是同一個映像） | 多平台索引的 `sha256:` |
+| PostgreSQL `postgres:17-alpine` | `docker/compose.yaml` 與 `docker/compose.registry.yaml` 的 `image:`。後者要單獨複製到部署端，所以兩個檔案各一行；`check-pins` 要求兩處相同 | 多平台索引的 `sha256:` |
+
+Chrome 不在其中：它以 `CHROME_VERSION` 固定版本號，從 Google 的網址下載，不驗證內容雜湊（ADR-029 已接受的限度）。
+
+升級一個輸入時：
+
+1. 取得新雜湊，從上游本身取得，不從第三方轉貼：
+   - action：`git ls-remote https://data.forgejo.org/actions/<name> 'refs/tags/<版本>' 'refs/tags/<版本>^{}'`。若有 `^{}` 那一行，用它（標籤指向的提交）；否則用第一行。
+   - 映像：`docker buildx imagetools inspect <名稱>:<標籤>`，取 `Digest:`，且確認 `MediaType` 是 `application/vnd.oci.image.index.v1+json`（或 `...manifest.list.v2+json`），Manifests 內含 `linux/amd64`。要的是索引的雜湊，不是單一平台的。
+2. 確認來源：註解中的標籤確實解析到該雜湊（上面的指令就是在標籤上查的）；映像的 registry 是 Docker Hub 的官方映像（`docker.io/library/...`）。對照上游的版本說明確認這是要升級的版本。
+3. 更新引用：只改上表的定義處，並同步改旁邊註解的版本或標籤。PostgreSQL 兩個 Compose 檔一起改。
+4. 重新驗證：`deploy/check-pins`（全部有雜湊、兩個 PostgreSQL 引用相同）、`deploy/test/pins-test.sh`、`deploy/test/publish-test.sh`；然後 `RUNLINE_REGISTRY=registry.invalid/x deploy/publish-image --no-push` 建置，檢查映像（非 root、無密鑰、`run-runtime/` 與 `engine.jar` 分離、`runline-browser-probe` 可執行），並以 `compose.registry.yaml` 啟動到 engine 就緒。action 的升級在推送新的 `v*` tag 後於 runner 上驗證。
+
 ## 環境變數
 
 全部經環境變數提供（Docker：`.env` 與映像的預設；systemd：`runline.env`）。缺漏時不會讓 Engine 啟動失敗，除非標明。
@@ -97,7 +120,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.ya
 | 項目 | 內容 |
 |---|---|
 | 映像 | `Dockerfile` 的 `browser` 階段，建在 `engine` 階段之上（`compose.yaml` 指定 `target: engine`，原本的映像不變）。以 `ARG CHROME_VERSION`（預設 `155.0.8059.39-1`，WI-1000 量測的版本）從 Google 的套件庫安裝 Chrome，另含 Xvfb、`fonts-noto-cjk`、`curl`、`procps`。非 amd64 建置時，建置步驟以說明訊息失敗 |
-| 可重現性 | 映像**不在** WI-32 的位元組級可重現範圍內：那個保證是給 `engine.jar` 等 jar 的，映像只是打包它們。Chrome 以固定版本安裝，但 apt 的相依套件與基底映像的標籤會隨時間改變；要鎖定就以摘要固定基底映像。發佈建置（`verifyReproducibleRelease`）不受影響 |
+| 可重現性 | 映像**不在** WI-32 的位元組級可重現範圍內：那個保證是給 `engine.jar` 等 jar 的，映像只是打包它們。Chrome 以固定版本安裝，基底映像以雜湊固定（見「更新固定的雜湊」），但 apt 的相依套件仍會隨時間改變。發佈建置（`verifyReproducibleRelease`）不受影響 |
 | 帳號 | 與 Engine 相同的 `runline`（uid 10001）。Chrome 在容器內以 `--no-sandbox` 執行（容器本身是隔離邊界；沙箱需要使用者命名空間，預設的容器沒有）；`HOME=/home/runline` 供 Chrome 放小檔案，不需持久 |
 | 顯示 | `runline-entrypoint` 在 `DISPLAY` 上啟動 Xvfb（`-nolisten tcp`）。Xvfb 以子殼層啟動，由 init 接手，不是 JVM 的子行程。容器重啟（`docker restart`）時先清掉上次留下的鎖檔（實測：重啟後顯示正常出現）。顯示沒有在 10 秒內出現時只在 log 警告，Engine 照常啟動 |
 | init | `compose.browser.yaml` 設 `init: true`：PID 1 是 Docker 的 init（tini），回收被取消而遺留的 Chrome 輔助行程。Java 為 PID 1 時它們成為殭屍（見「實測」）。`docker run` 要加 `--init` |

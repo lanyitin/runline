@@ -58,6 +58,25 @@ for bad in latest 'v1 2' '-v1' 'a:b' 'a/b'; do
     env RUNLINE_REGISTRY=registry.invalid/runline RUNLINE_EXTRA_TAG="$bad" "$work/clean/deploy/publish-image"
 done
 
+# The amd64 check on a daemon that must first download the base image (the case of a clean runner, where
+# Docker prints its pull progress before the probe's own output). It needs a real daemon, so it is skipped
+# loudly without one. The checkout is a copy whose Dockerfile names a base image that this test removes
+# from the daemon first, and whose gradlew stops the entry right after the check: reaching it means the
+# check passed.
+pull_base=eclipse-temurin:21.0.5_11-jre-alpine
+if docker info >/dev/null 2>&1; then
+  git clone -q "$root" "$work/pulling"
+  cp "$root/deploy/publish-image" "$work/pulling/deploy/publish-image"
+  sed -i.bak "s|^FROM eclipse-temurin[^ ]* AS engine\$|FROM $pull_base AS engine|" "$work/pulling/deploy/docker/Dockerfile"
+  printf '#!/bin/sh\necho check-passed-reached-gradle\nexit 1\n' >"$work/pulling/gradlew"
+  docker rmi "$pull_base" >/dev/null 2>&1
+  check "base image not local: the architecture check ignores the download messages" 1 'check-passed-reached-gradle' \
+    env RUNLINE_REGISTRY=registry.invalid/runline "$work/pulling/deploy/publish-image" --no-push
+  docker rmi "$pull_base" >/dev/null 2>&1
+else
+  echo "SKIP base image not local: no Docker daemon reachable"
+fi
+
 # The template as an operator has it: beside a .env (empty here; its values are given as variables).
 mkdir "$work/host"
 cp "$root/deploy/docker/compose.registry.yaml" "$work/host/"

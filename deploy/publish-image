@@ -69,6 +69,9 @@ docker info >/dev/null 2>&1 || fail "the Docker daemon cannot be reached (is Doc
 # An amd64 container must run here. Only a run proves it; the architecture of the host does not.
 base="$(sed -n 's/^FROM \(eclipse-temurin[^ ]*\) AS engine$/\1/p' deploy/docker/Dockerfile)"
 [ -n "$base" ] || fail "cannot find the base image in deploy/docker/Dockerfile"
+# The base image is fetched first, apart from the probe: when it is not local Docker prints its download
+# progress, and that must not end up in the architecture value that is compared.
+docker pull --quiet --platform linux/amd64 "$base" >/dev/null || fail "cannot fetch the base image $base for linux/amd64 (is the registry reachable?)"
 arch="$(docker run --rm --platform linux/amd64 --entrypoint uname "$base" -m 2>&1)" || arch=""
 if [ "$arch" != "x86_64" ]; then
   fail "this Docker daemon cannot run linux/amd64 containers (got '${arch:-nothing}'). On an arm64 machine enable amd64 emulation: Colima with vmType vz and rosetta true (colima start --vm-type vz --vz-rosetta), Docker Desktop with Rosetta. QEMU is not enough: Chrome aborts under it."

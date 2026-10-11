@@ -32,9 +32,24 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 ```
 
 - `RUNLINE_REGISTRY`（環境變數，必填）：registry 位址與路徑，不含 tag、帳密。映像為 `$RUNLINE_REGISTRY/runline-engine-browser:<commit 前 12 碼>`，最後一行輸出印出完整引用。沒有浮動 tag。
+- `RUNLINE_EXTRA_TAG`（環境變數，選填）：同一映像再加的第二個 tag，例如版本 tag `v1.2.0`。加在 commit tag 之外而非取代，commit tag 先推；拒絕 `latest` 與不合法的 tag，且在建置之前檢查。入口每推一個引用就印一行。
 - 憑證：入口不讀不存。先 `docker login <host>`（密碼由終端機提示或 `--password-stdin`），推送使用該登入。
 - 工作樹有未提交或未追蹤的變更時拒絕推送並說明原因；`--no-push` 仍可建置，tag 為 `<commit>-dirty`。
 - 一律 `linux/amd64`。arm64 筆電上 Docker 的虛擬機須以 Rosetta 模擬（Colima：`vmType: vz`、`rosetta: true`）；入口先實際跑一個 amd64 容器，不行就明確失敗並說明。建置後檢查映像的架構，不是 `linux/amd64` 即不推送。映像帶 `org.opencontainers.image.revision` 標籤（完整 commit）。
+
+### 推送 `v*` tag 時由 Forgejo Action 建置（WI-1101、ADR-027）
+
+`.forgejo/workflows/publish-image.yaml` 只在推送符合 `v*` 的 tag 時執行（分支與其他 tag 不觸發），在 runner 上準備 JDK 25、Node（`.node-version`）與 registry 登入後執行同一個 `deploy/publish-image`，並以 `RUNLINE_EXTRA_TAG` 帶入觸發它的 tag。規則只在入口一處，產物與筆電的可互換；它不接觸 arr、不改部署設定，上線仍由維運者手動把 `RUNLINE_IMAGE` 改成新的 tag。
+
+在 Forgejo 的儲存庫設定（Actions）需要：
+
+| 名稱 | 種類 | 說明 |
+|---|---|---|
+| `RUNLINE_REGISTRY` | 變數 | registry 位址與路徑，例如 `forgejo.dev.lan/runline` |
+| `REGISTRY_USER` | 機密 | 持有權杖的帳號 |
+| `REGISTRY_TOKEN` | 機密 | 只授與 `write:package` 的存取權杖 |
+
+登入以標準輸入傳權杖，job 結束時（含失敗）登出。工作流程的 `runs-on: docker` 是 runner 的標籤，依實際 runner 調整；runner 須為 amd64、能存取 Docker daemon。
 
 部署端只需要 `docker/compose.registry.yaml`、`.env`（由 `docker/.env.example` 複製，置換佔位值）與下列變數，不需要原始碼：
 

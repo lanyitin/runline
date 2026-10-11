@@ -8,6 +8,9 @@
 # Configuration comes from the environment, never from this file:
 #   RUNLINE_REGISTRY   registry host and path the image goes under, no tag and no credentials
 #                      (forgejo.example/owner gives forgejo.example/owner/runline-engine-browser:<tag>)
+#   RUNLINE_EXTRA_TAG  optional; a second tag for the same image, such as the release tag v1.2.0 that a
+#                      release workflow builds from (docs/stable/homelab-arr/work-items/WI-1101-forgejo-action.md).
+#                      It is added beside the commit tag, never in its place; `latest` is refused
 #
 # Registry credentials are not read or stored here. Log in beforehand with `docker login "$host"`; the
 # password is then read from the terminal or a credential helper (`--password-stdin` from a secret
@@ -38,6 +41,14 @@ case "$registry" in
   *@*|*://*|*:latest|*[[:space:]]*) fail "RUNLINE_REGISTRY must be a host and path only (no credentials, scheme or tag): '${registry//@*/@...}'" ;;
 esac
 registry="${registry%/}"
+
+# The extra tag is checked with the registry: nothing is built for a tag that cannot be pushed.
+extra_tag="${RUNLINE_EXTRA_TAG:-}"
+if [ -n "$extra_tag" ]; then
+  [ "$extra_tag" != latest ] || fail "RUNLINE_EXTRA_TAG must not be 'latest': nothing floats"
+  printf '%s' "$extra_tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$' \
+    || fail "RUNLINE_EXTRA_TAG '$extra_tag' is not a valid image tag (letters, digits, '_', '.', '-'; up to 128; not starting with '.' or '-')"
+fi
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -72,7 +83,15 @@ docker build --platform linux/amd64 --target browser --build-context deploy=depl
 built="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")"
 [ "$built" = "linux/amd64" ] || fail "the image came out as $built, not linux/amd64; it is not pushed"
 
-if [ "$push" = yes ]; then
-  docker push "$image"
+images=("$image")
+if [ -n "$extra_tag" ]; then
+  extra_image="$registry/runline-engine-browser:$extra_tag"
+  docker tag "$image" "$extra_image"
+  images+=("$extra_image")
 fi
-printf '%s\n' "$image"
+
+# The commit tag goes first: the extra tag appears in the registry only after the image it names is there.
+if [ "$push" = yes ]; then
+  for pushed in "${images[@]}"; do docker push "$pushed"; done
+fi
+printf '%s\n' "${images[@]}"

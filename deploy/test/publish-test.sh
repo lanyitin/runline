@@ -52,6 +52,12 @@ check "refuses to push a tree with uncommitted changes" 1 'uncommitted' \
 check "refuses a registry value carrying a tag or credentials" 1 'RUNLINE_REGISTRY' \
   env RUNLINE_REGISTRY=user:secret@registry.invalid/runline "$work/clean/deploy/publish-image"
 
+# The version tag a release workflow adds beside the commit tag (WI-1101): refused before anything is built.
+for bad in latest 'v1 2' '-v1' 'a:b' 'a/b'; do
+  check "refuses the extra tag '$bad'" 1 'RUNLINE_EXTRA_TAG' \
+    env RUNLINE_REGISTRY=registry.invalid/runline RUNLINE_EXTRA_TAG="$bad" "$work/clean/deploy/publish-image"
+done
+
 # The template as an operator has it: beside a .env (empty here; its values are given as variables).
 mkdir "$work/host"
 cp "$root/deploy/docker/compose.registry.yaml" "$work/host/"

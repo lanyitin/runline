@@ -1,6 +1,6 @@
 # WI-1102 建置輸入以雜湊固定
 
-狀態：已核可（2026-10-11）。回答：要達成什麼行為，使 CI 與映像檔建置不再依賴可移動的標籤。依據 [ADR-029](../adr/ADR-029-pin-build-inputs-by-hash.md)。
+狀態：已核可（2026-10-11）。回答：要達成什麼行為，使 CI 與映像檔建置不再依賴可移動的標籤。依據 [ADR-032](../adr/ADR-032-pin-build-inputs-by-hash.md)。
 
 **工作的儲存庫：** runline（`.forgejo/`、`deploy/`）。
 
@@ -11,7 +11,7 @@
 ## 範圍
 
 - 內：`.forgejo/workflows/` 內每個 action 的引用；`deploy/docker/` 的 Dockerfile 與各 Compose 範本中引用的每個容器映像（Engine 基底映像、PostgreSQL）；`deploy/publish-image` 對基底映像的架構檢查；`deploy/browser.md` 的更新步驟說明。
-- 外：Chrome 安裝套件的完整性（維持以版本號固定，不驗證內容雜湊，見 [ADR-029](../adr/ADR-029-pin-build-inputs-by-hash.md)）；自動更新工具；arr 側的 Terraform 與 compose（由 homelab-deployer 在 homelab 儲存庫處理，其映像是否同樣固定另議）。
+- 外：Chrome 安裝套件的完整性（維持以版本號固定，不驗證內容雜湊，見 [ADR-032](../adr/ADR-032-pin-build-inputs-by-hash.md)）；自動更新工具；arr 側的 Terraform 與 compose（由 homelab-deployer 在 homelab 儲存庫處理，其映像是否同樣固定另議）。
 
 ## 驗收條件
 

@@ -41,7 +41,7 @@ flowchart LR
 | 4 部署架構 | [04-deployment.md](04-deployment.md) | 已核可 |
 | 8 決策記錄 | [adr/ADR-026-homelab-arr-deployment.md](adr/ADR-026-homelab-arr-deployment.md) | 已核可 |
 | 8 決策記錄（續） | [adr/ADR-027-forgejo-action-image-publishing.md](adr/ADR-027-forgejo-action-image-publishing.md)：推 `v*` tag 時由 Forgejo Action 建置並推送，上線手動 | 已核可 |
-| 8 決策記錄（續） | [adr/ADR-029-pin-build-inputs-by-hash.md](adr/ADR-029-pin-build-inputs-by-hash.md)：action 與容器映像以內容雜湊固定，更新為人工動作 | 已核可 |
+| 8 決策記錄（續） | [adr/ADR-032-pin-build-inputs-by-hash.md](adr/ADR-032-pin-build-inputs-by-hash.md)：action 與容器映像以內容雜湊固定，更新為人工動作 | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |
 
 第 1、2、3、5、6、7 章不另立文件：需求與現況在 ADR-026 的背景與 04 中；IPC 與資料模型沿用 [pipeline-engine](../pipeline-engine/README.md)，不變。

@@ -9,7 +9,9 @@
 # browser). The last stage is what a build without --target makes, so name the one you want:
 #
 #   docker build --target engine -f deploy/docker/Dockerfile -t runline-engine engine/build/engine-dist
-FROM eclipse-temurin:25-jre AS engine
+# Pinned by the hash of the multi-platform index of eclipse-temurin:25-jre (ADR-029). This line is the one
+# definition: deploy/publish-image reads it for its architecture check. Update: deploy/browser.md.
+FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636 AS engine
 
 # A dedicated unprivileged account. The three directories are the places the Engine writes to: the
 # shared root (ADR-009) and the resource root (the files of `file` shared resources, ADR-019) must

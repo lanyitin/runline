@@ -8,6 +8,9 @@
 # Configuration comes from the environment, never from this file:
 #   RUNLINE_REGISTRY   registry host and path the image goes under, no tag and no credentials
 #                      (forgejo.example/owner gives forgejo.example/owner/runline-engine-browser:<tag>)
+#   RUNLINE_EXTRA_TAG  optional; a second tag for the same image, such as the release tag v1.2.0 that a
+#                      release workflow builds from (docs/stable/homelab-arr/work-items/WI-1101-forgejo-action.md).
+#                      It is added beside the commit tag, never in its place; `latest` is refused
 #
 # Registry credentials are not read or stored here. Log in beforehand with `docker login "$host"`; the
 # password is then read from the terminal or a credential helper (`--password-stdin` from a secret
@@ -39,6 +42,14 @@ case "$registry" in
 esac
 registry="${registry%/}"
 
+# The extra tag is checked with the registry: nothing is built for a tag that cannot be pushed.
+extra_tag="${RUNLINE_EXTRA_TAG:-}"
+if [ -n "$extra_tag" ]; then
+  [ "$extra_tag" != latest ] || fail "RUNLINE_EXTRA_TAG must not be 'latest': nothing floats"
+  printf '%s' "$extra_tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$' \
+    || fail "RUNLINE_EXTRA_TAG '$extra_tag' is not a valid image tag (letters, digits, '_', '.', '-'; up to 128; not starting with '.' or '-')"
+fi
+
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
@@ -56,8 +67,13 @@ command -v docker >/dev/null || fail "docker is not installed"
 docker info >/dev/null 2>&1 || fail "the Docker daemon cannot be reached (is Docker, or Colima, running?)"
 
 # An amd64 container must run here. Only a run proves it; the architecture of the host does not.
+# The base image is the pinned one from the Dockerfile (name, tag and digest as written there), the same
+# reference docker build uses: the check runs on exactly what is built (ADR-029).
 base="$(sed -n 's/^FROM \(eclipse-temurin[^ ]*\) AS engine$/\1/p' deploy/docker/Dockerfile)"
 [ -n "$base" ] || fail "cannot find the base image in deploy/docker/Dockerfile"
+# The base image is fetched first, apart from the probe: when it is not local Docker prints its download
+# progress, and that must not end up in the architecture value that is compared.
+docker pull --quiet --platform linux/amd64 "$base" >/dev/null || fail "cannot fetch the base image $base for linux/amd64 (is the registry reachable?)"
 arch="$(docker run --rm --platform linux/amd64 --entrypoint uname "$base" -m 2>&1)" || arch=""
 if [ "$arch" != "x86_64" ]; then
   fail "this Docker daemon cannot run linux/amd64 containers (got '${arch:-nothing}'). On an arm64 machine enable amd64 emulation: Colima with vmType vz and rosetta true (colima start --vm-type vz --vz-rosetta), Docker Desktop with Rosetta. QEMU is not enough: Chrome aborts under it."
@@ -72,7 +88,15 @@ docker build --platform linux/amd64 --target browser --build-context deploy=depl
 built="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")"
 [ "$built" = "linux/amd64" ] || fail "the image came out as $built, not linux/amd64; it is not pushed"
 
-if [ "$push" = yes ]; then
-  docker push "$image"
+images=("$image")
+if [ -n "$extra_tag" ]; then
+  extra_image="$registry/runline-engine-browser:$extra_tag"
+  docker tag "$image" "$extra_image"
+  images+=("$extra_image")
 fi
-printf '%s\n' "$image"
+
+# The commit tag goes first: the extra tag appears in the registry only after the image it names is there.
+if [ "$push" = yes ]; then
+  for pushed in "${images[@]}"; do docker push "$pushed"; done
+fi
+printf '%s\n' "${images[@]}"

@@ -1,0 +1,81 @@
+# Builds the browser Engine image and pushes it to the Forgejo registry when a v* tag is pushed
+# (docs/stable/homelab-arr/work-items/WI-1101-forgejo-action.md, ADR-027).
+#
+# The rules of the build and the push (linux/amd64, the tag from the commit, no latest, nothing
+# pushed when the architecture is wrong) are those of deploy/publish-image, the entry a laptop
+# uses too; this file only gives it a checkout, its tools and a login. It touches no deployment:
+# rolling the image out stays a manual change of the image tag in the homelab repository.
+#
+# Configuration (Forgejo: repository Settings, Actions):
+#   variable RUNLINE_REGISTRY  registry host and path, e.g. forgejo.dev.lan/runline
+#   secret   REGISTRY_USER     account that owns the token
+#   secret   REGISTRY_TOKEN    access token with the write:package scope and nothing else
+name: publish-image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# One build per tag at a time; a second push of the same tag waits rather than racing the first.
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # The runner's ubuntu-latest job environment has the Docker CLI wired to the host daemon (the
+    # label the streamexa release workflow uses on the same runner). The CLI comes from the runner;
+    # this workflow does not install it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      # First, before any tool is installed or anything is built: fail clearly when the runner
+      # offers no Docker, instead of failing with exit code 127 at the login.
+      - name: Verify Docker is available
+        run: |
+          if ! docker version >/dev/null 2>&1; then
+            echo "Docker is not available to this job: the runner must provide the Docker CLI wired to a daemon (host socket or DinD) for the label in runs-on." >&2
+            exit 1
+          fi
+
+      # Actions are pinned to a commit id (ADR-029); the comment names the version. Update: deploy/browser.md.
+      - uses: https://data.forgejo.org/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: https://data.forgejo.org/actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # The Console is built with the Node pinned in .node-version (the Engine's build checks it).
+      - uses: https://data.forgejo.org/actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Log in to the registry
+        env:
+          RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$RUNLINE_REGISTRY" ] || { echo "variable RUNLINE_REGISTRY is not set" >&2; exit 1; }
+          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_TOKEN" ] || { echo "secrets REGISTRY_USER and REGISTRY_TOKEN must both be set" >&2; exit 1; }
+          # The token is read from standard input, never from a command line.
+          printf '%s' "$REGISTRY_TOKEN" | docker login "${RUNLINE_REGISTRY%%/*}" --username "$REGISTRY_USER" --password-stdin
+
+      - name: Build and push
+        env:
+          RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
+          # The tag that triggered the run, next to the commit tag.
+          RUNLINE_EXTRA_TAG: ${{ github.ref_name }}
+        run: deploy/publish-image
+
+      # The login stays only for the job; do not leave the token in the runner's Docker config.
+      - name: Log out of the registry
+        if: always()
+        env:
+          RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
+        run: docker logout "${RUNLINE_REGISTRY%%/*}" || true

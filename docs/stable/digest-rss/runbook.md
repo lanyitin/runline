@@ -451,6 +451,40 @@ LIMIT 70;
 
 取出封面影像（保留期內）：`sqlite3 digest.db "select writefile('cover.png', cover_image) from capture where run_id = 5 and post_id = 12"`；以 `cover_sha256` 核對。
 
+### 8.3 Console 的 view
+
+Console 的 pipeline 詳情頁的「資料」區顯示 digest-rss 宣告的四個 view，不需要 `sqlite3` 或 Engine 帳號。view 是唯讀的表格，所有 view 都不顯示下載連結（連結可能帶金鑰）。宣告與查詢文字見 [`runline-digest-rss` 的 README](../../../../runline-digest-rss/README.md) 的「Console 的 view（WI-1303）」，機制見 [pipeline view](../pipeline-views/README.md)。
+
+| view（id） | 回答的問題 |
+|---|---|
+| 下載清單（`downloads`） | 哪些文章被派發下載、派發到哪個服務、結果是 `succeeded`、`failed` 或 `unknown`，嘗試了幾次 |
+| 未下載與原因（`not-downloaded`） | 哪些文章沒有任何一次派發成功，以及為什麼；可用參數 `reason` 依原因類別篩選 |
+| run 清單（`runs`） | 每次 run 的起訖、結果與抓到、保留、過濾、下載成功、下載失敗、結果未知的篇數；點 run 編號鑽取到下一個 view |
+| 某次 run 的文章（`run-articles`） | 參數 `run`；那次 run 列出的每篇文章的處置（或未處理原因）與下載結果 |
+
+這四個 view 沒有涵蓋的問題（引文與判定依據、各站點失敗率、各規則版本的保留比例、digest、標記、隔離清單、階段耗時）仍用第 8.1、8.2 節的查詢。
+
+**未下載的原因類別。** `not-downloaded` 的「原因類別」欄是下表的值之一；名稱以 digest-rss 儲存庫的宣告（`DigestViews`）為準，說明欄另有每一列的具體原因。
+
+| 類別 | 意思 |
+|---|---|
+| `filtered` | 不符條件；說明列出答 `no` 的條件 |
+| `refused` | 引文驗證未通過；說明含拒絕原因 |
+| `capture_failed`、`text_insufficient`、`whole_page_screenshot` | 擷取失敗、文字不足、只有整頁截圖；說明是擷取時記下的原因 |
+| `quarantine` | 隔離中（連續未得出判定，刻意暫停），隔離期滿後恢復 |
+| `not_read` | 頁面可讀，但讀者沒有處理這篇 |
+| `no_link` | 保留的文章沒有 torrent／magnet（feed 與頁面都沒有），改用文章網址派發給 streamexa 仍失敗 |
+| `download_failed` | 保留，torrent／magnet（或 feed／頁面的連結）已派發，服務回失敗 |
+| `download_unknown` | 已派發，但結果未知（只留下 `pending`） |
+| `not_dispatched` | 保留，但最近一次 run 沒有這篇的派發紀錄（例如 run 在下載階段失敗、被停止）；說明帶該 run 的結果 |
+| `unprocessed` | 最近一次 run 沒有記下處置也沒有原因（例如 run 還在進行） |
+
+**前提：角色 `database` 已綁定（第 4.4 節）。** view 讀的是 `database` 角色綁定的資源。角色沒有綁定、也沒有同名資源時，「資料」區的 view 狀態顯示「未綁定」，點進去說明該角色沒有共享資源，並提供選擇資源的入口；處置是依第 4.4 節綁定，不需要重新上傳。資源已停用、已被刪除、型別不符時同樣顯示在狀態欄，處置同第 10.1 節的對應列。這個綁定是建立 run 所需要的，所以依第 4 節完成上線的 pipeline 不會遇到未綁定。
+
+**時間欄。** 所有 view 的時間欄都以帶 UTC 偏移的格式輸出，Console 才會依使用者的語言與時區顯示；複製到別處的原始值是 UTC。
+
+**並行讀取上限。** 同一個資源同時進行的 view 讀取有上限，超過的讀取得到「資料庫忙碌中」，稍候再試即可。管理員要調整上限時，環境變數的名稱與預設值見 [pipeline-engine 的部署文件](../pipeline-engine/04-deployment.md)；原因見 [ADR-035](../pipeline-views/adr/ADR-035-view-read-limits.md)。
+
 ## 9. 維運
 
 ### 9.1 備份
@@ -461,7 +495,7 @@ LIMIT 70;
 sqlite3 "$RUNLINE_RESOURCE_ROOT/digest.db" ".backup '/backup/digest-$(date +%F).db'"
 ```
 
-只複製主檔而漏了 `-wal` 可能缺少最近的提交；要用檔案複製就在 Engine 停止時複製（含 `-wal` 與 `-shm`）。憑證檔（`credentials.json`）和金鑰庫另外備份，內容含 token 與金鑰，權限同原檔。還原時 Engine 停止，換回檔案後啟動；資料庫的結構版本比 pipeline 新時 pipeline 拒絕寫入（第 10 節），所以**不要用舊版 pipeline 面對較新版寫過的資料庫**。
+只複製主檔而漏了 `-wal` 可能缺少最近的提交；要用檔案複製就在 Engine 停止時複製（含 `-wal` 與 `-shm`）。憑證檔（`credentials.json`）和金鑰庫另外備份，內容含 token 與金鑰，權限同原檔。還原時 Engine 停止，換回檔案後啟動；資料庫的結構版本比 pipeline 新時 pipeline 拒絕寫入（第 10 節），所以**不要用舊版 pipeline 面對較新版寫過的資料庫**。還原結構版本低於 8 的備份時，索引在下一個 run 開始時補上（第 9.4 節）。
 
 ### 9.2 保留清除
 
@@ -486,7 +520,7 @@ sqlite3 "$RUNLINE_RESOURCE_ROOT/digest.db" ".backup '/backup/digest-$(date +%F).
 4. 綁定**自動沿用**（綁定以上傳者加 pipeline 名稱為單位）；用第 4.4 節的檢視確認每個角色 `problem` 為 `null`（端到端測試驗證新版本的三個角色已綁定到原來的資源）。
 5. 用手動 run 試跑（`markRead=off`），再把 trigger 移到新版本：`PATCH /api/v1/triggers/{name}` 帶 `{"contentHash": "<新>"}`。**trigger 不會自己移動**，也不會因此被啟用或停用（端到端測試驗證）。
 6. 舊版本：沒有 trigger 與 run 引用它時才可 `DELETE /api/v1/artifacts/{hash}`（否則 409 `in_use`）。
-7. 資料庫結構由新版 pipeline 在第一個 run 開始時前向升級；升級後舊版 pipeline 不能再寫這個資料庫。
+7. 資料庫結構由新版 pipeline 在第一個 run 開始時前向升級；升級後舊版 pipeline 不能再寫這個資料庫。結構版本 8 新增一個索引（`run_post_by_post`），也在這時套用：在第一個 run 開始之前，Console 的 view（第 8.3 節）仍可讀取，只是 `not-downloaded` 較慢，資料量大時可能逾時；第一個 run 之後恢復。
 
 ### 9.5 停止與重啟
 
@@ -524,7 +558,7 @@ SIGTERM 讓 Engine 優雅關閉（`docker compose stop`、`systemctl stop`）：
 | `FAILED 2/7 model-check: ModelConfigurationException`，前一行 `… failed: ENDPOINT_NOT_ENABLED`（沒有 `CONFIG ERROR` 行） | `llm` 資源沒啟用 `models.list`。補上端點：`PATCH /api/v1/resources/lemonade` 帶完整的 `settings`（整份取代，所以要連 `baseUrl`、`defaults` 一併帶） |
 | `CONFIG ERROR: the browser is not set up: CHROME_BIN is not an executable file: /…` | `CHROME_BIN` 指向不存在的檔案，或找不到 Chrome。第 2 節 |
 | `BROWSER REFUSED: hardware rendering is required (CHROME_REQUIRE_HARDWARE_RENDERING=true) but the browser renders in software: <渲染器>`（`HardwareRenderingRequiredException`） | 要求硬體渲染而 Chrome 是軟體渲染（或讀不到渲染器）。接上 `/dev/dri`，或接受軟體渲染而把設定改回 `false`（WI-1000 的判定規則）。在擷取任何頁面之前失敗，不標記 |
-| `SchemaTooNewException`：`the database schema is version 99, newer than the 7 this pipeline knows` | 資料庫被較新版的 pipeline 寫過。改用較新的 pipeline 版本；不要降版。run 不開始任何階段、不寫任何東西 |
+| `SchemaTooNewException`：`the database schema is version 99, newer than the 8 this pipeline knows` | 資料庫被較新版的 pipeline 寫過。改用較新的 pipeline 版本；不要降版。run 不開始任何階段、不寫任何東西 |
 | 狀態 `CANCELLED`，log 有 `FAILED 3/7 capture: InterruptedException`，`run.result` 為 `stopped`（`result_note` 為 `asked to stop`） | 有人取消了 run（`POST /api/v1/runs/{id}/cancel`，回 202）。沒有 digest、不標記、Chrome 隨之結束 |
 | 狀態 `INTERRUPTED` | Engine 在 run 進行中停止或重啟。下一個 run 開始時 `run.result` 標為 `interrupted`。第 9.3、9.5 節 |
 | `STAGE` 行還沒出現、狀態一直是 `WAITING_FOR_RESOURCES` | 上一個 run 還在持有模型資源（容量 1）。等它結束；異常久時看是否有 run 卡住，必要時取消它或 `POST /api/v1/resources/{name}/holders/{runId}/release`。第 6 節 |
@@ -566,6 +600,6 @@ SIGTERM 讓 Engine 優雅關閉（`docker compose stop`、`systemctl stop`）：
 
 ## 附錄 B：驗證範圍
 
-**端到端測試（`./gradlew endToEndTest`，打包的真實 Engine）已驗證：** 上傳、analyzer 的原因、unsafe 的允許、白名單預覽、三種資源的建立與檢查、綁定、`llm` 未綁定時的拒絕、cron trigger 觸發的兩次完整 run（digest、標記集合、下載、計數）、32 個標註案例經 Engine 重放、`condition=none`（含沒給與有給 `readerModel` 的各一次 run）、本手冊的全部查詢（含 `sqlite3` 命令列）、保留清除、備份與 VACUUM、模型不可用／中途消失／身分不符（含以檔案路徑回報的模型：相符者繼續、檔名不同者失敗）／不在允許清單、FreshRSS 取不到（含 TLS 不信任與 token 被拒）、單篇擷取失敗（含檢查頁）、下載失敗、標記失敗與下一個 run 的補標、標記開關關閉、資料庫寫入失敗（digest 與標記意圖）、憑證檔缺條目、run 被取消、呼叫錯誤、資料庫比 pipeline 新、缺端點、Chrome 主機設定、run 序列化、新版本的升級、Engine 被強制結束後的遺留 Chrome 與下一個 run 的清理、SIGTERM、pipeline 沒有寫任何檔案、機密不在任何 log／回應／資料庫。
+**端到端測試（`./gradlew endToEndTest`，打包的真實 Engine）已驗證：** 上傳、analyzer 的原因、unsafe 的允許、白名單預覽、三種資源的建立與檢查、綁定、`llm` 未綁定時的拒絕、cron trigger 觸發的兩次完整 run（digest、標記集合、下載、計數）、32 個標註案例經 Engine 重放、`condition=none`（含沒給與有給 `readerModel` 的各一次 run）、本手冊的全部查詢（含 `sqlite3` 命令列）、Console 的四個 view（Engine 在上傳時接受宣告，`database` 已綁定時四個都是可讀取狀態，並透過 Engine 的 API 實際讀取，筆數與資料庫相符，第 8.3 節）、保留清除、備份與 VACUUM、模型不可用／中途消失／身分不符（含以檔案路徑回報的模型：相符者繼續、檔名不同者失敗）／不在允許清單、FreshRSS 取不到（含 TLS 不信任與 token 被拒）、單篇擷取失敗（含檢查頁）、下載失敗、標記失敗與下一個 run 的補標、標記開關關閉、資料庫寫入失敗（digest 與標記意圖）、憑證檔缺條目、run 被取消、呼叫錯誤、資料庫比 pipeline 新、缺端點、Chrome 主機設定、run 序列化、新版本的升級、Engine 被強制結束後的遺留 Chrome 與下一個 run 的清理、SIGTERM、pipeline 沒有寫任何檔案、機密不在任何 log／回應／資料庫。
 
-**未驗證：** 真實的 FreshRSS、Lemonade（含 thinking 關的預填、串流事件是否帶 `model`、`models.list`）、rqbit、streamexa、目標站點的 profile、目標主機（Linux、Intel iGPU、虛擬顯示的硬體 GL）、Docker 與 systemd 上的 digest-rss（deploy/browser.md 記錄各自的實測範圍）、Console 的綁定畫面（WI-1013 的測試涵蓋，本項用 API）、`RUNLINE_RUN_TIMEOUT_SECONDS` 與 `RUNLINE_RESOURCE_WAIT_TIMEOUT_SECONDS` 的逾時行為、進行中 run 時的優雅關閉。這些由 WI-1017 與使用者的目標環境驗證。
+**未驗證：** 真實的 FreshRSS、Lemonade（含 thinking 關的預填、串流事件是否帶 `model`、`models.list`）、rqbit、streamexa、目標站點的 profile、目標主機（Linux、Intel iGPU、虛擬顯示的硬體 GL）、Docker 與 systemd 上的 digest-rss（deploy/browser.md 記錄各自的實測範圍）、Console 的綁定畫面（WI-1013 的測試涵蓋，本項用 API）、Console 的「資料」區畫面（WI-1302 的測試涵蓋，本項用 API 讀 view）、`RUNLINE_RUN_TIMEOUT_SECONDS` 與 `RUNLINE_RESOURCE_WAIT_TIMEOUT_SECONDS` 的逾時行為、進行中 run 時的優雅關閉。這些由 WI-1017 與使用者的目標環境驗證。

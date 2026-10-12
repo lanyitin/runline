@@ -26,6 +26,8 @@ flowchart LR
 |---|---|---|
 | 需求、假設、待確認問題 | [01-requirements.md](01-requirements.md) | 已核可 |
 | 決策（方案比較、view 宣告、唯讀與隔離） | [ADR-033](adr/ADR-033-pipeline-views.md) | 已核可 |
+| 決策：參數以具名佔位符綁定 | [ADR-034](adr/ADR-034-view-parameter-binding.md) | 已核可 |
+| 決策：讀取逾時與並行上限 | [ADR-035](adr/ADR-035-view-read-limits.md) | 已核可 |
 | 通訊契約（API、錯誤、分頁、鑽取） | [05-ipc.md](05-ipc.md) | 已核可 |
 | 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
 | 工作項總覽 | [work-items/README.md](work-items/README.md) | 已核可 |
@@ -34,4 +36,4 @@ flowchart LR
 
 - 現況觀察：寫在 ADR-033 的背景。
 - 部署架構：不適用。不新增行程、容器或組態；仍是「一個 Engine 加一個 PostgreSQL」，Console 隨 Engine 發佈（ADR-015）。
-- 資料模型：不適用於 Engine。Engine 不保存 view 的結果；宣告隨 artifact 的 metadata 保存（ADR-003）。digest-rss 的資料模型見 `docs/stable/digest-rss/06-data-model.md`，本提案不改動它，除非 WI-1303 發現原因欄位不足（見該項）。
+- 資料模型：不適用於 Engine。Engine 不保存 view 的結果；宣告隨 artifact 的 metadata 保存（ADR-003）。digest-rss 的資料模型見 `docs/stable/digest-rss/06-data-model.md`，view 不改動它的實體；WI-1303 僅新增一個索引（資料庫結構版本 8）。

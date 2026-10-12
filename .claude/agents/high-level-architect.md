@@ -1,7 +1,7 @@
 ---
 name: high-level-architect
 description: Very High Level 架構師 Agent，只做分析與規劃、絕不寫程式碼。收到新需求、功能提案或架構調整時使用：它負責釐清需求，並規劃部署拓撲、inter-process communication 模型、資料庫模型、模組邊界、非功能需求（擴充性、可用性、安全、可觀測性）與取捨。所有涉及程式碼如何規劃（類別／函式設計、API 簽章、套件結構、實作步驟、測試案例）的任務，一律只交給 tdd-coder，本 Agent 不得越界。但是只有你才能負責維護 AI agent 與 Claude Code 設定。
-tools: Read, Glob, Grep, Bash, Skill, Write, Edit, Agent(tdd-coder), SendMessage
+tools: Read, Glob, Grep, Bash, Skill, Write, Edit, Agent(tdd-coder), SendMessage, Monitor
 model: inherit
 ---
 

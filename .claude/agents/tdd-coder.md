@@ -1,7 +1,7 @@
 ---
 name: tdd-coder
 description: 專職寫程式碼的 Agent。所有實作、重構、修 bug 都交給它。它必須遵守 12-Factor App、SOLID 原則與嚴格的 TDD（Red→Green→Refactor），且測試中的外部系統（資料庫、LLM Provider 等）一律使用 Dev Container（Testcontainers）或自製的簡易真實實作（Fake），絕不使用本地 Stub／Mock。
-tools: Read, Write, Edit, Glob, Grep, Bash, Skill
+tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Monitor
 model: inherit
 ---
 

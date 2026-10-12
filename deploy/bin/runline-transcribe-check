@@ -6,8 +6,8 @@
 #
 #   ffmpeg, ffprobe    found on the PATH, their versions are printed
 #   account            not root
-#   intake root        TRANSCRIBE_INTAKE_ROOT exists, is readable and cannot be written (a file is really
-#                      tried; if it could be made it is removed again and the check fails)
+#   intake root        TRANSCRIBE_INTAKE_ROOT exists, is readable and can be written (a file is really
+#                      tried and removed again; the pipeline writes the subtitle files beside the videos)
 #   work directory     TRANSCRIBE_WORK_DIR (unset or empty: /tmp, the default temporary
 #                      directory of the JVM that runs the pipeline; TMPDIR is not looked at) can be written; its free space is
 #                      reported and must be at least RUNLINE_TRANSCRIBE_MIN_FREE_MB (default 1024)
@@ -66,9 +66,9 @@ else
   probe="$root/.runline-write-probe-$$"
   if ( : >"$probe" ) 2>/dev/null; then
     rm -f "$probe"
-    fail "intake root '$root' is writable; mount it read-only / make it not writable for the Engine account"
+    ok "intake root '$root' is readable and writable"
   else
-    ok "intake root '$root' is readable and not writable"
+    fail "intake root '$root' is not writable by uid $(id -u); the pipeline writes the subtitle files beside the videos (ADR-039), so mount it read-write / make it writable for the Engine account"
   fi
 fi
 

@@ -2,7 +2,7 @@
 
 本文回答：管理員如何把 transcribe pipeline 在 Engine 上線、第一次怎麼安全地執行、之後怎麼呼叫與查結果、降級與中斷怎麼處置、出了問題怎麼查，以及哪些事還要使用者在有 Lemonade 的環境驗證。狀態：已核可（2026-10-12）。
 
-驗證範圍：本文的上傳、analyzer 判定、允許 unsafe、資源、綁定、trigger、webhook、整條 11 階段流程、查詢、負向案例、取消、Engine 停止與強制結束、資源等候與逾時、降級、各設定與工具缺漏的失敗訊息，都在**打包的真實 Engine**（`engineDistribution` 產物，JDK 25，PostgreSQL 17 容器）上，以真實的 ffmpeg、真實的 VAD 工具 jar 與 silero-vad 模型、真實的 SQLite（`jdbc-pool`）實際執行；Docker 覆蓋層（單獨與合用瀏覽器）也跑過完整流程。**模型服務是 `runline-transcribe` 的 `FakeOpenAiServer`（真的在 port 上監聽的 OpenAI 相容服務），不是 Lemonade**：它的轉錄文字是預先給定的、它的「核對」「摘要」「翻譯」是依格式回答的，所以本文對模型行為（遵守率、thinking、圖片理解、簡體字）與 LLM 階段耗時**沒有任何結論**，那些在第 17 節列為使用者要驗證的項目。錯誤訊息與 log 是實際輸出，不是推測。其中最後一格畫面、`TRANSCRIBE_WORK_DIR`、設定類錯誤與模型清單檢查、VAD 暫存目錄、媒體失敗的分類這五項（附錄 A 的 1、2、4、5、6）是以 devkit 的 JVM（真實 ffmpeg、真實 VAD 工具、真實 SQLite、`FakeOpenAiServer`）驗證，沒有在打包的 Engine 上重跑；參數值含 U+0000 的處理與 `jdbc-statement` 執行緒警告的修正（附錄 A 的 3、7）以真實 PostgreSQL 與真實 SQLite 檔的 Engine 測試驗證。已驗證與未驗證的完整清單見第 16 節。
+驗證範圍：本文的上傳、analyzer 判定、允許 unsafe、資源、綁定、trigger、webhook、整條流程（階段 1 至 12，含字幕檔寫出）、查詢、負向案例、取消、Engine 停止與強制結束、資源等候與逾時、降級、各設定與工具缺漏的失敗訊息，都在**打包的真實 Engine**（`engineDistribution` 產物，JDK 25，PostgreSQL 17 容器）上，以真實的 ffmpeg、真實的 VAD 工具 jar 與 silero-vad 模型、真實的 SQLite（`jdbc-pool`）實際執行；Docker 覆蓋層（單獨與合用瀏覽器）也跑過完整流程。**模型服務是 `runline-transcribe` 的 `FakeOpenAiServer`（真的在 port 上監聽的 OpenAI 相容服務），不是 Lemonade**：它的轉錄文字是預先給定的、它的「核對」「摘要」「翻譯」是依格式回答的，所以本文對模型行為（遵守率、thinking、圖片理解、簡體字）與 LLM 階段耗時**沒有任何結論**，那些在第 17 節列為使用者要驗證的項目。錯誤訊息與 log 是實際輸出，不是推測。其中最後一格畫面、`TRANSCRIBE_WORK_DIR`、設定類錯誤與模型清單檢查、VAD 暫存目錄、媒體失敗的分類這五項（附錄 A 的 1、2、4、5、6）是以 devkit 的 JVM（真實 ffmpeg、真實 VAD 工具、真實 SQLite、`FakeOpenAiServer`）驗證，沒有在打包的 Engine 上重跑；參數值含 U+0000 的處理與 `jdbc-statement` 執行緒警告的修正（附錄 A 的 3、7）以真實 PostgreSQL 與真實 SQLite 檔的 Engine 測試驗證。已驗證與未驗證的完整清單見第 16 節。
 
 > **三件事先知道。**
 > 1. **一次 run 很長。** 一小時影片的 LLM 階段需要數小時（容量估算見第 12 節），上限 6 小時的影片可達數十小時，期間獨佔 Lemonade 資源。中斷不續跑，要重做就重送。第一次一律用約 1 分鐘的樣本。
@@ -11,13 +11,13 @@
 
 ## 1. 它是什麼：一次 run 做什麼
 
-pipeline 名稱 `transcribe`，一個薄 jar（`runline-transcribe.jar`，只用 JDK、core 與 Kotlin 標準函式庫），unsafe：它在 Engine 主機上啟動 ffmpeg、ffprobe 與 VAD 工具（[ADR-037](adr/ADR-037-unsafe-pipeline-and-intake-root.md)）。輸入是收件根目錄下的一個影片檔名；輸出全部寫進 SQLite：來源語言 SRT、繁體中文 SRT、影片摘要、來源語言代碼，以及每個階段的文字、模型對話與計數。不保存音訊與圖片。
+pipeline 名稱 `transcribe`，一個薄 jar（`runline-transcribe.jar`，只用 JDK、core 與 Kotlin 標準函式庫），unsafe：它在 Engine 主機上啟動 ffmpeg、ffprobe 與 VAD 工具（[ADR-037](adr/ADR-037-unsafe-pipeline-and-intake-root.md)）。輸入是收件根目錄下的一個影片檔名（指定 `file`，或掃描模式由 pipeline 挑出，第 6.3 節）；完整紀錄全部寫進 SQLite：來源語言 SRT、繁體中文 SRT、影片摘要、來源語言代碼，以及每個階段的文字、模型對話與計數。不保存音訊與圖片。最後一個階段 `export` 把兩份 SRT 寫成**影片旁邊的字幕檔**「影片檔名_語系.srt」（例如 `movie.mp4` 得 `movie_en.srt` 與 `movie_zh-TW.srt`），內容與 SQLite 的 `result` 相同；命名、語系與覆蓋規則見 [ADR-039](adr/ADR-039-subtitle-files-beside-video.md) 與 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「字幕檔輸出」。
 
 | 階段 | 做什麼 | 外部系統 |
 |---|---|---|
 | 1 `cleanup` | 清除已結束行程遺留的工作目錄，建立本 run 的 | 檔案系統 |
 | 2 `store` | 開啟紀錄資料庫、建立或升級結構、清除過期的 run、記錄本 run | `database` |
-| 3 `intake` | 檢查收件根目錄、檔名、VAD 設定與全部參數 | 檔案系統 |
+| 3 `intake` | 檢查收件根目錄、檔名、影片所在目錄可寫且字幕檔名可用、VAD 設定與全部參數 | 檔案系統 |
 | 4 `audio` | ffprobe 檢查（有音訊、長度不超過 `maxMediaSeconds`），ffmpeg 擷取單聲道 16 kHz WAV | ffmpeg |
 | 5 `vad` | VAD 工具對整份 WAV 輸出每 32 毫秒一個語音機率 | VAD 工具 |
 | 6 `segmentation` | 判定 VAD-A、於最低能量點切開過長者、判定 VAD-B（字幕條目） | 無 |
@@ -26,6 +26,7 @@ pipeline 名稱 `transcribe`，一個薄 jar（`runline-transcribe.jar`，只用
 | 9 `verify` | 每個條目連同其時間區間的畫面（最多 6 張）送 gemma4 核對，得核對文字與一句畫面觀察 | ffmpeg、`llm` |
 | 10 `summary` | 先每組、再全片的階層式摘要，並判定來源語言 | `llm` |
 | 11 `translate` | 每個 VAD-A 組連同全片摘要送 gemma4 翻成繁體中文 | `llm` |
+| 12 `export` | 把來源語言與繁體中文兩份 SRT 寫成影片旁邊的字幕檔 | 檔案系統 |
 
 Lemonade 的並行是 1，所有請求逐一送出；階段依模型分批（轉錄全部完成才開始 gemma4 階段），減少模型切換。各階段的細節（提示、回答格式、驗證與退回規則）見 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)；設計見 [入口文件](README.md)。
 
@@ -38,7 +39,7 @@ Lemonade 的並行是 1，所有請求逐一送出；階段依模型分批（轉
 | JDK | **25**（Engine 與 VAD 工具都用主機或映像的 JRE） |
 | ffmpeg 與 ffprobe | 在 Engine 行程的 `PATH` 上。映像內是固定版本與雜湊的靜態建置（7.0.2）；本項在主機上用的是 9.0.2，兩者都通過 |
 | VAD 工具 | `runline-vad.jar`（含 ONNX Runtime，由 `runline-transcribe` 的 `./gradlew :vad:jar` 建置）與 `silero_vad.onnx`（v5.1.2，雜湊固定）。命令 `runline-vad`（`deploy/bin/runline-vad`）以 JRE 執行 `RUNLINE_VAD_JAR`。不需要 Python |
-| 收件根目錄 | 一個 Engine 帳號**可讀、不可寫**的目錄；影片放進去的人是呼叫端，不是 Engine |
+| 收件根目錄 | 一個 Engine 帳號**可讀、可寫**的目錄（pipeline 在影片旁寫字幕檔；權限與擁有者見 [04](04-deployment.md)）；影片放進去的人是呼叫端；以「新檔出現」觸發 webhook 的呼叫端有忽略特定檔案的責任（[04](04-deployment.md)） |
 | 工作目錄 | `TRANSCRIBE_WORK_DIR`，未設定時 JVM 的 `java.io.tmpdir`：可寫、可執行（不是 `noexec`；VAD 工具的暫存檔也在其下），容量見 2.3 |
 | SQLite 檔 | 在 `RUNLINE_RESOURCE_ROOT` 之下；**這個目錄要備份** |
 | 網路 | Engine 到 Lemonade 可達 |
@@ -52,9 +53,9 @@ Lemonade 的並行是 1，所有請求逐一送出；階段依模型分批（轉
 | 只跑 transcribe | `compose.yaml` + `compose.transcribe.yaml`（`transcribe` 映像，arm64 與 amd64 皆可） | 安裝 `runline-engine-transcribe.conf` 為 drop-in |
 | 與 digest-rss 同一個 Engine（要 Chrome） | 依序 `compose.yaml`、`compose.browser.yaml`、`compose.transcribe.yaml`、**最後**`compose.browser-transcribe.yaml`（單一映像 `browser-transcribe`，只有 linux/amd64） | 兩個 drop-in（`browser.conf`、`transcribe.conf`）並存，檔名不同，沒有共同設定項 |
 
-Docker 的啟動需要 `TRANSCRIBE_INTAKE_HOST_DIR`（宿主上放影片的目錄，唯讀掛載為 `/var/lib/runline/intake`）；VAD 工具 jar 放在 `TRANSCRIBE_VAD_HOST_DIR`（預設 `./transcribe-vad`）並唯讀掛載到 `/opt/runline/vad`，換 jar 不需要重建映像。宿主上的影片要對 other 可讀（檔案 `o+r`、目錄 `o+rx`），否則容器內的 uid 10001 讀不到——這種檔案在 run 以 `UNREADABLE` 失敗（本項在容器內以權限 000 的檔案驗證）。
+Docker 的啟動需要 `TRANSCRIBE_INTAKE_HOST_DIR`（宿主上放影片的目錄，可寫掛載為 `/var/lib/runline/intake`，是唯一可寫的掛載）；VAD 工具 jar 放在 `TRANSCRIBE_VAD_HOST_DIR`（預設 `./transcribe-vad`）並唯讀掛載到 `/opt/runline/vad`，換 jar 不需要重建映像。宿主上的影片要對 other 可讀（檔案 `o+r`、目錄 `o+rx`），否則容器內的 uid 10001 讀不到——這種檔案在 run 以 `UNREADABLE` 失敗（本項在容器內以權限 000 的檔案驗證）；影片所在目錄要讓 uid 10001 可寫，否則 run 在 `intake` 以 `EXPORT_DIRECTORY_NOT_WRITABLE` 失敗（第 15.2 節）。
 
-**檢查**（上線前、每次改部署後）：在 Engine 的環境與帳號下執行 `runline-transcribe-check`（Docker：`docker compose <同一組 -f> exec engine runline-transcribe-check`）。它逐項印 `ok`、`skip` 或 `FAIL`：ffmpeg、ffprobe、非 root、收件根目錄可讀且**真的寫不進去**、工作目錄可寫與空間、VAD 模型雜湊、VAD 工具載入模型並輸出 0 至 1 的機率。本項在 `transcribe` 映像與 `browser-transcribe` 映像內都得到 `all checks passed`。
+**檢查**（上線前、每次改部署後）：在 Engine 的環境與帳號下執行 `runline-transcribe-check`（Docker：`docker compose <同一組 -f> exec engine runline-transcribe-check`）。它逐項印 `ok`、`skip` 或 `FAIL`：ffmpeg、ffprobe、非 root、收件根目錄可讀且**真的寫得進去**、工作目錄可寫與空間、VAD 模型雜湊、VAD 工具載入模型並輸出 0 至 1 的機率。本項在 `transcribe` 映像與 `browser-transcribe` 映像內都得到 `all checks passed`。
 
 ### 2.3 工作目錄與容量
 
@@ -137,15 +138,18 @@ pipeline 宣告兩個角色（程式只認角色名稱）；管理員建立資�
 
 `PUT /api/v1/definitions/{hash}/transcribe/resource-bindings/{role}`，本文 `{"resource": "<資源名稱>"}`，對 `llm` 與 `database` 各一次；或在 Console 的 pipeline 詳情頁選擇。`GET` 同一路徑檢視：兩個角色的 `problem` 應為 `null`、`isDefault` 為 `false`。綁定以「上傳者加 pipeline 名稱」為單位，同一位上傳者的新版本自動沿用。
 
-## 6. webhook trigger 與參數
+## 6. trigger 與參數
 
 ### 6.1 參數
 
-只有 `file` 由呼叫端（webhook 本文）提供；其餘固定在 trigger，或手動 run 時填寫。值都是字串。完整的 32 個參數與預設值以 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「參數」為準；日常要決定的是：
+只有 `file` 由呼叫端（webhook 本文）提供；其餘固定在 trigger，或手動 run 時填寫。值都是字串。完整的 35 個參數與預設值以 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「參數」為準；日常要決定的是：
 
 | 參數 | 預設 | 說明 |
 |---|---|---|
-| `file` | 必填 | 收件根目錄下的相對路徑。**呼叫端提供** |
+| `file` | 空 | 收件根目錄下的相對路徑，**呼叫端提供**（webhook）。**空（或未提供）＝掃描模式**：pipeline 在收件根目錄找一部尚未產生字幕的影片處理（第 6.3 節）；cron trigger 不設它。只含空白字元的值不是「空」，會被拒絕為不合法的檔名 |
+| `scanExtensions` | `mp4,mkv,mov,m4v,webm` | 掃描模式視為影片的副檔名：逗號分隔、不分大小寫、不含點、只含英數字。不合法時兩種模式都在 `intake` 以 `CONFIGURATION` 失敗 |
+| `scanMinAgeSeconds` | `600` | 掃描模式：影片的修改時間距現在至少這麼多秒才處理（非負整數），避免處理仍在複製的檔案 |
+| `scanMaxAttempts` | `3` | 掃描模式：同一個檔案（相對路徑，且大小與修改時間相同）已有這麼多次 `failed` 的 run 就不再選它（正整數） |
 | `asrModel` | 必填 | 轉錄模型 id（qwen-asr）。以 Lemonade 的 `GET /models` 為準 |
 | `llmModel` | 必填 | 潤飾、核對、摘要、翻譯用的模型 id（gemma4） |
 | `maxMediaSeconds` | `21600`（6 小時） | 影片長度上限（秒）；長度恰等於上限者接受，超過者在 `audio` 階段被拒絕。**這是控制單次 run 時間的主要旋鈕**（第 14 節） |
@@ -157,7 +161,7 @@ pipeline 宣告兩個角色（程式只認角色名稱）；管理員建立資�
 | `maxFramesPerRequest`、`frameMaxEdgePixels` | `6`、`512` | 核對請求的圖片上限與縮圖長邊 |
 | `vadA*`、`vadB*`、`maxSegmentSeconds`、`refineThresholdSeconds`、`cutSearchWindowSeconds`、`minPieceSeconds` | 見 README | VAD 與分段；組合有限制（B 的最小靜音須短於 A 等），不合法在 `intake` 以訊息指出參數名稱 |
 
-參數不合法時 run 以 `CONFIGURATION` 失敗，訊息指出參數名稱與規則，不回顯值（實測：`vadAThreshold must be a number above 0 up to 1`、`maxMediaSeconds must be a positive whole number of seconds`、`asrLanguage must be a language code such as en or zh-TW, or empty`）。缺少必填參數（`asrModel`、`llmModel`）時 Engine 在建立 run 或 trigger 就回 422 `invalid_parameters`，`problems[]` 指出名稱。參數值含 U+0000 時 Engine 回 400（第 7 節）。
+參數不合法時 run 以 `CONFIGURATION` 失敗，訊息指出參數名稱與規則，不回顯值（實測：`vadAThreshold must be a number above 0 up to 1`、`maxMediaSeconds must be a positive whole number of seconds`、`asrLanguage must be a language code such as en or zh-TW, or empty`）。缺少必填參數（`asrModel`、`llmModel`；`file` 不是必填）時 Engine 在建立 run 或 trigger 就回 422 `invalid_parameters`，`problems[]` 指出名稱。參數值含 U+0000 時 Engine 回 400（第 7 節）。
 
 ### 6.2 建立 webhook trigger
 
@@ -176,10 +180,62 @@ pipeline 宣告兩個角色（程式只認角色名稱）；管理員建立資�
 | 情況 | 回應 |
 |---|---|
 | `callerParameters` 的名稱不是 pipeline 宣告的參數 | 422 `invalid_parameters`，`problem` 為 `undeclared` |
-| 必填而沒有預設值的參數（`file`、`asrModel`、`llmModel`）既不在 `parameters` 也不在 `callerParameters` | 422，`problem` 為 `missing`（訊息：`缺少必填參數 file`） |
+| 必填而沒有預設值的參數（`asrModel`、`llmModel`）既不在 `parameters` 也不在 `callerParameters` | 422，`problem` 為 `missing`（訊息：`缺少必填參數 asrModel`）。`file` 有預設值（空），不在其內 |
 | 一個參數同時是固定值與呼叫端提供 | 422，`problem` 為 `fixed_and_caller` |
 
 trigger 綁定在建立時指定的版本上，**不會**隨新版本移動；升級新版本時要 `PATCH /api/v1/triggers/{name}` 帶新的 `contentHash`（第 13 節）。一個 trigger 服務任意多個檔案；要用不同的固定參數（例如較小的 `maxMediaSeconds`）就建立第二個 trigger。
+
+**webhook trigger 必須把 `file` 列入 `callerParameters`。** `file` 是選填（有預設值），Engine 不會因為它沒列而拒絕 trigger；沒有列入的 webhook trigger 忽略請求本文（沿用 ADR-005：未宣告呼叫端參數者本文不影響參數），它的每個 run 的 `file` 都是空，進入掃描模式（第 6.3 節，實測：本文帶 `file` 仍然掃描）。
+
+### 6.3 cron trigger 與掃描模式
+
+cron trigger 讓 pipeline 在每次觸發時自己在收件根目錄找一部尚未產生字幕的影片處理（[ADR-040](adr/ADR-040-cron-scan-mode.md)）。與 webhook 並存的關係見 [04](04-deployment.md)。
+
+**建立**：`POST /api/v1/triggers`，admin token（Console 的 trigger 表單也可設定）：
+
+| 欄位 | 值 |
+|---|---|
+| `name` | 例如 `transcribe-scan` |
+| `kind` | `cron` |
+| `contentHash`、`pipeline` | 上傳的版本與 `transcribe` |
+| `parameters` | 固定的參數：至少 `asrModel`、`llmModel`；**不含 `file`**；可加 `maxMediaSeconds`、`scanExtensions`、`scanMinAgeSeconds`、`scanMaxAttempts` 等 |
+| `callerParameters` | 不給或空；cron trigger 設定它時 Engine 回 422 `invalid_trigger`（`caller_parameters_not_allowed`） |
+| `cron` | 標準五欄表達式，例如 `0 * * * *`（每小時）。最小粒度是分鐘 |
+| `timeZone` | IANA 時區，預設 UTC（例如 `Asia/Taipei`） |
+
+建好後 trigger 的 `callerParameters` 是 `[]`，`effectiveParameters.file` 是空字串。錯過的時間（Engine 停機期間）**不補跑**，下一個排程時間才觸發。每次觸發的結果在 `GET /api/v1/triggers/{name}/firings`（`run_created`、`runId`）。
+
+**一個 run 處理一部影片。** 掃描收件根目錄（遞迴），候選依修改時間由舊到新排序（相同時依相對路徑），取第一部，之後的流程、字幕檔命名與輸出和指定 `file` 的 run 完全相同；run 的 `run.file` 記錄所選的相對路徑。積壓以觸發次數消化。**候選條件**全部成立才算；每個檢視到的項目只記第一個不成立的原因，順序如下（括號是 log 的計數名稱）：
+
+| 順序 | 排除原因 | 條件 |
+|---|---|---|
+| 1 | `symlink` | 符號連結（檔案與目錄皆然）：不跟隨、不進入，失效的連結也算 |
+| 2 | `hidden` | 名稱以點開頭（含寫出字幕時的 `.transcribe-*.tmp`）；點開頭的目錄整個略過 |
+| 3 | `other` | 不是一般檔案（例如 FIFO），或讀取時失敗 |
+| 4 | `extension` | 副檔名（最後一個點之後，不分大小寫）不在 `scanExtensions` 內，預設 `mp4`、`mkv`、`mov`、`m4v`、`webm`（`.srt` 與其他非影片檔也在這裡被計入） |
+| 5 | `tooNew` | 修改時間距現在不足 `scanMinAgeSeconds`（預設 600 秒；未來的時間也算太新） |
+| 6 | `hasSubtitle` | 同目錄有名為「影片檔名去掉副檔名_zh-TW.srt」的路徑（檔案、目錄、符號連結都算已存在）。它是「已產生過字幕」的**唯一標記** |
+| 7 | `unwritable` | 所在目錄對 Engine 帳號不可寫（字幕檔要寫在影片旁）；排除並記入 log，不使整個佇列停住 |
+| 8 | `attemptsExhausted` | 同一個檔案（相對路徑，且大小與修改時間相同）已有 `scanMaxAttempts` 次結果為 `failed` 的 run；`stopped` 與被中斷的 run 不計。檔案被取代或修改（大小或修改時間變了）即視為新檔案，重新計數 |
+
+指定 `file` 的 run（webhook、手動）不受這些條件影響：永遠處理該檔案，字幕已存在時覆蓋。
+
+**沒有候選：「無待處理」。** `intake` 階段以 `no video to take` 結束，run 立即成功（Engine `SUCCEEDED`；`OUTCOME success: NO_PENDING`；`run.result` 為 `success`、`run.result_note` 為 `NO_PENDING`），不進入 `audio` 以後的階段，不寫任何檔案；它仍留下 `run` 紀錄（`file` 為空字串）。這是正常的結果，不是錯誤；`SCAN` 這一行說明每個排除原因各有幾個（第 11 節）。
+
+**失敗與重試。** run 在選定影片之後、做任何可能失敗的事之前，就把影片的相對路徑、大小與修改時間寫進 `run` 紀錄，所以在 `intake` 之後任何階段失敗都算該檔案的一次失敗；失敗達 `scanMaxAttempts` 後該檔案不再被選中，**不阻擋其他影片**。
+
+**序列化前提：`llm` 資源容量為 1。** run 建立後依先進先出取得資源，前一個 run 結束且字幕寫出後，後面的 run 才開始掃描，所以兩個 run 不會挑到同一部影片。容量不得調高（第 5.1 節）。
+
+**重做與重新處理**：
+
+| 想做的事 | 作法 |
+|---|---|
+| 重做一部已有字幕的影片 | 刪除它的 `_zh-TW.srt`（下一次觸發會再掃到；來源語言的 `_<語系>.srt` 不影響判定），或用 webhook 或手動 run 指定 `file`（永遠處理，覆蓋既有字幕） |
+| 讓失敗達上限的影片重新處理 | 取代或修改該檔案（大小或修改時間變了即重新計數）；或調高 trigger 的 `scanMaxAttempts`。先修好失敗的原因（`run.result_note`，第 15.2 節） |
+| 暫時不要某部影片被掃描 | 改名為點開頭、移出收件根目錄，或改成不在 `scanExtensions` 內的副檔名 |
+
+刪除或搬走字幕檔會使影片再被處理；字幕檔不屬於本 pipeline 的保留規則，不會自動清除。
+
 
 ## 7. webhook 呼叫格式
 
@@ -195,7 +251,7 @@ curl -X POST $ENGINE/api/v1/webhooks/transcribe-intake \
 |---|---|
 | 密鑰 | 標頭 `X-Runline-Webhook-Secret`（不使用 Bearer token） |
 | delivery 識別碼 | 標頭 `X-Runline-Delivery-Id`，1 至 200 個可見 ASCII 字元，**必填**；呼叫端為每個影片產生一個唯一值 |
-| 本文 | JSON 物件，只有一個鍵 `file`，值是文字，**收件根目錄下的相對路徑**（可含子目錄與空白、中文，不可含 U+0000）。大小上限預設 16384 位元組 |
+| 本文 | JSON 物件，只有一個鍵 `file`，值是文字，**收件根目錄下的相對路徑**（可含子目錄與空白、中文，不可含 U+0000）。大小上限預設 16384 位元組。呼叫端必須給實際的檔名：Engine 不檢查 `file` 是否存在或非空，**本文沒有 `file`，或 `file` 是空字串，會得 202 並進入掃描模式**（第 6.3 節；實測），只含空白字元的值則是 `INVALID_NAME` 失敗 |
 | 檔案 | 呼叫時必須已完整寫入（呼叫端負責）。呼叫端提供的值是不可信輸入，不得放機密；它會出現在 run 的參數與 SQLite 的 `run.file` |
 
 回應（實測）：
@@ -207,7 +263,7 @@ curl -X POST $ENGINE/api/v1/webhooks/transcribe-intake \
 | 401 `unauthorized` | 密鑰缺少、錯誤、trigger 已停用、不是 webhook 或不存在，一律同一個固定回應 |
 | 400 `invalid_delivery_id` | 通過驗證，但識別碼缺少或格式不符 |
 | 400 `invalid_body` | 本文不是 JSON 物件（`not_a_json_object`）或超過上限（`too_large`） |
-| 400 `invalid_caller_parameters` | 清單外的鍵（`undeclared`）、缺少 `file`（`missing`）、值不是文字（`not_text`）、值含 U+0000（`contains_nul`）；`problems[]` 只指出名稱，不回值 |
+| 400 `invalid_caller_parameters` | 清單外的鍵（`undeclared`）、值不是文字（`not_text`）、值含 U+0000（`contains_nul`）；`problems[]` 只指出名稱，不回值。`file` 不是必填，所以缺少它不是 400（見上列「本文」） |
 | 500 `internal_error` | 未預期的失敗；以相同識別碼重送是安全的 |
 
 兩個 400（`invalid_body`、`invalid_caller_parameters`）**不消耗識別碼，也不寫觸發紀錄**：呼叫端修正本文後可用同一個識別碼重送並成功（實測：以 `bad-1` 送非物件本文得 400，再以同一識別碼送正確本文得 202 並建立 run）。401 與 400 不留任何紀錄，只有 Engine 的 log 與指標 `runline.triggers.webhook.rejected`。
@@ -218,9 +274,9 @@ curl -X POST $ENGINE/api/v1/webhooks/transcribe-intake \
 
 1. **主機檢查。** 部署覆蓋層，`runline-transcribe-check` 得到 `all checks passed`。
 2. **上傳、允許、資源、綁定。** 第 4、5 節；兩個資源的 `check` 為 `"ok": true`；綁定的 `problem` 為 `null`。資源設定 `allowedModels`。
-3. **放一個約 1 分鐘、有人聲的影片**到收件目錄（用 `ffmpeg` 剪一段真實素材即可）。
-4. **手動 run**：`POST /api/v1/runs`，本文含 `contentHash`、`pipeline`、`parameters`（`file`、`asrModel`、`llmModel`）。預期 `SUCCEEDED`，log 的最後兩行是 `RUN SUMMARY …` 與 `OUTCOME success`。`OUTCOME success-degraded` 或 `failed` 時停下，依第 10、13 節處理；降級數很高通常是模型 id 或請求格式不對。
-5. **用第 9 節的查詢取回結果**：兩份 SRT 的條目數相同、時間相同；摘要與來源語言非空。
+3. **放一個約 1 分鐘、有人聲的影片**到收件目錄（用 `ffmpeg` 剪一段真實素材即可）；影片所在目錄須對 Engine 帳號可寫。
+4. **手動 run**：`POST /api/v1/runs`，本文含 `contentHash`、`pipeline`、`parameters`（`file`、`asrModel`、`llmModel`）。`file` 可省略：省略（或空字串）即掃描模式，由 pipeline 挑一部尚未產生字幕的影片（第 6.3 節；影片的修改時間須距現在至少 `scanMinAgeSeconds`，樣本剛放進去時指定 `file` 較直接）。預期 `SUCCEEDED`，log 的最後兩行是 `RUN SUMMARY …` 與 `OUTCOME success`。`OUTCOME success-degraded` 或 `failed` 時停下，依第 10、13 節處理；降級數很高通常是模型 id 或請求格式不對。
+5. **取回結果**：影片旁邊出現兩個字幕檔，兩份 SRT 的條目數相同、時間相同（第 9 節）；用第 9 節的查詢確認摘要與來源語言非空。
 6. **完成第 17 節對真實 Lemonade 的驗證**（至少第 1 至 5 項）。
 7. **建立 webhook trigger**（第 6.2 節），以 webhook 重做第 4 與第 5 步（同一個樣本，新的識別碼）。再做一次負向檢查：送不存在的檔名，run 以 `NOT_FOUND` 失敗且原因明確。
 8. **5 至 10 分鐘的影片**，確認每階段耗時與降級數合理。
@@ -228,26 +284,45 @@ curl -X POST $ENGINE/api/v1/webhooks/transcribe-intake \
 
 ## 9. 查詢結果
 
-結果在 SQLite 檔（`$RUNLINE_RESOURCE_ROOT/transcribe.db`），唯讀查詢即可，Engine 運作時可同時讀（WAL）；不要用工具寫入它。Docker 部署的檔案在 `resources` volume 內，映像沒有 `sqlite3`：把檔案複製出來查（`docker compose cp engine:/var/lib/runline/resources/transcribe.db <宿主目錄的絕對路徑>`，實測可行；`-wal` 在 run 都結束後為空，不存在時不複製）。Docker 的複製出來的檔案是某一時間點的快照。
+**字幕直接取影片旁邊的檔案**「影片檔名_語系.srt」（第 1 節）；檔案遺失、被改動或 `export` 失敗時，從 SQLite 導出同樣的內容（下表「兩份 SRT」）。完整紀錄在 SQLite 檔（`$RUNLINE_RESOURCE_ROOT/transcribe.db`），唯讀查詢即可，Engine 運作時可同時讀（WAL）；不要用工具寫入它。Docker 部署的檔案在 `resources` volume 內，映像沒有 `sqlite3`：把檔案複製出來查（`docker compose cp engine:/var/lib/runline/resources/transcribe.db <宿主目錄的絕對路徑>`，實測可行；`-wal` 在 run 都結束後為空，不存在時不複製）。Docker 的複製出來的檔案是某一時間點的快照。
 
 | 問題 | 查詢（描述） |
 |---|---|
-| 最近的 run 與結果 | 表 `run`：`id`、`file`、`started_at`、`finished_at`、`result`（`success`、`success-degraded`、`failed`、`stopped`；**未結束或被強制結束的 run 為 NULL**）、`result_note`（失敗的分類）、`degraded`。依 `id` 倒序 |
+| 最近的 run 與結果 | 表 `run`：`id`、`file`（掃描 run 在選定影片前為空字串，「無待處理」的 run 一直為空）、`file_size`（位元組）與 `file_modified_at`（UTC，ISO-8601；檔案指紋，選定或通過檢查的影片才有，被拒絕的檔名與無待處理者為空；掃描以它加 `file` 判定失敗次數）、`started_at`、`finished_at`、`result`（`success`、`success-degraded`、`failed`、`stopped`；**未結束或被強制結束的 run 為 NULL**）、`result_note`（失敗的分類；無待處理為 `NO_PENDING`）、`degraded`。依 `id` 倒序 |
 | 某個 run 的參數 | 表 `run_parameter`（`name`、`value`），依 `run_id`；不含機密 |
-| 各階段計數與降級 | 表 `stage`，依 `run_id`、`position` 排序：`name`、`status`（`done`／`failed`）、`input_count`、`output_count`、`failed_count`、`degraded_count`、`failure_reason`。**只有 `segmentation`（6）至 `translate`（11）寫入 `stage`**；`cleanup`、`store`、`intake`、`audio`、`vad` 的計數只在 log |
-| 兩份 SRT | 表 `result`（依 `run_id`）：`source_srt`、`chinese_srt` 是完整的 SRT 文字，以 `sqlite3 -noheader <db> "select source_srt from result where run_id=…"` 導出到檔案即可播放（實測：兩份都能被 ffprobe 解析為 12 個字幕封包，條目數與時間相同） |
+| 各階段計數與降級 | 表 `stage`，依 `run_id`、`position` 排序：`name`、`status`（`done`／`failed`）、`input_count`、`output_count`、`failed_count`、`degraded_count`、`failure_reason`。**只有 `segmentation`（6）至 `export`（12）寫入 `stage`**；`cleanup`、`store`、`intake`、`audio`、`vad` 的計數只在 log |
+| 兩份 SRT（資料庫，字幕檔的備援來源） | 表 `result`（依 `run_id`）：`source_srt`、`chinese_srt` 是完整的 SRT 文字，與字幕檔逐位元組相同；以 `sqlite3 -noheader <db> "select source_srt from result where run_id=…"` 導出到檔案即可播放（實測：兩份都能被 ffprobe 解析為 12 個字幕封包，條目數與時間相同） |
+| 寫出了哪些字幕檔 | 表 `subtitle_file`（依 `run_id`；主鍵 `run_id` 加 `language`）：`language`（檔名中的語系，繁體中文為 `zh-TW`）、`path`（收件根目錄下的相對路徑）、`written`（1 為已寫出，0 為嘗試寫出但失敗）。`export` 階段記錄，所以「寫出了哪些檔」以它為準，不由檔案系統推測；結構版本 3 之前的 run 沒有紀錄。欄位的設計見 [06](06-data-model.md) |
 | 摘要與來源語言 | 表 `result`：`summary`、`source_language`（模型判定的語言代碼，原樣）；**NULL 表示摘要缺少（降級 1）** |
 | 哪些組或條目降級 | 表 `exchange`，`outcome = 'fallback'`（退回上一階段文字）或 `'failed'`（讓 run 失敗的呼叫），依 `run_id`；`stage`、`target`（`group`／`entry`／`run`）、`target_seq` 指出是哪一個 |
 | 模型呼叫次數與結果 | 表 `exchange` 依 `run_id` 對 `stage`、`outcome` 分組計數；`outcome` 為 `success`、`retry`（後面還有重試）、`fallback`、`failed`；`duration_ms`、`model`（實際回報）、`prompt`、`response`（原文） |
 | 某個條目各階段的文字 | 表 `entry_text`（`entry`、`stage` 為 `transcribe`／`polish`／`verify`／`translate`、`text`、核對的 `observation`）連 `segment_b`（`seq` 對 `entry`，起訖秒 `start_seconds`、`end_seconds`、所屬 `group_seq`） |
 | 核對用了哪幾秒的畫面 | 表 `entry_frame`（只有時間點，不存圖片） |
-| 對回 Engine 的 run | pipeline 的執行環境不提供 Engine 的 run 識別，所以以 `started_at` 與 `file` 比對 Engine 的 run 的 `startedAt` 與 `parameters.file` |
+| 對回 Engine 的 run | pipeline 的執行環境不提供 Engine 的 run 識別，所以以 `started_at` 與 `file` 比對 Engine 的 run 的 `startedAt` 與 `parameters.file`。**掃描 run 的 `parameters.file` 是空的**：改以 `started_at` 比對 `startedAt`（兩者都是 run 取得資源、開始執行的時刻，相差不到一秒；等候資源的 run 在取得資源前沒有 `startedAt`），選定影片後的 `run.file` 才是它處理的檔案 |
+| 某部影片失敗過幾次、為什麼 | 表 `run` 依 `file`、`file_size`、`file_modified_at` 分組，看 `result` 為 `failed` 的筆數與 `result_note`；筆數達 `scanMaxAttempts` 即被掃描排除（`attemptsExhausted`） |
+
+**Console 的「資料」區。** pipeline 宣告五個唯讀 view，Console 的 pipeline 詳情頁「資料」區以表格呈現，取代上表中以資料庫工具做的下列查詢；表格的欄位、參數與穩定的值以 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「Console 的 view」為準，機制見 [pipeline-views](../pipeline-views/README.md)。
+
+| view | 回答的問題 | 取代的查詢 |
+|---|---|---|
+| `runs` | 最近有哪些 run、各自的結果、降級數與字幕檔是否寫出？可用結果篩選 | 「最近的 run 與結果」與 `subtitle_file` 的寫出狀態 |
+| `run-stages` | 某次 run 的各階段做到哪、計數與失敗原因為何？（參數 `run`） | 「各階段計數與降級」 |
+| `degradations` | 某次 run 的哪些組或條目降級或失敗，對應影片的哪一段？（參數 `run`） | 「哪些組或條目降級」 |
+| `entries` | 某次 run 的每個條目在各階段的文字為何，哪些被改動？（參數 `run`、`show`） | 「某個條目各階段的文字」 |
+| `result` | 某次 run 的來源語言、摘要、兩份字幕的條目數與寫出的字幕檔路徑為何？（參數 `run`） | 「摘要與來源語言」與「寫出了哪些字幕檔」 |
+
+- `run.result` 為 NULL 的 run（進行中，或被強制結束）在 `runs` 顯示為 `running`；`stopped` 是中性的狀態，不是失敗。
+- 掃描模式「無待處理」（`NO_PENDING`）的 run 在 `runs` 的影片檔為空；由 `run` 欄鑽取到 `run-stages`。
+- `run-stages` 只呈現 `stage` 有紀錄的階段（`segmentation` 至 `export`），在 `segmentation` 之前失敗的 run 為空；其餘階段看 log（第 11 節）。
+- `result` 的條目數以 SRT 文字中的 ` --> ` 計數；摘要缺少時為空，不報錯。
+- 不在 view 中、仍以資料庫工具查詢（上表）：`run_parameter`、`exchange` 的 `prompt` 與 `response`、`entry_text` 的 `observation`、`entry_frame`、SRT 全文。
 
 SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 
 | 情況 | Engine `state` | `run.result` | log 的最後一行 |
 |---|---|---|---|
 | 全部完成，沒有降級 | `SUCCEEDED` | `success` | `OUTCOME success` |
+| 掃描模式沒有待處理的影片 | `SUCCEEDED` | `success`（`result_note` 為 `NO_PENDING`） | `OUTCOME success: NO_PENDING` |
 | 完成，有降級 | `SUCCEEDED` | `success-degraded` | `OUTCOME success-degraded degraded=N (…)` |
 | 任一階段失敗 | `FAILED` | `failed`（`result_note` 為分類） | `OUTCOME failed: <分類>` |
 | 取消 | `CANCELLED` | `stopped` | `OUTCOME stopped` |
@@ -256,7 +331,7 @@ SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 
 ## 10. 降級的意義與退回規則
 
-**降級**：某一個單位的 LLM 處理在重試用盡（或回答不符契約）後，該單位採用**上一階段的文字**，run 仍然完成，降級數加一。字幕的條目數與時間永遠不變（[ADR-038](adr/ADR-038-segment-model-and-stage-invariants.md)），降級只影響文字的品質。降級總數等於各階段降級數之和，寫在 log 的 `OUTCOME`、`RUN SUMMARY`、`run.degraded`，各階段的在 `stage.degraded_count`。**降級數不是 0 的 run 是可用的，但某些文字是未經該階段處理的。**
+**降級**：某一個單位的 LLM 處理在重試用盡（或回答不符契約）後，該單位採用**上一階段的文字**，run 仍然完成，降級數加一。字幕的條目數與時間永遠不變（[ADR-038](adr/ADR-038-segment-model-and-stage-invariants.md)），降級只影響文字的品質。降級總數等於各階段降級數之和，寫在 log 的 `OUTCOME`、`RUN SUMMARY`、`run.degraded`，各階段的在 `stage.degraded_count`。**降級數不是 0 的 run 是可用的，但某些文字是未經該階段處理的**；降級的 run 照常寫出字幕檔。
 
 | 階段 | 降級的單位 | 退回到 | 例外（不降級，run 失敗） |
 |---|---|---|---|
@@ -282,26 +357,28 @@ SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 Engine 的 `GET /api/v1/runs/{runId}/log?limit=2000`（需要時用 `after` 分頁；先到先寫，進行中也可讀）。每個階段有固定格式：
 
 ```
-STAGE 7/11 transcription: send each segment, one after the other, to the recognizer
-RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech=0 retries=0 modelNotReported=389; 336 ms
+STAGE 7/12 transcription: send each segment, one after the other, to the recognizer
+RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech=0 retries=0 modelNotReported=389; 336 ms
 ```
 
 | 行的開頭 | 意義 |
 |---|---|
-| `STAGE n/11 名稱` | 階段開始 |
-| `RESULT n/11 名稱: …; 計數; N ms` | 階段成功結束，附計數與耗時。各階段的計數：`audio` 的 `seconds`、`streams`；`vad` 的 `windows`（每視窗 32 ms）；`segmentation` 的 `a`、`b`、`keptFromA`、`noLowEnergyCuts`；`transcription` 的 `entries`、`speech`、`noSpeech`、`retries`；`polish`／`verify`／`translate` 的 `groups`／`entries`、`sent`、`degraded`、`retries`；`verify` 另有 `shrinks`、`frames`；`summary` 的 `groups`、`calls`、`batches` |
-| `FAILED n/11 名稱: 例外型別: 訊息` | 階段失敗，run 失敗。訊息只含固定用語，不含路徑與機密 |
-| `STOPPED n/11 名稱` | 階段被取消或逾時打斷（不是失敗） |
+| `STAGE n/12 名稱` | 階段開始 |
+| `RESULT n/12 名稱: …; 計數; N ms` | 階段成功結束，附計數與耗時。各階段的計數：`audio` 的 `seconds`、`streams`；`vad` 的 `windows`（每視窗 32 ms）；`segmentation` 的 `a`、`b`、`keptFromA`、`noLowEnergyCuts`；`transcription` 的 `entries`、`speech`、`noSpeech`、`retries`；`polish`／`verify`／`translate` 的 `groups`／`entries`、`sent`、`degraded`、`retries`；`verify` 另有 `shrinks`、`frames`；`summary` 的 `groups`、`calls`、`batches`；`export` 的 `files`（寫出的檔數，成功時為 2） |
+| `FAILED n/12 名稱: 例外型別: 訊息` | 階段失敗，run 失敗。訊息只含固定用語，不含路徑與機密 |
+| `STOPPED n/12 名稱` | 階段被取消或逾時打斷（不是失敗） |
 | `TRANSCRIBE\|POLISH\|VERIFY\|SUMMARY\|TRANSLATE RETRY …` | 單次嘗試失敗，附原因，稍後重試 |
 | `… DEGRADED … kept …` | 一個單位重試用盡而降級，附最後一次的原因 |
 | `… NOTE …` | 提示，例如 `temperature is locked by the resource`（管理員鎖定了 `temperature`，pipeline 改為不送，由資源的 `defaults` 決定） |
 | `VERIFY SHRINK …` | 請求過大，縮小縮圖邊長重送（不算模型嘗試） |
 | `… PROGRESS 25/389` | 每完成 25 個單位一行 |
+| `SCAN inspected=… candidates=… truncated=… excluded: symlink=… hidden=… other=… extension=… tooNew=… hasSubtitle=… unwritable=… attemptsExhausted=…` | 掃描模式的 `intake` 階段，每次掃描一行，只有計數：`inspected`（檢視的項目數）＝ `candidates` ＋ 各排除計數之和；`truncated=true` 表示項目超過一萬個、以已檢視的為準。**不列出路徑，也不列出所選的影片**（選定的路徑在 `run.file`） |
+| `RESULT 3/12 intake: no video to take; files=0; … ms` | 掃描找不到候選：run 立即成功結束，接著 `RUN SUMMARY` 與 `OUTCOME success: NO_PENDING`（第 9 節）。選到影片時是 `RESULT 3/12 intake: file accepted; files=1 bytes=…` |
 | `STORE WARN …` | 結束的紀錄寫不進去；不改變 run 的結果 |
 | `RUN SUMMARY entries=… degraded=N (polish=… verify=… summary=… translate=…) modelCalls=… elapsed=… ms` | 所有階段完成後一行（失敗與停止的 run 沒有）。`modelCalls` 是對 `llm` 資源送出的請求總數，含每次重試 |
-| `OUTCOME …` | 最後一行（第 9 節的表） |
+| `OUTCOME …` | 最後一行（第 9 節的表）；掃描模式沒有待處理時是 `OUTCOME success: NO_PENDING` |
 
-`OUTCOME failed:` 後的分類：`CONFIGURATION`（設定或參數）、`INVALID_NAME`、`NOT_FOUND`、`UNREADABLE`（檔名）、`NO_SPEECH`、`TRANSCRIPTION_FAILED`、`MODEL_IDENTITY`、`VAD_TOOL_MISSING`、`VAD_TOOL_FAILED`、`VAD_TIMEOUT`、`VAD_BAD_OUTPUT`；媒體失敗的分類帶原因：`MEDIA_NO_AUDIO`（無音訊串流）、`MEDIA_CORRUPT`（損毀）、`MEDIA_TOO_LONG`（超過 `maxMediaSeconds`）、`MEDIA_TOOL_MISSING`（ffmpeg 或 ffprobe 不在 `PATH`）、`MEDIA_TOOL_FAILED`（工具失敗）、`MEDIA_TIMEOUT`（逾時），訊息在前一行 `FAILED` 裡。Engine 的 run 的 `failure.type` 是例外類別、`failure.message` 是同一句訊息。
+`OUTCOME failed:` 後的分類：`CONFIGURATION`（設定或參數）、`INVALID_NAME`、`NOT_FOUND`、`UNREADABLE`（檔名）、`NO_SPEECH`、`TRANSCRIPTION_FAILED`、`MODEL_IDENTITY`、`VAD_TOOL_MISSING`、`VAD_TOOL_FAILED`、`VAD_TIMEOUT`、`VAD_BAD_OUTPUT`；字幕檔失敗的分類 `EXPORT_OUTSIDE_ROOT`、`EXPORT_DIRECTORY_NOT_WRITABLE`、`EXPORT_TARGET_NOT_REGULAR_FILE`、`EXPORT_WRITE_FAILED`（第 15.2 節）；媒體失敗的分類帶原因：`MEDIA_NO_AUDIO`（無音訊串流）、`MEDIA_CORRUPT`（損毀）、`MEDIA_TOO_LONG`（超過 `maxMediaSeconds`）、`MEDIA_TOOL_MISSING`（ffmpeg 或 ffprobe 不在 `PATH`）、`MEDIA_TOOL_FAILED`（工具失敗）、`MEDIA_TIMEOUT`（逾時），訊息在前一行 `FAILED` 裡。Engine 的 run 的 `failure.type` 是例外類別、`failure.message` 是同一句訊息。
 
 ## 12. 容量與耗時
 
@@ -342,9 +419,11 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 
 | 取消時 pipeline 在 | 結果 |
 |---|---|
-| `vad`（VAD 工具行程執行中） | 回 202；工具行程（`java -jar runline-vad.jar`）立即終止；log `STOPPED 5/11 vad`、`OUTCOME stopped`；工作目錄刪除；沒有遺留的 ffmpeg、ffprobe、VAD 行程；Engine 狀態 `CANCELLED`，`run.result` 為 `stopped` |
+| `vad`（VAD 工具行程執行中） | 回 202；工具行程（`java -jar runline-vad.jar`）立即終止；log `STOPPED 5/12 vad`、`OUTCOME stopped`；工作目錄刪除；沒有遺留的 ffmpeg、ffprobe、VAD 行程；Engine 狀態 `CANCELLED`，`run.result` 為 `stopped` |
 | `polish` | 同上；已完成的組保留（實測 117 組的潤飾文字在資料庫），轉錄全部保留 |
 | `verify`（含 ffmpeg 擷取畫面） | 同上；已核對的條目保留（實測取消時 50 條目的核對文字與 218 個畫面時間點保留），`result.source_srt` 與 `chinese_srt` **不寫**（兩份 SRT 在階段結束時才寫入） |
+
+取消、逾時，以及失敗於 `export` 之前的 run **不寫任何字幕檔**（影片旁邊沒有新檔，也不改動已存在的同名檔）。
 
 **Engine 停止（SIGTERM，例如 `systemctl restart`、`docker compose stop`）**：進行中的 run 立即被中斷，Engine 狀態 `INTERRUPTED`，`run.result` 為 `stopped`（pipeline 盡力寫入），工作目錄刪除；Engine 在 1 秒內停止（實測）。`RUNLINE_SHUTDOWN_GRACE_SECONDS` 到期才強制。
 
@@ -366,6 +445,12 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 2. **digest-rss 的 cron 間隔須大於一個 run 的時間**，否則下一個到點的 run 在後面排隊。transcribe 的長 run 會把整段時間的 digest-rss 觸發都擋在後面，而擋住的 run 在逾時後失敗，下一次 cron 才再試。建議：長影片只在 digest-rss 的 cron 空窗期放入收件目錄並呼叫 webhook，或讓 webhook 呼叫端依 digest-rss 的排程決定何時呼叫。
 3. **`maxMediaSeconds` 的預設 6 小時（21600）是容許度，不是建議值。** 接近上限的影片，單次 run 可達數十小時（07 的估算，待量測），期間 digest-rss 完全等待、中斷即全部重跑。管理員在 trigger 以較小的 `maxMediaSeconds` 限制（例如 1 至 2 小時＝3600 至 7200）：超過者在 `audio` 階段被拒絕：run 仍要先取得 `llm` 與 `database`（排在佇列後面時要等），取得後只持有資源數百毫秒、不呼叫模型。需要處理長影片的人，用第二個 trigger（較大的上限）和較少的呼叫端密鑰，並在 digest-rss 空窗期使用。
 
+**transcribe 自己的 cron 掃描**（第 6.3 節）：
+
+- **排程間隔不宜小於典型的處理時間。** 每次觸發最多處理一部影片，Engine 沒有「前一個 run 未結束就跳過」的政策，錯過的時間不補跑。間隔短於處理時間時，到點的 run 在 `llm` 前先進先出等候（`WAITING_FOR_RESOURCES`），輪到時各自掃描，沒有待處理就立即結束；它們只佔用等候佇列，也受第 1 點的等待逾時限制（逾時的 run 未開始、不處理任何影片，影片留給下一次觸發）。實測（假模型服務，每次呼叫延遲 4 秒使一個 run 約 66 秒）：兩個 cron trigger 在同一分鐘觸發，一個 run 取得資源，另一個等候；前者結束後後者才開始，並選到另一部影片；下一分鐘到點的兩個 run 依序取得資源，各約 10 毫秒得 `NO_PENDING`。
+- **縮短間隔不會加快消化積壓。** 容量 1 使處理速度由模型決定：N 部待處理的影片需要 N 次觸發，間隔短於處理時間只增加空的 run。想在特定時段才處理，用 cron 表達式與時區限定時段（例如夜間），並讓 digest-rss 的 cron 避開，作法同第 2 點。
+- **最小的排程粒度是分鐘**（五欄表達式）。
+
 另：transcribe 的 run 以「階段依模型分批」降低 Lemonade 的模型切換，但與 digest-rss 的 run 交錯時，每次換手都會切換模型；run 之間不會交錯執行（資源容量 1），所以每個 run 內的切換次數不受影響。
 
 ## 15. 排錯
@@ -378,6 +463,7 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 409 `resources_unavailable`，`problem` `unbound` | 角色未綁定 | 第 5.3 節；也可能是綁定的資源被停用或刪除（`unknown`／`disabled`） |
 | 422 `invalid_parameters`，`problem` `missing` | 缺少 `asrModel` 或 `llmModel` | 補在 trigger 的 `parameters` |
 | 手動 run 400 `invalid_parameters`，`problem` `contains_nul` | 參數值含 U+0000 | 移除該字元 |
+| webhook 202，但 run 是 `NO_PENDING` 或處理了不相關的影片 | 進入了掃描模式：trigger 沒有把 `file` 列入 `callerParameters`（本文被忽略），或本文沒有 `file` 或 `file` 是空字串（Engine 不檢查）。確認 trigger 的 `callerParameters` 是 `["file"]`，呼叫端帶實際的檔名（第 6.2、7 節） |
 | webhook 401 | 密鑰錯、trigger 停用或不存在 | 換發密鑰（`rotate-secret`），確認 trigger 的 `enabled` |
 | webhook 400 | 見第 7 節（含 `contains_nul`） | 修正後以同一識別碼重送 |
 | webhook 500 | 未預期的失敗 | 以相同識別碼重送；持續發生時看 Engine 的 log（`TriggerFirer` 的 ERROR） |
@@ -386,10 +472,14 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 
 | `OUTCOME` 的分類 | 訊息（實測） | 原因與處置 |
 |---|---|---|
-| `INVALID_NAME` | `file rejected: the name must not contain a parent segment (..)`；`… must be relative to the intake root`；`… resolves outside the intake root`；`… is not a regular file`；`… is empty` | 檔名不合法：含 `..`、絕對路徑、解析符號連結後在根目錄外、是目錄或根目錄本身、空。訊息**不含**根目錄或解析後的路徑，也不回顯呼叫端給的名稱。呼叫端修正檔名 |
+| `INVALID_NAME` | `file rejected: the name must not contain a parent segment (..)`；`… must be relative to the intake root`；`… resolves outside the intake root`；`… is not a regular file`；`… is empty`（`file` 只含空白字元也是這個訊息；`file` 完全為空是掃描模式，不是失敗） | 檔名不合法：含 `..`、絕對路徑、解析符號連結後在根目錄外、是目錄或根目錄本身、空。訊息**不含**根目錄或解析後的路徑，也不回顯呼叫端給的名稱。呼叫端修正檔名 |
 | `NOT_FOUND` | `file rejected: no such file in the intake root` | 檔案不存在（含指向不存在目標的符號連結）。確認影片已放進收件目錄、檔名大小寫與子目錄；Docker 確認宿主目錄已掛載 |
 | `UNREADABLE` | `file rejected: the file cannot be read` | Engine 帳號讀不到：宿主上檔案要對 other 可讀（`o+r`，目錄 `o+rx`） |
 | `CONFIGURATION` | `TRANSCRIBE_INTAKE_ROOT is not set`／`… is not an existing, readable directory`；`RUNLINE_VAD_MODEL is not set`／`… is not an existing, readable file`；`<參數名稱> must be …`；`TRANSCRIBE_WORK_DIR is not an existing, writable directory`（在 `cleanup`）；`llmModel names a model that the llm resource does not list`（`polishModel`、`verifyModel`、`translateModel` 同，在 `polish`）；`the llm resource cannot be used: ENDPOINT_NOT_ENABLED`／`MODEL_NOT_ALLOWED`／`DENIED`／`REQUEST_REJECTED (HTTP 404)`／`REQUEST_TOO_LARGE`／`PARAMETER_LOCKED`／`SECRET_UNAVAILABLE`… | 第 3 節（環境變數）、第 6.1 節（參數）、第 5.1 節（資源）。資源本身的問題與服務回的 401、403、404（金鑰被拒、模型或端點不存在）不重試也不降級，run 立即失敗，轉錄與各對話階段一致；失敗發生的階段是第一次用到該能力的階段（`ENDPOINT_NOT_ENABLED` 在 `transcription`，`MODEL_NOT_ALLOWED` 與 404 在使用該模型的第一個階段）。模型不在服務的清單內由潤飾開始前的檢查發現，訊息只有參數名稱：對照 `GET <baseUrl>/models`，修正該參數 |
+| `EXPORT_DIRECTORY_NOT_WRITABLE`（`intake`；`export` 前的再檢查也可能出現） | `subtitle files: the directory of the video cannot be written to` | Engine 帳號對**影片所在目錄**沒有寫入權限。Docker：宿主目錄要讓 uid 10001 可寫，掛載不可是唯讀；systemd：目錄要讓 `runline` 可寫。run 在 `intake` 就失敗，不做轉錄。以 root 執行時這項檢查可能不成立（不要以 root 執行 Engine） |
+| `EXPORT_OUTSIDE_ROOT` | `subtitle files: the directory of the video is outside the intake root` | 影片所在目錄解析後（含符號連結）在收件根目錄之外。移除或修正符號連結 |
+| `EXPORT_TARGET_NOT_REGULAR_FILE` | `subtitle files: a subtitle file name is taken by something that is not a file` | 影片旁邊有同名（`名稱_zh-TW.srt` 或 `名稱_<兩到三個小寫英文字母>.srt`）的目錄或符號連結。移除後重送 |
+| `EXPORT_WRITE_FAILED`（`export`） | `subtitle files: the files could not be written` | 磁碟滿、檔名過長，或權限在 run 中途改變。資料庫的 `result` 已保存：從資料庫導出（第 9 節），解決後重送 |
 | `MEDIA_NO_AUDIO`（`audio`） | `the file has no audio stream` | 影片沒有音訊串流 |
 | `MEDIA_CORRUPT`（`audio`） | `ffprobe exited with exit code 1: … moov atom not found / <hidden>: Invalid data found when processing input` | 檔案損毀或不是影片；路徑與檔名被移除（`<hidden>`）。可能是檔案尚未完整寫入——呼叫端須在寫完後才呼叫 |
 | `MEDIA_TOO_LONG`（`audio`） | `the file is 62.324 s long, longer than the limit of 62.000 s` | 超過 `maxMediaSeconds`，訊息含影片長度與上限（三位小數）。調高 trigger 的上限，或拒絕該檔 |
@@ -422,6 +512,18 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | Engine log 在 run 結束時有 `left threads running: [jdbc-statement-…]` 的 WARN | 這是舊版 Engine 的缺陷（`jdbc-pool` 存取端的執行緒繼承了 run 的 class loader），WI-1418 之後的 Engine 不再出現；不影響結果。若看到 `[openai-timers…]`，是 `openai-compatible` 存取端的同一類模式，尚未處理，同樣不影響結果 |
 | 暫存區有 `onnxruntime-java*` 目錄 | VAD 工具的暫存檔在 run 的工作目錄之下，隨工作目錄刪除，系統暫存區不再累積。被強制結束的 Engine 留下的工作目錄由下一個 run 的 `cleanup` 移除（第 13 節） |
 
+### 15.5 cron 掃描
+
+| 現象 | 原因與處置 |
+|---|---|
+| 每次都是 `NO_PENDING`，但目錄裡有影片 | 看該 run log 的 `SCAN` 一行（第 11 節），哪個排除計數吃掉了影片：`tooNew`（還在複製或修改時間太新，等 `scanMinAgeSeconds` 過去）、`extension`（副檔名不在 `scanExtensions`；`.srt` 與其他非影片檔也算在這裡，所以此計數常常不是 0）、`hasSubtitle`（已有 `_zh-TW.srt`；重做見第 6.3 節）、`unwritable`（Engine 帳號對該目錄沒有寫入權限；Docker 是 uid 10001，第 2.2 節）、`attemptsExhausted`（失敗達 `scanMaxAttempts`：用 `run` 表查該檔案的失敗分類（第 9 節），修好後取代或修改該檔案，或調高 `scanMaxAttempts`）、`symlink`、`hidden`（符號連結與點開頭的路徑不掃描）、`other`（非一般檔案，例如 FIFO） |
+| `SCAN` 顯示 `inspected=0` | 收件根目錄是空的，或 `TRANSCRIBE_INTAKE_ROOT` 指向別處（第 3 節） |
+| `truncated=true` | 收件根目錄下的項目超過 10000 個，掃描以已檢視的為準；把處理過的影片移出收件根目錄 |
+| 同一部影片被處理兩次 | 先確認 `llm` 資源的容量是 1（第 5.1 節）；其次是它的 `_zh-TW.srt` 被刪除或搬走 |
+| 一部影片一直失敗、其他影片不處理 | 失敗的影片依修改時間最舊，會先被選中，直到達 `scanMaxAttempts` 次才被排除（預設 3 次觸發）；之後不阻擋其他影片。也可以先移出收件根目錄 |
+| `intake` 以 `CONFIGURATION` 失敗並指出 `scan*` | 該參數不合法（第 6.1 節）；兩種模式都會檢查 |
+| 掃描 run 的 Engine 參數 `file` 是空的，找不到它處理了哪部影片 | 以 `run` 表的 `file`（選定後才有值）和 `started_at` 對回（第 9 節） |
+
 ## 16. 已驗證與未驗證
 
 ### 16.1 已驗證（真實 Engine；模型服務是 `FakeOpenAiServer`）
@@ -431,7 +533,7 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 項目 | 結果 |
 |---|---|
 | 上傳、analyzer 判定（UNSAFE，23 項）、允許前 409、允許、資源與 check、綁定、trigger 的三種 422 | 通過 |
-| webhook → 完整 11 階段 → 從 SQLite 取回兩份 SRT、摘要、來源語言（`en`） | 通過；SRT 條目數與時間相同，可被 ffprobe 解析 |
+| webhook → 完整 12 階段（含 `export`）→ 從 SQLite 取回兩份 SRT、摘要、來源語言（`en`） | 通過；SRT 條目數與時間相同，可被 ffprobe 解析；影片旁的兩個字幕檔與 `result` 的兩份 SRT 逐位元組相同（WI-1424 在打包的 Engine 上以 cron 掃描與 webhook 的 run 重跑，見下方 cron 掃描列） |
 | 短（64 s）與長（1934 s）影片各一的每階段耗時、呼叫次數、降級數 | 第 12 節 |
 | ADR-036：401（錯密鑰、無密鑰、不存在的 trigger）；400（缺識別碼、本文非物件、非 JSON、清單外的鍵、缺鍵、值非文字、本文過大）不消耗識別碼且無觸發紀錄；重複識別碼（含同時）只一個 run；已拒絕的 run 建立仍回 202 | 通過 |
 | 負向案例：`..`、絕對路徑、符號連結逃逸（檔案與目錄）、不存在、懸空符號連結、目錄、`.`、空、權限 000、無音訊、損毀、超過 `maxMediaSeconds` | 全部被拒絕或失敗，原因明確且不含路徑（容器內另驗證指向 `/etc/hostname` 的絕對符號連結） |
@@ -442,9 +544,13 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 設定類錯誤與模型清單檢查、最後一格畫面、`TRANSCRIBE_WORK_DIR`（含不合法值）、VAD 暫存目錄、媒體失敗的 `OUTCOME` 分類 | 以 devkit 的 JVM 驗證，不是打包的 Engine：401、403、404 在轉錄與四個對話階段各自立即 `CONFIGURATION` 失敗且不重試，5xx 仍重試與降級；`llmModel`、`polishModel`、`verifyModel`、`translateModel` 不在清單內於潤飾開始前失敗，清單取不到（500、403、404、端點未啟用、空清單）略過；清單以檔案路徑回報的模型（ADR-028）通過；語音延伸到結尾的樣本（每秒 1 格、語音到檔案結尾）不降級；`TRANSCRIBE_WORK_DIR` 的建立、清理、不存在、是檔案、相對路徑、不可寫；VAD 工具的暫存目錄在工作目錄內，系統暫存區沒有新的 `onnxruntime-java*`；六種媒體失敗的 `OUTCOME` 分類（無音訊、損毀、過長、工具缺少以 run 驗證，工具失敗與逾時以分類的單元測試驗證） |
 | 參數值含 U+0000：webhook 與手動 run 回 400、不建立 run、不消耗識別碼、無 ERROR log；`jdbc-statement` 執行緒不再屬於 run 的 class loader | 以 Engine 的測試驗證（真實 PostgreSQL，真實 SQLite 檔），未在打包的 Engine 上重跑 |
 | Console 的 trigger 表單（呼叫端提供的參數）：單元、契約（真實 Engine）、e2e（真實 Engine 與 Chrome） | 通過；`dev/verify-console-security.sh` 通過 |
+| Console 的 view（WI-1422）：打包的 Engine，上傳驗證通過，`runs`、`run-stages`、`degradations`、`entries`、`result` 五個 view 各實際讀取至少一次 | 通過；資料與資料庫相符。**未驗證**：Console 畫面（只驗證 Engine 的讀取，沒有以瀏覽器看表格）；結構版本 2 的資料庫經 Engine 升級到 3（只有 `runline-transcribe` 的單元測試涵蓋）。結構目前為版本 3 |
 | 設定缺漏：VAD 命令、VAD jar、模型檔、收件根目錄、`PATH` 無 ffmpeg；資源缺端點、模型不在 `allowedModels`、模型服務連不上；參數不合法 | 失敗訊息如第 15 節 |
 | Docker：`transcribe` 映像與 `browser-transcribe` 合用映像，`runline-transcribe-check` 通過、完整 run、容器內的負向案例與取消 | 通過；合用映像只跑短與長兩個 run |
-| 部署檔：檢查腳本的工作目錄判定、`runline-vad` 包裝腳本傳遞 `JDK_JAVA_OPTIONS` | 腳本層測試通過（含突變驗證）；未在真實映像與 systemd 下實跑 |
+| 字幕檔輸出（WI-1420）：檔名、語系、位元組相同、原子換名、目錄不可寫與同名目錄的拒絕、降級與取消不寫檔 | 以 devkit 的 JVM 驗證（真實檔案系統與 SQLite、`FakeOpenAiServer`）；打包的 Engine 上只重跑了「檔名、語系、位元組相同」（cron 掃描與 webhook 的 run，見下方 cron 掃描列），其餘項目未在打包的 Engine 上逐項重跑 |
+| 收件根目錄可寫與唯讀掛載（WI-1421）：Docker `transcribe` 映像內的真實 Engine，`FakeOpenAiServer` 作模型服務 | 可寫掛載：run `success-degraded`（降級是最後一格畫面無法取出，與本項無關），影片旁出現 `movie_en.srt`、`movie_zh-TW.srt`（`rw-r--r--`），與 `result` 逐位元組相同，`stage` 有 `export`（輸入 2、輸出 2）；唯讀掛載：`runline-transcribe-check` 失敗並指出缺什麼，run 在 `intake` 以 `EXPORT_DIRECTORY_NOT_WRITABLE` 失敗，沒有檔案寫出 |
+| cron 掃描（WI-1423、WI-1424）：打包的 Engine（`engine.jar` 的現有產物），PostgreSQL 17 容器，Engine 以主機行程執行；真實 cron trigger（`* * * * *`，UTC，不設 `file`），可寫的收件目錄，`FakeOpenAiServer` 作模型服務，macOS `say` 合成的 8.3 秒影片（3 個條目） | 通過。**(1) 篩選與序列化**：目錄有兩部符合的影片（`lectures/one.mp4`、`two.MKV`，修改時間在過去）、一部太新的、一部已有 `done_zh-TW.srt` 的、一部 `.avi`：第 1、2 次觸發各處理一部（依修改時間由舊到新），各得 `_en.srt` 與 `_zh-TW.srt`（與 `result` 逐位元組相同；12 階段，`export` 的 `files=2`）；`SCAN` 行先是 `candidates=2`（`extension=2 tooNew=1 hasSubtitle=1`），再是 `candidates=1`；第 3 次觸發 `inspected=10 candidates=0`，`OUTCOME success: NO_PENDING`，Engine `SUCCEEDED`，`run.result_note` 為 `NO_PENDING`，沒有寫出任何檔案。**(2) 失敗上限**：一部沒有音訊的影片（修改時間最舊）連續 3 次觸發各以 `MEDIA_NO_AUDIO` 失敗，第 4 次觸發改處理另一部影片並成功，第 5 次 `NO_PENDING`（`attemptsExhausted=1`）；修改該檔案的修改時間後，下一次觸發又選到它（重新計數）。**(3) 重疊**：兩個 cron trigger 同一分鐘到點、兩部影片、模型服務每次呼叫延遲 4 秒（一個 run 約 66 秒）：一個 run 取得資源，另一個 `WAITING_FOR_RESOURCES`；前者結束後後者才開始並選到另一部影片（`v1.mp4`、`v2.mp4` 各處理一次，沒有重複）；下一分鐘到點的兩個 run 依序取得資源，各得 `NO_PENDING`。另：手動 run 省略 `file` 進入掃描模式；`callerParameters` 為 `["file"]` 的 webhook trigger 帶 `{}` 或 `{"file":""}` 得 202 並進入掃描模式，帶 `{"file":" "}` 的 run 以 `INVALID_NAME` 失敗；沒有列 `file` 的 webhook trigger 忽略本文並掃描；cron trigger 設 `callerParameters` 得 422 `caller_parameters_not_allowed` |
+| 部署檔：檢查腳本的工作目錄判定與收件根目錄可寫判定、`runline-vad` 包裝腳本傳遞 `JDK_JAVA_OPTIONS` | 腳本層測試通過（含突變驗證）；未在真實映像與 systemd 下實跑 |
 
 ### 16.2 未驗證
 
@@ -454,11 +560,14 @@ RESULT 7/11 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | LLM 階段的耗時、容量估算（07）中依賴真實 Lemonade 的數字 | 同上，維持待量測 |
 | 真實素材的畫面擷取成本、請求大小（真實 1080p 影片 6 張 512 px 縮圖） | 樣本是 320×240 的合成畫面 |
 | 6 小時上限附近的影片、數十小時的 run、記憶體與磁碟壓力 | 時間；樣本最長 32 分鐘 |
-| systemd 部署（drop-in 啟動 Engine、`ReadOnlyPaths=`、與瀏覽器 drop-in 並存） | 只有語法檢查與設定不衝突的檢查，本項沒有 systemd 主機 |
+| systemd 部署（drop-in 啟動 Engine、與瀏覽器 drop-in 並存、`runline` 帳號對收件根目錄的寫入） | 只有語法檢查與設定不衝突的檢查，本項沒有 systemd 主機 |
 | 原生 linux/amd64 | 本機是 arm64；amd64 映像以 Rosetta 模擬執行 |
+| cron 掃描的 `unwritable`、`symlink`、`hidden`、`other`（FIFO）、`truncated`（超過一萬個項目）排除在打包的 Engine 上的行為 | 實機驗證只涵蓋 `extension`、`tooNew`、`hasSubtitle`、`attemptsExhausted`；其餘由 `runline-transcribe` 的測試以真實檔案系統驗證 |
+| 預設的 `scanMinAgeSeconds`（600 秒）以真實時鐘等待；cron 在真實 Lemonade 下的長 run；時區與夏令時間 | 實機驗證以修改時間設在過去代替等待；模型服務是 `FakeOpenAiServer` |
 | 與 digest-rss 的真實交錯（兩個 pipeline 同時排隊） | 只驗證 transcribe 對 transcribe 的等候；機制相同（同一資源、同一等候佇列） |
 | `RUNLINE_RUN_TIMEOUT_SECONDS` 的行為 | 未設定；文件所述 |
 | 收件目錄在宿主被替換檔案的競態（檢查時間與使用時間的間隙） | README 已記為限制 |
+| 字幕檔輸出在真實 Lemonade、真實素材與播放器上的行為；以 root 執行時目錄不可寫的檢查 | WI-1420 與 WI-1421 只用 `FakeOpenAiServer` 與合成素材；沒有以 root 執行 Engine 的驗證 |
 | 上列 devkit 驗證的修復在打包 Engine 與真實 Lemonade 上的行為（尤其是真實 Lemonade 的 `models.list` 回報格式、404 與 401 的實際狀態碼、`JDK_JAVA_OPTIONS` 在 Docker 與 systemd 的 `runline-vad` 包裝腳本下對 VAD 工具 JVM 的生效） | 沒有重跑打包的 Engine 與 Lemonade；見第 17 節的第 1 項 |
 
 ## 17. 使用者在有 Lemonade 的環境要驗證的項目

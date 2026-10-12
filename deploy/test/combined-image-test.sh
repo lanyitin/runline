@@ -53,6 +53,21 @@ transcribe="$(render compose.transcribe.yaml)"
 expect "transcribe alone: its image" "$(engine_of "$transcribe")" 'image: runline-engine-transcribe:local'
 expect "transcribe alone: its stage" "$(engine_of "$transcribe")" 'target: transcribe$'
 
+# Only the intake root is writable (ADR-039); the other mounts stay read-only.
+mount_of() { # compose output, target path: the whole volume entry with that target
+  printf '%s\n' "$1" | awk -v t="target: $2" '
+    function flush() { if (index(blk, t)) printf "%s", blk; blk = "" }
+    /^      - type: / { flush() }
+    { blk = blk $0 "\n" }
+    END { flush() }'
+}
+transcribe_engine="$(engine_of "$transcribe")"
+intake_mount="$(mount_of "$transcribe_engine" /var/lib/runline/intake)"
+vad_mount="$(mount_of "$transcribe_engine" /opt/runline/vad)"
+expect "transcribe alone: the intake mount is found" "$intake_mount" 'source:'
+expect_not "transcribe alone: the intake mount is writable" "$intake_mount" 'read_only: true'
+expect "transcribe alone: the VAD tool mount is read-only" "$vad_mount" 'read_only: true'
+
 # Both.
 both="$(render compose.browser.yaml compose.transcribe.yaml compose.browser-transcribe.yaml)"
 for service in engine migrate; do

@@ -26,6 +26,14 @@
 | [WI-1417](WI-1417-end-to-end-defect-fixes.md) | T | 端到端驗證發現的缺陷修正（最後一格畫面、工作目錄設定、設定類錯誤快速失敗、暫存目錄、失敗原因） | WI-1413 | 已完成（2026-10-12；以 devkit 驗證，未在打包 Engine 與真實 Lemonade 重跑） |
 | [WI-1418](WI-1418-webhook-nul-parameter.md) | R | 呼叫端參數含 NUL 字元回 400；釐清 jdbc-statement 執行緒警告 | WI-1400 | 已完成（2026-10-12） |
 | [WI-1419](WI-1419-deploy-alignment.md) | R | 部署檔與 pipeline 實作對齊（檢查腳本的工作目錄、VAD 暫存、模型清單端點說明） | WI-1417、WI-1402 | 已完成（2026-10-12；真實映像與 systemd 下未實跑） |
+| [WI-1420](WI-1420-subtitle-export.md) | T | 新增 `export` 階段：把來源語言與繁體中文字幕寫到影片旁，檔名為「影片檔名_語系.srt」（[ADR-039](../adr/ADR-039-subtitle-files-beside-video.md)） | WI-1412、WI-1417 | 已完成（2026-10-12；devkit 驗證，打包 Engine 的實機驗證在 WI-1424） |
+| [WI-1421](WI-1421-writable-intake-root.md) | R | 收件根目錄改為可寫；部署檔與文件對齊 | WI-1420 | 已完成（2026-10-12；Docker 實機驗證，systemd 主機與真實 Lemonade 未驗證） |
+| [WI-1422](WI-1422-transcribe-views.md) | T | transcribe 在 Console 的資料區：run 清單、階段、降級、逐條文字、結果與寫出的字幕檔（pipeline view） | WI-1420 | 已完成（2026-10-12；打包 Engine 讀取五個 view 通過，Console 畫面與 V2 資料庫經 Engine 升級未驗證） |
+| [WI-1425](WI-1425-runbook-views.md) | R | runbook 與資料模型補上 Console 的 view 與 `subtitle_file` 表（結構版本 3） | WI-1422 | 已完成（2026-10-12） |
+| [WI-1423](WI-1423-cron-scan.md) | T | cron 掃描模式：`file` 為空時挑一部尚未產生字幕的影片處理（[ADR-040](../adr/ADR-040-cron-scan-mode.md)） | WI-1420 | 已完成（2026-10-12；第 10 條重疊 run 的實機驗證在 WI-1424） |
+| [WI-1424](WI-1424-cron-scan-docs.md) | R | cron 掃描的文件、trigger 設定與實機驗證 | WI-1423、WI-1421 | 已完成（2026-10-12；打包的 Engine 與真實 cron trigger 驗證篩選、失敗上限與重疊 run，模型服務為 FakeOpenAiServer，真實 Lemonade 未驗證） |
+
+派工順序：WI-1420 → WI-1421 → WI-1423 → WI-1424 → WI-1422，一次派一項。WI-1422 放最後，使 `runs` view 涵蓋「無待處理」的 run 與檔案指紋。
 
 ```mermaid
 flowchart LR

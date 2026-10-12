@@ -7,6 +7,7 @@
 | 呼叫 | 方式 | 同步性 |
 |---|---|---|
 | 呼叫端 → Engine | webhook，HTTP POST，JSON 本文提供 `file` | 驗證後立即 202，run 非同步 |
+| Engine cron → pipeline | cron trigger 建立 run，沒有呼叫端參數（`callerParameters` 一律為空） | 非同步；`file` 為空，pipeline 自己掃描收件根目錄（[ADR-040](adr/ADR-040-cron-scan-mode.md)） |
 | pipeline → ffprobe／ffmpeg | 行程，參數逐一傳遞（不經 shell） | 等結束 |
 | pipeline → VAD 工具 | 行程，同上 | 等結束 |
 | pipeline → Lemonade | `openai-compatible` 資源：音訊轉錄（多部分，位元組）、對話（文字與圖片） | 同步，逐一，並行 1 |
@@ -15,6 +16,10 @@
 ## webhook 契約
 
 見 [ADR-036](adr/ADR-036-webhook-caller-parameters.md)。呼叫端需提供密鑰、delivery 識別碼與含 `file` 的 JSON。重送同一 delivery 不產生第二個 run。
+
+## cron 觸發契約
+
+cron trigger 不帶任何呼叫端參數：固定參數全部來自 trigger，`file` 不設，所以 run 進入掃描模式。錯過的觸發時間不補跑；Engine 不因「前一個 run 未結束」而跳過觸發，後來的 run 在 `llm` 資源前先進先出等候（[ADR-040](adr/ADR-040-cron-scan-mode.md)）。掃描規則與排程建議見 [runbook](runbook.md) 第 6 與 14 節。
 
 ## VAD 工具契約（行為層級）
 
@@ -41,7 +46,7 @@
 - 回答不符契約（條目數或時間變動、格式錯誤）：視同失敗，重試後退回上一階段文字。
 - 設定類錯誤（模型不存在或不被允許、未授權、端點未啟用）不降級：run 立即以 CONFIGURATION 失敗，不重試，也不逐組降級。第一個使用對話模型的階段開始前，若資源提供模型清單，先確認 `llmModel`（及已設的階段覆寫）在清單內；清單取不到（含端點未啟用、被拒、回答不是清單、空清單）時略過檢查並記錄，不當作錯誤。
 - 取消：run 取消時結束自己啟動的行程並刪除工作目錄。
-- 去重：delivery 識別碼；不同 delivery 對同一檔案是兩個獨立的 run。
+- 去重：delivery 識別碼；不同 delivery 對同一檔案是兩個獨立的 run。cron 觸發沒有 delivery；重複的選取由 `llm` 資源的容量 1 序列化各 run 加上「字幕已存在」的判定避免（[07](07-nfr-risks.md)）。
 
 ## 認證與信任
 

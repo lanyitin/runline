@@ -7,7 +7,7 @@
 | 檔案 | 用途 |
 |---|---|
 | `docker/Dockerfile` 的 `transcribe-fetch`、`transcribe` 階段 | 在 Engine 映像上加 ffmpeg、ffprobe、silero-vad 模型檔與下列腳本；`engine` 階段與既有映像不變 |
-| `docker/compose.transcribe.yaml` | 疊加檔：用 `transcribe` 階段、唯讀掛載收件根目錄、設定 `TRANSCRIBE_INTAKE_ROOT`、掛載 VAD 工具目錄 |
+| `docker/compose.transcribe.yaml` | 疊加檔：用 `transcribe` 階段、**可寫**掛載收件根目錄、設定 `TRANSCRIBE_INTAKE_ROOT`、掛載 VAD 工具目錄 |
 | `docker/Dockerfile` 的 `browser-transcribe` 階段、`docker/compose.browser-transcribe.yaml` | 與瀏覽器並用時的單一映像與其疊加檔（見「與瀏覽器並用」） |
 | `test/combined-image-test.sh` | 並用的檢查：Compose 展開結果、兩個 systemd drop-in 不衝突；不需 Docker daemon |
 | `systemd/runline-engine-transcribe.conf` | systemd 的 drop-in |
@@ -29,7 +29,7 @@
 | `RUNLINE_VAD_MODEL` | `/opt/runline/models/silero_vad.onnx` | 本部署層的設定：模型檔位置。檢查腳本讀它並以 `--model` 傳給工具（見「待 WI-1407 對齊」） |
 | `RUNLINE_VAD_MODEL_SHA256` | 未設定；改讀 `<模型檔>.sha256` | 檢查時與模型檔比對的雜湊 |
 | `RUNLINE_TRANSCRIBE_MIN_FREE_MB` | `1024` | 只用於檢查：工作目錄的可用空間下限 |
-| `TRANSCRIBE_INTAKE_HOST_DIR`（僅 Docker，必填） | 無 | 宿主上放影片的目錄，唯讀掛載為 `TRANSCRIBE_INTAKE_ROOT` |
+| `TRANSCRIBE_INTAKE_HOST_DIR`（僅 Docker，必填） | 無 | 宿主上放影片的目錄，可寫掛載為 `TRANSCRIBE_INTAKE_ROOT`（pipeline 在影片旁寫字幕檔，權限與擁有者見 [04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
 | `TRANSCRIBE_VAD_HOST_DIR`（僅 Docker） | `./transcribe-vad`（相對於疊加檔） | 宿主上放 `runline-vad.jar` 的目錄，唯讀掛載到 `/opt/runline/vad` |
 
 沒有機密：映像與疊加檔不含密碼、金鑰或 URL 憑證；模型檔與 ffmpeg 都是公開的下載。
@@ -42,7 +42,7 @@
 | 模型檔與其 `.sha256` | `/opt/runline/models/`（映像內，root 擁有、Engine 帳號唯讀） | `/opt/runline/models/` |
 | VAD 工具 jar | `/opt/runline/vad/runline-vad.jar`（宿主目錄唯讀掛載） | `/opt/runline/vad/runline-vad.jar` |
 | 命令 `runline-vad` | `/usr/local/bin/` | `/opt/runline/bin/` |
-| 收件根目錄 | `/var/lib/runline/intake`（唯讀掛載） | 管理員指定 |
+| 收件根目錄 | `/var/lib/runline/intake`（可寫掛載；其他掛載仍唯讀） | 管理員指定 |
 | 工作目錄 | 容器的 `/tmp`（可寫層） | `/var/cache/runline-transcribe` |
 
 ## Docker
@@ -61,7 +61,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe
 | 映像 | `Dockerfile` 的 `transcribe` 階段，建在 `engine` 階段之上。單獨使用時是 `transcribe` 映像（沒有 Chrome）；與瀏覽器疊加檔並用時是 `browser-transcribe` 映像（見「與瀏覽器並用」） |
 | 平台 | `linux/amd64` 與 `linux/arm64` 皆可（靜態 ffmpeg 兩者都有），不像瀏覽器疊加檔限 amd64 |
 | 帳號 | 與 Engine 相同的 `runline`（uid 10001）。ffmpeg、ffprobe、VAD 工具都由 Engine 啟動，以該帳號執行；映像沒有以 root 執行任何這些工具 |
-| 收件根目錄 | 宿主目錄以 `read_only: true` 綁定掛載。Engine 帳號能不能**讀**由宿主的檔案權限決定：影片檔要對 other 可讀（`chmod o+r`、目錄 `o+rx`），或群組是容器內帳號的群組。檢查會告訴你讀不到 |
+| 收件根目錄 | 宿主目錄以綁定掛載（不加 `read_only`），是疊加檔唯一可寫的掛載。Engine 帳號能不能**讀寫**由宿主的檔案權限決定：影片檔要對 other 可讀（`chmod o+r`、目錄 `o+rx`），影片所在目錄要讓 uid 10001 可寫（擁有者、群組或 `o+w`）。檢查會告訴你讀不到或寫不進去。以「新檔出現」觸發 webhook 的呼叫端有忽略特定檔案的責任（[04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
 | VAD 工具目錄 | 宿主目錄（可先是空的）唯讀掛載到 `/opt/runline/vad`；把 `runline-vad.jar` 放進去，重新啟動容器不需重建映像 |
 | 模型檔 | 建置時由 `runline-transcribe-fetch` 驗證雜湊後放進映像（見「版本固定」）；root 擁有，Engine 帳號不能改 |
 | 工作目錄 | 容器的 `/tmp`（可寫層），pipeline 為每個 run 建立專屬目錄並在結束時刪除。要把它放在別處，設 `TRANSCRIBE_WORK_DIR` 並提供該路徑的 volume（`tmpfs` 會佔記憶體，不建議放長影片） |
@@ -74,7 +74,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe
 1. 執行 `bin/runline-transcribe-fetch <暫存目錄>`：下載並驗證雜湊，把 `ffmpeg`、`ffprobe` 裝到 `/usr/local/bin`，把模型檔與其 `.sha256` 裝到 `/opt/runline/models`；把 `runline-vad` 與檢查腳本裝到 `/opt/runline/bin`。
 2. 安裝 drop-in 為 `/etc/systemd/system/runline-engine.service.d/transcribe.conf`，`systemctl daemon-reload`。
 3. 把 `runline-vad.jar` 放到 `/opt/runline/vad/`（`root` 擁有、Engine 帳號可讀、不可寫）。
-4. 在 `/etc/runline/runline.env` 設 `TRANSCRIBE_INTAKE_ROOT`。收件根目錄須「Engine 帳號可讀、不可寫」，例如目錄 `root:runline 0750`、檔案 `root:runline 0640`；若要讓服務的掛載命名空間也強制唯讀，在 drop-in 加 `ReadOnlyPaths=<收件根目錄>`（檔頭有註解範例）。
+4. 在 `/etc/runline/runline.env` 設 `TRANSCRIBE_INTAKE_ROOT`。收件根目錄須「Engine 帳號可讀、可寫」，例如目錄 `runline:runline 0755`、影片檔 `0644`；drop-in 不對它設 `ReadOnlyPaths=`（權限與擁有者見 [04](../docs/stable/transcribe-pipeline/04-deployment.md)）。
 5. `systemctl restart runline-engine`，然後執行檢查。
 
 drop-in 只設預設值（`PATH`、`RUNLINE_VAD_*`、`TRANSCRIBE_WORK_DIR` 與 `CacheDirectory=runline-transcribe`），`runline.env` 的同名變數會取代它們；與瀏覽器 drop-in 可同時安裝（見「與瀏覽器並用」）。
@@ -156,7 +156,7 @@ transcribe pipeline 使用的 `llm` 資源（`openai-compatible`）須啟用 `au
 |---|---|
 | ffmpeg、ffprobe | 在 PATH 上且能執行，印出版本；否則 `ffmpeg not found on the PATH` |
 | 帳號 | 不是 root |
-| 收件根目錄 | `TRANSCRIBE_INTAKE_ROOT` 已設定、存在、可讀，且**真的寫不進去**（嘗試建立一個探測檔；若建成功就刪除並判失敗，`... is writable`） |
+| 收件根目錄 | `TRANSCRIBE_INTAKE_ROOT` 已設定、存在、可讀，且**真的寫得進去**（嘗試建立一個探測檔並刪除；建不成功則判失敗，`... is not writable by uid N; the pipeline writes the subtitle files beside the videos (ADR-039), so mount it read-write / make it writable for the Engine account`）。只檢查根目錄本身；影片所在的子目錄可寫與否由 run 的 `intake` 階段檢查 |
 | 工作目錄 | `TRANSCRIBE_WORK_DIR`（未設定或空白時為 `/tmp`，不看 `TMPDIR`）存在、可寫，印出可用空間，不低於下限 |
 | VAD 工具與模型 | 命令存在，否則 `VAD tool is not installed: ...`；模型檔存在，否則 `VAD model is not installed: ...`；有雜湊時相符（`... sha256 ... differs from the pinned ...`）；然後產生 2 秒的 16 kHz 單聲道樣本 WAV，呼叫 `<命令> --model <模型檔> <wav>`，要求結束碼 0 且標準輸出每行都是 0 到 1 的機率，印出最小、最大值與筆數；失敗時顯示工具的標準錯誤 |
 
@@ -197,9 +197,20 @@ sudo -u runline env $(grep -v '^#' /etc/runline/runline.env | xargs) /opt/runlin
 
 實測環境：macOS arm64、Colima（Docker 29.9）的 `linux/arm64` 容器，並以 `--platform linux/amd64`（Rosetta）建置、執行 ffmpeg。
 
+以下兩段是 WI-1402、WI-1416 當時的紀錄，那時收件根目錄是唯讀掛載、檢查要求「寫不進去」；WI-1421 把兩者反轉（可寫掛載、檢查要求「寫得進去」），現行驗證見本節最後一段。
+
 - **實測**：兩個平台的 `transcribe` 階段建置成功（雜湊驗證通過）；容器以 uid 10001 執行；`/opt/runline/models` 對該帳號唯讀；檢查腳本在容器內對下列狀態給出預期結果：工具未安裝（失敗並明說）、`--skip-vad`（通過）、收件根目錄為可寫掛載（失敗，且沒有留下探測檔）與唯讀掛載（通過）、以一個**臨時製作、不隨本專案提供的**最小 jar 驗證 `runline-vad` 經 JRE 載入並輸出機率的路徑（通過）、模型雜湊不符（失敗）；以 `compose.yaml` + `compose.transcribe.yaml` 啟動 PostgreSQL、migrate、engine，engine 健康、檢查通過、對收件目錄寫入得到 `Read-only file system`；不加疊加檔時映像內沒有 ffmpeg 與 `runline-vad`；`check-pins`、`pins-test.sh`、`publish-test.sh` 通過。
 - **未實測**：真實的 VAD 工具與 silero-vad 模型的推論（工具尚不存在，WI-1407）；systemd 主機上的完整安裝（drop-in 只用 `systemd-analyze verify` 檢查語法，沒有在 systemd 下啟動 Engine）；`ReadOnlyPaths=`；amd64 原生機器；暫時畫面檔的大小；與瀏覽器並用時的 systemd 主機安裝（只以 `test/combined-image-test.sh` 檢查兩個 drop-in 的設定不衝突，未在 systemd 下啟動）。
 
 ### 與瀏覽器並用的驗證（WI-1416）
 
 實測環境同上（Colima、`linux/amd64` 以 Rosetta 執行）。**實測**：以 `compose.yaml` + `compose.browser.yaml` + `compose.transcribe.yaml` + `compose.browser-transcribe.yaml` 建置 `browser-transcribe` 階段並啟動 PostgreSQL、migrate、engine（含 `init`）；engine 健康；同一個容器中 `runline-transcribe-check` 通過（含真實 VAD 工具 jar 載入模型並輸出機率，jar 由唯讀掛載提供，不隨本專案提供）與 `--skip-vad` 通過，收件根目錄寫入得到 `Read-only file system`；`runline-browser-probe` 在轉錄檢查前後各執行完成一次（Chrome 155.0.8059.39、Xvfb 在 `:99`、軟體渲染的警告如[瀏覽器手冊](browser.md)所述）；`test/combined-image-test.sh` 通過（Compose 展開：不用疊加檔、單獨用任一個、並用四種情形）；`check-pins`、`pins-test.sh` 通過。**未實測**：並用時 systemd 主機的安裝與啟動；GPU 疊加檔與並用映像；pipeline 在並用映像中的真實 run（pipeline 不在本儲存庫）。
+
+### 收件根目錄改為可寫的驗證（WI-1421）
+
+實測環境：macOS arm64、Colima（Docker 29.9）；映像是以 `compose.yaml` + `compose.transcribe.yaml` 建置的 `transcribe` 階段（linux/arm64），Engine 是 `engine/build/engine-dist` 的打包產物；pipeline 是 `runline-transcribe` 工作區的 `runline-transcribe.jar`（含 WI-1420）與其 `runline-vad.jar`；模型服務是 `FakeOpenAiServer`（與 Engine 同一個網路命名空間的容器），不是 Lemonade；影片是 macOS `say` 合成的語音接合成畫面。
+
+- **可寫掛載**（疊加檔的預設）：`runline-transcribe-check` 全部通過，含 `intake root ... is readable and writable`；run 的 log 有 `STAGE 12/12 export` 與 `RESULT 12/12 export: subtitle files written; files=2`，影片旁出現 `movie_en.srt` 與 `movie_zh-TW.srt`（權限 `rw-r--r--`），兩個檔與資料庫 `result` 的 `source_srt`、`chinese_srt` 逐位元組相同，`stage` 的 `export` 為輸入 2、輸出 2。
+- **唯讀掛載**（以一個不隨本專案提供的臨時 Compose 檔把該掛載加上 `read_only: true`）：檢查腳本失敗並印出 `intake root ... is not writable by uid 10001; the pipeline writes the subtitle files beside the videos (ADR-039), so mount it read-write / make it writable for the Engine account`；run 在 `intake`（`FAILED 3/12 intake`）以 `OUTCOME failed: EXPORT_DIRECTORY_NOT_WRITABLE` 失敗，訊息 `subtitle files: the directory of the video cannot be written to`，影片旁沒有任何字幕檔。
+- **腳本與設定層**：`test/transcribe-check-test.sh`（可寫通過、唯讀失敗並指出缺什麼、探測檔不遺留）與 `test/combined-image-test.sh`（Compose 展開：收件根目錄掛載不是唯讀、VAD 工具目錄仍唯讀）通過。
+- **未實測**：真實 Lemonade；systemd 主機（drop-in 只是不再設 `ReadOnlyPaths=`，沒有在 systemd 下啟動 Engine，`runline` 帳號對收件根目錄的寫入未驗證）；與瀏覽器並用的映像（該疊加檔沿用同一個收件根目錄掛載，未重跑 run）；以 root 執行時的目錄權限檢查；宿主為 Linux 時綁定目錄的擁有者與 uid 10001 的對應（Colima 的共用目錄把擁有者對映到宿主使用者，目錄用 `chmod 777` 讓容器帳號可寫）。

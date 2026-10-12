@@ -30,12 +30,13 @@ services:
       # TRANSCRIBE_WORK_DIR and TRANSCRIBE_VAD_COMMAND are not set: the work directory is the container's
       # /tmp (writable layer; size: deploy/transcribe.md) and the command is runline-vad on the PATH.
     volumes:
-      # The videos. Read-only for everyone in the container: the Engine's account (uid 10001) can read
-      # the files if the host gives "other" read (or the account's group) on them, and cannot write.
+      # The videos. Read-write: the pipeline writes the subtitle files beside each video (ADR-039). The
+      # Engine's account (uid 10001) reads the files if the host gives "other" read (or the account's
+      # group) on them, and writes only where the host gives it write on the directory of the video.
+      # This is the one writable mount of the overlay; the others stay read-only.
       - type: bind
         source: ${TRANSCRIBE_INTAKE_HOST_DIR:?set TRANSCRIBE_INTAKE_HOST_DIR to the directory of the videos}
         target: /var/lib/runline/intake
-        read_only: true
       # The VAD tool (WI-1407): a host directory with runline-vad.jar in it. It may be empty or not
       # exist yet; runline-transcribe-check then says the tool is not installed.
       - type: bind

@@ -4,7 +4,7 @@
 
 ## 目標與範圍
 
-- 一個 runline pipeline：由 webhook 帶入檔名觸發，將影片轉成單聲道 16 kHz WAV，以 silero-vad 分段，交給 Lemonade 的 qwen-asr 轉錄，再用 gemma4 做潤飾、畫面核對與摘要、翻譯為繁體中文。輸出一律是 SRT。
+- 一個 runline pipeline：由 webhook 帶入檔名，或由 cron 觸發後自行掃描收件目錄挑出影片，將影片轉成單聲道 16 kHz WAV，以 silero-vad 分段，交給 Lemonade 的 qwen-asr 轉錄，再用 gemma4 做潤飾、畫面核對與摘要、翻譯為繁體中文。輸出一律是 SRT。
 - 範圍外：影片上傳與收件目錄的填入（呼叫端負責）、媒體檔的保存（只存時間區間與文字）、中斷後續跑、說話者辨識、轉錄準確度的調校。
 - 專案位置：獨立於 runline 儲存庫的外部專案 `runline-transcribe`（與 runline 同層，目前為空目錄），以 composite build 取得 devkit，作法同 [digest-rss](../digest-rss/README.md)。
 
@@ -19,6 +19,8 @@
 | VAD | 獨立 JVM 小工具（ONNX Runtime）只輸出語音機率，判定與切分在 pipeline；不需 Python，也不把原生程式庫放進 pipeline jar | [03-options.md](03-options.md) |
 | LLM | 走 `openai-compatible` 資源（並行 1）；階段依模型分批，減少 Lemonade 切換模型 | [05-ipc.md](05-ipc.md) |
 | 資料保存 | 全部進 SQLite；只存時間區間、文字、模型對話與階段紀錄，不存圖片與音訊 | [06-data-model.md](06-data-model.md) |
+| cron 掃描 | `file` 為空時 pipeline 掃描收件根目錄，每個 run 處理一部尚未產生 `_zh-TW.srt` 的影片；沒有待處理時 run 立即成功；同一檔案失敗達上限後不再被選中；仰賴 `llm` 資源容量為 1 | [ADR-040](adr/ADR-040-cron-scan-mode.md)、[runbook](runbook.md) 第 6.3 節 |
+| 字幕檔輸出 | 最後階段 `export` 在影片旁寫出「影片檔名_語系.srt」兩個檔（來源語言與 `zh-TW`），內容與資料庫的 `result` 相同；收件根目錄須可寫 | [ADR-039](adr/ADR-039-subtitle-files-beside-video.md) |
 
 ## 元件關係
 
@@ -27,7 +29,7 @@ flowchart LR
   Caller[呼叫端] -->|webhook + 檔名| E[Engine webhook trigger]
   E --> P[transcribe pipeline run]
   subgraph Host[Engine 主機]
-    Intake[(收件根目錄 唯讀)] --> P
+    Intake[(收件根目錄 可寫)] <--> P
     P -->|行程| FF[ffmpeg / ffprobe]
     P -->|行程| VAD[VAD 工具 silero-vad]
     P -->|jdbc-pool| DB[(SQLite)]
@@ -41,7 +43,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   A[擷取音訊] --> B[VAD-A 分段] --> C[VAD-B 細分] --> D[qwen-asr 轉錄]
-  D --> E[依 VAD-A 分組潤飾] --> F[畫面核對 + 摘要] --> G[依 VAD-A 分組翻譯]
+  D --> E[依 VAD-A 分組潤飾] --> F[畫面核對 + 摘要] --> G[依 VAD-A 分組翻譯] --> H[寫出字幕檔]
 ```
 
 ## 文件索引
@@ -55,7 +57,7 @@ flowchart LR
 | 5 IPC 模型 | [05-ipc.md](05-ipc.md) | 已核可 |
 | 6 資料模型 | [06-data-model.md](06-data-model.md) | 已核可 |
 | 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
-| 8 決策記錄（ADR-036 至 038） | [adr/](adr/) | 已核可 |
+| 8 決策記錄（ADR-036 至 040） | [adr/](adr/) | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |
 | 上線手冊 | [runbook.md](runbook.md)（管理員的上線、第一次執行、查詢、降級與中斷處置、排錯、已驗證與未驗證清單） | 已核可 |
 

@@ -39,7 +39,8 @@ path_without() { # directory name, commands left out...
   printf '%s' "$dir"
 }
 
-intake="$work/intake"; mkdir -p "$intake"; : >"$intake/a.mp4"; chmod 0555 "$intake"
+intake="$work/intake"; mkdir -p "$intake"; : >"$intake/a.mp4"
+readonly_dir="$work/readonly"; mkdir -p "$readonly_dir"; chmod 0555 "$readonly_dir"
 scratch="$work/scratch"; mkdir -p "$scratch"
 tooldir="$work/tool"; mkdir -p "$tooldir"
 model="$tooldir/silero_vad.onnx"; printf 'model-bytes' >"$model"
@@ -81,16 +82,17 @@ check "intake root unset fails and names the variable" 1 'TRANSCRIBE_INTAKE_ROOT
   env -i "HOME=$work" "PATH=$PATH" "${vad[@]}" "$check_script"
 check "intake root missing fails" 1 'intake root.*does not exist' \
   env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$work/nowhere" "${vad[@]}" "$check_script"
-writable="$work/writable"; mkdir -p "$writable"
-check "a writable intake root fails" 1 'intake root.*writable' \
-  env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$writable" "${vad[@]}" "$check_script"
-check "the write probe leaves nothing behind" 0 '^0$' bash -c "ls -A '$writable' | wc -l | tr -d ' '"
+check "a writable intake root passes" 0 "intake root '$intake' is readable and writable" \
+  "${base[@]}" "${vad[@]}" "$check_script"
+check "a read-only intake root fails and says what is missing" 1 'intake root.*not writable.*writes the subtitle files' \
+  env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$readonly_dir" "${vad[@]}" "$check_script"
+check "the write probe leaves nothing behind" 0 '^1$' bash -c "ls -A '$intake' | wc -l | tr -d ' '"
 closed="$work/closed"; mkdir -p "$closed"; chmod 0000 "$closed"
 check "an unreadable intake root fails" 1 'intake root.*not readable' \
   env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$closed" "${vad[@]}" "$check_script"
 
 check "a work directory that cannot be written fails" 1 'work directory.*not writable' \
-  env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$intake" "TRANSCRIBE_WORK_DIR=$intake" "${vad[@]}" "$check_script"
+  env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$intake" "TRANSCRIBE_WORK_DIR=$readonly_dir" "${vad[@]}" "$check_script"
 check "TRANSCRIBE_WORK_DIR, when set, is the directory checked" 0 "work directory '$scratch' is writable" \
   "${base[@]}" "TMPDIR=$work" "${vad[@]}" "$check_script"
 check "without TRANSCRIBE_WORK_DIR the JVM default /tmp is checked, not TMPDIR" 0 "work directory '/tmp' is writable" \

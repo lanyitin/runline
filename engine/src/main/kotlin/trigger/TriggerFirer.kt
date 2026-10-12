@@ -23,9 +23,14 @@ class TriggerFirer(
   /**
    * Creates the run of firing [firingId] of [trigger] and settles the firing:
    * [FiringOutcome.RUN_CREATED], [FiringOutcome.REFUSED] or, when something unexpected went wrong,
-   * [FiringOutcome.FAILED].
+   * [FiringOutcome.FAILED]. The run gets the fixed parameters of the trigger plus [callerValues],
+   * which the receiver of a webhook call has checked against the trigger's list (ADR-036).
    */
-  fun fire(trigger: Trigger, firingId: Long): FiringOutcome {
+  fun fire(
+      trigger: Trigger,
+      firingId: Long,
+      callerValues: Map<String, String> = emptyMap(),
+  ): FiringOutcome {
     val result =
         try {
           // A trigger is the administrator's, so it sees every definition; it runs the very version
@@ -35,7 +40,7 @@ class TriggerFirer(
                   trigger.contentHash,
                   trigger.uploader,
                   trigger.pipeline,
-                  trigger.parameters,
+                  trigger.parameters + callerValues,
                   RunSource.Trigger(trigger.name),
                   Visibility.All,
               )
@@ -97,6 +102,8 @@ class TriggerFirer(
                       when (it.kind) {
                         ParameterProblemKind.MISSING -> "缺少必填參數 ${it.name}"
                         ParameterProblemKind.UNDECLARED -> "未宣告的參數 ${it.name}"
+                        ParameterProblemKind.FIXED_AND_CALLER -> "參數 ${it.name} 不能同時固定又由呼叫端提供"
+                        ParameterProblemKind.NUL_IN_VALUE -> "參數 ${it.name} 的值含有 NUL 字元"
                       }
                     },
             )

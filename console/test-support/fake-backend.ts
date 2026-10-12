@@ -27,6 +27,7 @@ import {
 } from './fake-api';
 import { FakeAllowList, judge } from './fake-allowlist';
 import { FakeBindings } from './fake-bindings';
+import { declareView, FakeViews, type DeclaredView } from './fake-views';
 import { FakeResources } from './fake-resources';
 import { FakeSecrets, type FakeKeystoreEntry } from './fake-secrets';
 import { FakeTriggers, type FakeTrigger } from './fake-triggers';
@@ -98,6 +99,8 @@ export interface Definition {
     resourceTypes: Record<string, string>;
     /** What a declared resource is for, by its name; only those with a purpose. */
     resourcePurposes: Record<string, string>;
+    /** The views the pipeline declares (ADR-033). */
+    views: DeclaredView[];
   };
   verdict: 'SAFE' | 'UNSAFE';
   reasons: Array<Required<FakeReason>>;
@@ -166,12 +169,15 @@ export class FakeBackend {
   readonly allowList = new FakeAllowList(this);
   /** Which resource each role of a pipeline is bound to, for each uploader (ADR-025). */
   readonly bindings: FakeBindings = new FakeBindings(this);
+  /** The views of the pipelines and the rows they read (ADR-033). */
+  readonly views: FakeViews = new FakeViews(this);
   /** The routes of the parts the backend is made of, apart from its own. */
   private readonly routes: FakeRoute[] = [
     ...this.triggers.routes,
     ...this.allowList.routes,
     ...this.resources.routes,
     ...this.bindings.routes,
+    ...this.views.routes,
     ...this.secrets.routes,
     {
       method: 'DELETE',
@@ -836,6 +842,17 @@ export class FakeBackend {
       });
       return;
     }
+    if (run.pipeline === 'demo-views') {
+      // As the sample does: it makes its tables in the database its role comes to, and fills them.
+      const definition = this.version(run.contentHash, run.uploader)?.definitions.find(
+        (d) => d.name === run.pipeline,
+      );
+      const role = definition && this.bindings.rolesOf(run.uploader, definition).find((r) => r.role === 'view-db');
+      if (role) this.views.seedDemo(role.resource);
+      say('articles written');
+      this.finish(run, 'SUCCEEDED', null);
+      return;
+    }
     say(`${run.pipeline} ran`);
     this.finish(run, 'SUCCEEDED', null);
   }
@@ -874,6 +891,7 @@ export class FakeBackend {
         resources: pipeline.resources ?? [],
         resourceTypes: pipeline.resourceTypes ?? {},
         resourcePurposes: pipeline.resourcePurposes ?? {},
+        views: (pipeline.views ?? []).map(declareView),
       },
       verdict: 'SAFE',
       reasons: [],

@@ -21,12 +21,55 @@ data class MetadataDoc(
     val resourceTypes: Map<String, String> = emptyMap(),
     /** What some roles are for, by role name (ADR-025); only roles that say it. For people only. */
     val resourcePurposes: Map<String, String> = emptyMap(),
+    /** The read-only views the pipeline declares (ADR-033); none for a pipeline without any. */
+    val views: List<ViewDoc> = emptyList(),
 ) {
   companion object {
     /** The longest purpose of a role, in characters; a longer one is refused at upload. */
     const val MAX_PURPOSE_LENGTH = 200
   }
 }
+
+/**
+ * A declared view, as written. Types and tones are the names the pipeline wrote; a name outside the
+ * allowed sets is refused at upload, so a stored view only has known ones.
+ */
+@Serializable
+data class ViewDoc(
+    val id: String,
+    val title: String,
+    val description: String,
+    /** The resource role the query runs against. */
+    val resource: String,
+    val query: String,
+    val parameters: List<ViewParameterDoc>,
+    val columns: List<ViewColumnDoc>,
+    val sort: List<ViewSortDoc>,
+)
+
+@Serializable
+data class ViewParameterDoc(
+    val name: String,
+    val type: String,
+    val required: Boolean,
+    val options: List<String>,
+)
+
+@Serializable
+data class ViewColumnDoc(
+    val name: String,
+    val label: String,
+    val type: String,
+    val tones: List<StatusToneDoc>,
+    val drill: DrillDoc?,
+)
+
+@Serializable data class StatusToneDoc(val value: String, val tone: String)
+
+/** Opens view [view] of the same pipeline with the value of column [from] as [parameter]. */
+@Serializable data class DrillDoc(val view: String, val parameter: String, val from: String)
+
+@Serializable data class ViewSortDoc(val column: String, val descending: Boolean)
 
 @Serializable
 data class ParameterDoc(val name: String, val required: Boolean, val default: String? = null)

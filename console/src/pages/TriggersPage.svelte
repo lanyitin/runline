@@ -130,6 +130,7 @@
             <th scope="col">{i18n.t('triggers.col.kind')}</th>
             <th scope="col">{i18n.t('triggers.col.target')}</th>
             <th scope="col">{i18n.t('triggers.col.schedule')}</th>
+            <th scope="col">{i18n.t('triggers.col.callers')}</th>
             <th scope="col">{i18n.t('triggers.col.enabled')}</th>
             <th scope="col">{i18n.t('triggers.col.updated')}</th>
             <th scope="col">{i18n.t('triggers.col.actions')}</th>
@@ -158,6 +159,15 @@
                   {#if meaning}<div class="words rl-help">{meaning}</div>{/if}
                 {:else}
                   <span class="rl-help">{i18n.t('triggers.fromOutside')}</span>
+                {/if}
+              </td>
+              <td class="callers">
+                {#if trigger.kind === 'webhook'}
+                  {#if trigger.callerParameters.length === 0}
+                    <span class="rl-help">{i18n.t('triggers.callers.none')}</span>
+                  {:else}
+                    {#each trigger.callerParameters as parameter, at (parameter)}{#if at > 0}, {/if}<PlainText value={parameter} mono />{/each}
+                  {/if}
                 {/if}
               </td>
               <td class="enabled">

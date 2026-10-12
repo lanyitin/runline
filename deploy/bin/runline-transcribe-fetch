@@ -1,0 +1,64 @@
+#!/bin/bash
+# Fetches the build inputs of the transcribe runtime, each verified by the sha256 pinned here (ADR-032,
+# WI-1402): ffmpeg and ffprobe (the static build of johnvansickle.com) and the silero-vad ONNX model.
+# This file is the one place the versions and hashes are defined: the Dockerfile's `transcribe` stage
+# runs it, and so does an operator preparing a systemd host. Nothing reaches the destination unless
+# every download matched.
+#
+#   runline-transcribe-fetch <destination-directory> [amd64|arm64]    architecture defaults to this machine's
+#
+# Writes <destination>/ffmpeg, <destination>/ffprobe and <destination>/silero_vad.onnx and <destination>/silero_vad.onnx.sha256.
+# RUNLINE_FFMPEG_BASE_URL and RUNLINE_SILERO_VAD_URL name an internal mirror in place of the upstream
+# addresses (the hashes still apply).
+#
+# To update: take the new release from upstream, download it once, compute its sha256 yourself
+# (the upstream publishes no sha256 for these files), change the version and the hashes below and read
+# deploy/transcribe.md "Updating the pinned inputs".
+set -euo pipefail
+
+ffmpeg_version=7.0.2
+ffmpeg_sha256_amd64=abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67
+ffmpeg_sha256_arm64=f4149bb2b0784e30e99bdda85471c9b5930d3402014e934a5098b41d0f7201b1
+silero_vad_version=v5.1.2
+silero_vad_sha256=2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f
+
+usage() { echo "usage: runline-transcribe-fetch <destination-directory> [amd64|arm64]" >&2; exit 2; }
+die() { echo "runline-transcribe-fetch: $*" >&2; exit 1; }
+
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
+dest="$1"
+arch="${2:-}"
+if [ -z "$arch" ]; then
+  case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; *) arch="$(uname -m)" ;; esac
+fi
+case "$arch" in
+  amd64) ffmpeg_sha256="$ffmpeg_sha256_amd64" ;;
+  arm64) ffmpeg_sha256="$ffmpeg_sha256_arm64" ;;
+  *) die "no pinned ffmpeg for architecture '$arch' (amd64 and arm64 only)" ;;
+esac
+
+sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+download() { # what, url, file, expected sha256
+  curl -fsSL --retry 3 -o "$3" "$2" || die "$1: cannot download $2"
+  local actual; actual="$(sha256_of "$3")"
+  [ "$actual" = "$4" ] || die "$1: sha256 of $2 is $actual, not the pinned $4"
+}
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+ffmpeg_base="${RUNLINE_FFMPEG_BASE_URL:-https://johnvansickle.com/ffmpeg/releases}"
+silero_url="${RUNLINE_SILERO_VAD_URL:-https://raw.githubusercontent.com/snakers4/silero-vad/${silero_vad_version}/src/silero_vad/data/silero_vad.onnx}"
+name="ffmpeg-${ffmpeg_version}-${arch}-static"
+
+download ffmpeg "$ffmpeg_base/$name.tar.xz" "$tmp/ffmpeg.tar.xz" "$ffmpeg_sha256"
+download "silero-vad model" "$silero_url" "$tmp/silero_vad.onnx" "$silero_vad_sha256"
+mkdir "$tmp/unpacked"
+tar -xJf "$tmp/ffmpeg.tar.xz" -C "$tmp/unpacked" --strip-components=1 "$name/ffmpeg" "$name/ffprobe"
+
+mkdir -p "$dest"
+install -m 0755 "$tmp/unpacked/ffmpeg" "$tmp/unpacked/ffprobe" "$dest/"
+install -m 0644 "$tmp/silero_vad.onnx" "$dest/silero_vad.onnx"
+# The pinned hash beside the model, for runline-transcribe-check to compare the file in place with.
+printf '%s  silero_vad.onnx\n' "$silero_vad_sha256" >"$dest/silero_vad.onnx.sha256"
+echo "runline-transcribe-fetch: ffmpeg $ffmpeg_version ($arch), ffprobe and silero-vad $silero_vad_version verified and written to $dest"

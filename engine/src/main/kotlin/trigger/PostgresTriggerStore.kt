@@ -7,12 +7,14 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
   private val parameters = MapSerializer(String.serializer(), String.serializer())
+  private val names = ListSerializer(String.serializer())
 
   override fun insert(trigger: NewTrigger): Trigger? {
     val inserted =
@@ -21,8 +23,8 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
               .prepareStatement(
                   "INSERT INTO pipeline_trigger (name, kind, definition_id, parameters, enabled, " +
                       "cron_expression, time_zone, secret_hash, secret_rotated_at, created_by, " +
-                      "created_at, updated_by, updated_at) " +
-                      "VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                      "created_at, updated_by, updated_at, caller_parameters) " +
+                      "VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb) " +
                       "ON CONFLICT (name) DO NOTHING"
               )
               .use {
@@ -39,6 +41,7 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
                 it.setObject(11, trigger.at.utc())
                 it.setString(12, trigger.by)
                 it.setObject(13, trigger.at.utc())
+                it.setString(14, Json.encodeToString(names, trigger.callerParameters))
                 it.executeUpdate() == 1
               }
         }
@@ -60,7 +63,7 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
               .prepareStatement(
                   "UPDATE pipeline_trigger SET definition_id = ?, parameters = ?::jsonb, " +
                       "enabled = ?, cron_expression = ?, time_zone = ?, updated_by = ?, " +
-                      "updated_at = ? WHERE name = ?"
+                      "updated_at = ?, caller_parameters = ?::jsonb WHERE name = ?"
               )
               .use {
                 it.setLong(1, change.definitionId)
@@ -70,7 +73,8 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
                 it.setString(5, change.timeZone)
                 it.setString(6, by)
                 it.setObject(7, at.utc())
-                it.setString(8, name)
+                it.setString(8, Json.encodeToString(names, change.callerParameters))
+                it.setString(9, name)
                 it.executeUpdate() == 1
               }
         }
@@ -136,6 +140,20 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
         it.setLong(1, triggerId)
         it.setObject(2, at.utc())
         it.setString(3, deliveryId)
+      }
+
+  override fun isDeliveryClaimed(triggerId: Long, deliveryId: String): Boolean =
+      dataSource.connection.use { connection ->
+        connection
+            .prepareStatement(
+                "SELECT 1 FROM trigger_firing WHERE trigger_id = ? AND delivery_id = ? " +
+                    "AND outcome <> 'FAILED'"
+            )
+            .use {
+              it.setLong(1, triggerId)
+              it.setString(2, deliveryId)
+              it.executeQuery().use { rows -> rows.next() }
+            }
       }
 
   override fun claimOccurrence(triggerId: Long, scheduledFor: Instant, at: Instant): Long? =
@@ -241,6 +259,8 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
                         pipeline = rows.getString("pipeline"),
                         parameters =
                             Json.decodeFromString(parameters, rows.getString("parameters")),
+                        callerParameters =
+                            Json.decodeFromString(names, rows.getString("caller_parameters")),
                         enabled = rows.getBoolean("enabled"),
                         cronExpression = rows.getString("cron_expression"),
                         timeZone = rows.getString("time_zone"),
@@ -269,7 +289,7 @@ class PostgresTriggerStore(private val dataSource: DataSource) : TriggerStore {
     // The binding is shown as the version (artifact content hash) and pipeline name.
     const val SELECT =
         "SELECT t.id, t.name, t.kind, t.definition_id, a.content_hash, a.uploaded_by, d.name AS pipeline, " +
-            "t.parameters, t.enabled, t.cron_expression, t.time_zone, t.secret_rotated_at, " +
+            "t.parameters, t.caller_parameters, t.enabled, t.cron_expression, t.time_zone, t.secret_rotated_at, " +
             "t.created_by, t.created_at, t.updated_by, t.updated_at FROM pipeline_trigger t " +
             "JOIN pipeline_definition d ON d.id = t.definition_id " +
             "JOIN pipeline_artifact a ON a.id = d.artifact_id"

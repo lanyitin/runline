@@ -1,5 +1,6 @@
 package dev.lawlan.runline.accessors.jdbc
 
+import dev.lawlan.runline.accessors.ReadOnlyFailure
 import dev.lawlan.runline.core.ResourceFailure
 import java.math.BigDecimal
 import java.net.SocketTimeoutException
@@ -141,6 +142,8 @@ object PostgresProfile : JdbcProfile {
       org.postgresql.Driver().connect(url, properties)
           ?: throw SQLException("the driver does not take the address", "08001")
 
+  override val reading: ReadDialect = PostgresReading
+
   override fun classify(e: SQLException): Classified {
     val state = e.sqlState?.takeIf { STATE.matches(it) }
     val failure =
@@ -178,6 +181,56 @@ object PostgresProfile : JdbcProfile {
   private const val DEFAULT_APPLICATION = "runline"
   private const val LOGIN_MARGIN_SECONDS = 5L
   private val STATE = Regex("[0-9A-Z]{5}")
+}
+
+/** Reading PostgreSQL for a view (WI-1301). */
+internal object PostgresReading : ReadDialect {
+  override val syntax = SqlSyntax.POSTGRESQL
+
+  override fun quote(name: String) = "\"" + name.replace("\"", "\"\"") + "\""
+
+  override fun connect(url: String, properties: Properties): Connection =
+      PostgresProfile.connect(url, properties)
+
+  /**
+   * Every transaction of the session is read-only from the start, and the one the read runs in is
+   * begun read-only too ([begin]): nothing is written, not by the statement, not by a function it
+   * calls, and not by whatever the account is allowed to do.
+   */
+  override val startStatements: List<String> =
+      listOf(
+          "SET default_transaction_read_only = on",
+          // The check of the text reads a quote the way the standard says; an account set up to
+          // read
+          // a backslash as an escape would see statements where the check saw text.
+          "SET standard_conforming_strings = on",
+      )
+
+  override fun begin(connection: Connection) {
+    connection.autoCommit = false
+    connection.isReadOnly = true
+  }
+
+  override fun classify(e: SQLException): ReadOnlyFailure {
+    val state = e.sqlState.orEmpty()
+    return when {
+      state in NOT_THERE -> ReadOnlyFailure.SCHEMA_MISMATCH
+      // 25: the transaction is read-only or cannot be changed; 42: the text is not valid as it
+      // is; 0A: a feature that is not allowed here (a statement that changes inside a query);
+      // 22: a value the text cannot take.
+      state.startsWith("25") ||
+          state.startsWith("42") ||
+          state.startsWith("0A") ||
+          state.startsWith("22") -> ReadOnlyFailure.QUERY_REJECTED
+      state == "57014" -> ReadOnlyFailure.CANCELLED
+      PostgresProfile.classify(e).failure != ResourceFailure.SQL_ERROR ->
+          ReadOnlyFailure.CONNECTION_FAILED
+      else -> ReadOnlyFailure.FAILED
+    }
+  }
+
+  /** Undefined column, undefined table, invalid schema name. */
+  private val NOT_THERE = setOf("42703", "42P01", "3F000")
 }
 
 /** How values pass between Java and PostgreSQL. */

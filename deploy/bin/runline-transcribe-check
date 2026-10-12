@@ -1,0 +1,148 @@
+#!/bin/bash
+# Checks the runtime of the transcribe pipeline (docs/stable/transcribe-pipeline/04-deployment.md,
+# WI-1402), in a container or on a host, as the account the Engine runs as:
+#
+#   runline-transcribe-check [--skip-vad]
+#
+#   ffmpeg, ffprobe    found on the PATH, their versions are printed
+#   account            not root
+#   intake root        TRANSCRIBE_INTAKE_ROOT exists, is readable and cannot be written (a file is really
+#                      tried; if it could be made it is removed again and the check fails)
+#   work directory     TRANSCRIBE_WORK_DIR (unset or empty: /tmp, the default temporary
+#                      directory of the JVM that runs the pipeline; TMPDIR is not looked at) can be written; its free space is
+#                      reported and must be at least RUNLINE_TRANSCRIBE_MIN_FREE_MB (default 1024)
+#   VAD tool           TRANSCRIBE_VAD_COMMAND (default runline-vad on the PATH) is installed, the model
+#                      file RUNLINE_VAD_MODEL exists (and has the sha256 RUNLINE_VAD_MODEL_SHA256, or
+#                      the one in the file <model>.sha256 beside it, when either is there), and the tool prints probabilities between 0 and 1 for a sample
+#                      16 kHz mono WAV made here. Called as: <command> --model <model> <wav>
+#
+# Every check runs and the reason of each failure is printed; the exit status is 0 only when all pass.
+# --skip-vad leaves the VAD tool out (it is delivered apart from the runtime: WI-1407) and says so.
+set -u
+
+skip_vad=false
+case "${1:-}" in
+  "") ;;
+  --skip-vad) skip_vad=true ;;
+  *) echo "usage: runline-transcribe-check [--skip-vad]" >&2; exit 2 ;;
+esac
+[ "$#" -le 1 ] || { echo "usage: runline-transcribe-check [--skip-vad]" >&2; exit 2; }
+
+failures=0
+ok() { printf 'ok    %s\n' "$*"; }
+skipped() { printf 'skip  %s\n' "$*"; }
+fail() { printf 'FAIL  %s\n' "$*" >&2; failures=$((failures + 1)); }
+
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/runline-transcribe-check-XXXXXX")" || { echo "FAIL  cannot make a temporary directory" >&2; exit 1; }
+trap 'rm -rf "$scratch"' EXIT
+
+# --- ffmpeg and ffprobe
+for tool in ffmpeg ffprobe; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    fail "$tool not found on the PATH"
+  elif version="$("$tool" -version 2>&1 | head -n 1)" && [ -n "$version" ]; then
+    ok "$version"
+  else
+    fail "$tool is on the PATH but does not run"
+  fi
+done
+
+# --- account
+if [ "$(id -u)" -eq 0 ]; then
+  fail "running as root; the tools must run as the unprivileged account of the Engine"
+else
+  ok "running as uid $(id -u), not root"
+fi
+
+# --- intake root
+root="${TRANSCRIBE_INTAKE_ROOT:-}"
+if [ -z "$root" ]; then
+  fail "TRANSCRIBE_INTAKE_ROOT is not set"
+elif [ ! -d "$root" ]; then
+  fail "intake root '$root' does not exist or is not a directory"
+elif [ ! -r "$root" ] || [ ! -x "$root" ] || ! ls "$root" >/dev/null 2>&1; then
+  fail "intake root '$root' is not readable by uid $(id -u)"
+else
+  probe="$root/.runline-write-probe-$$"
+  if ( : >"$probe" ) 2>/dev/null; then
+    rm -f "$probe"
+    fail "intake root '$root' is writable; mount it read-only / make it not writable for the Engine account"
+  else
+    ok "intake root '$root' is readable and not writable"
+  fi
+fi
+
+# --- work directory
+work="${TRANSCRIBE_WORK_DIR:-/tmp}"
+min_free="${RUNLINE_TRANSCRIBE_MIN_FREE_MB:-1024}"
+if [ ! -d "$work" ]; then
+  fail "work directory '$work' does not exist"
+elif ! wprobe="$(mktemp -d "$work/.runline-work-probe-XXXXXX" 2>/dev/null)"; then
+  fail "work directory '$work' is not writable by uid $(id -u)"
+else
+  rmdir "$wprobe"
+  free_mb="$(df -Pk "$work" | awk 'NR==2 {print int($4 / 1024)}')"
+  if [ "${free_mb:-0}" -lt "$min_free" ]; then
+    fail "work directory '$work' has ${free_mb:-0} MB free, less than the $min_free MB required (about 115 MB per hour of video plus the frames)"
+  else
+    ok "work directory '$work' is writable, $free_mb MB free"
+  fi
+fi
+
+# --- VAD tool
+# Makes a sample, runs the tool on it and judges what it printed.
+check_vad_output() {
+  local wav="$scratch/sample.wav" status=0 bad pattern range
+  pattern='^[[:space:]]*(0(\.[0-9]+)?|1(\.0+)?)[[:space:]]*$'
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    fail "VAD sample not made: ffmpeg not found"; return
+  fi
+  if ! ffmpeg -v error -f lavfi -i "sine=frequency=300:duration=2" -ar 16000 -ac 1 -y "$wav"; then
+    fail "VAD sample could not be made with ffmpeg"; return
+  fi
+  "$tool" --model "$model" "$wav" >"$scratch/vad.out" 2>"$scratch/vad.err" || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "VAD tool failed (exit $status): $(head -c 600 "$scratch/vad.err")"
+  elif [ ! -s "$scratch/vad.out" ]; then
+    fail "VAD tool printed no probabilities for the sample"
+  elif bad="$(grep -Ev "$pattern" "$scratch/vad.out")"; then
+    fail "VAD output has line(s) that are not a probability between 0 and 1: $(printf '%s' "$bad" | head -n 3 | tr '\n' ' ')"
+  else
+    range="$(awk 'NR==1 {min=$1; max=$1} {if ($1<min) min=$1; if ($1>max) max=$1} END {printf "min %s max %s, %d values", min, max, NR}' "$scratch/vad.out")"
+    ok "VAD tool loaded the model and printed probabilities ($range)"
+  fi
+}
+
+if [ "$skip_vad" = true ]; then
+  skipped "VAD tool and model skipped (--skip-vad)"
+else
+  command_name="${TRANSCRIBE_VAD_COMMAND:-runline-vad}"
+  model="${RUNLINE_VAD_MODEL:-}"
+  tool_ok=true
+  if ! tool="$(command -v "$command_name" 2>/dev/null)"; then
+    fail "VAD tool is not installed: '$command_name' is not an executable or on the PATH (put runline-vad.jar where the overlay documents, see deploy/transcribe.md)"
+    tool_ok=false
+  fi
+  if [ -z "$model" ] || [ ! -f "$model" ]; then
+    fail "VAD model is not installed: RUNLINE_VAD_MODEL '${model:-<unset>}' is not a file"
+    tool_ok=false
+  elif pinned="${RUNLINE_VAD_MODEL_SHA256:-$(cut -d' ' -f1 "$model.sha256" 2>/dev/null | head -n 1)}"; [ -n "$pinned" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then actual="$(sha256sum "$model" | cut -d' ' -f1)"; else actual="$(shasum -a 256 "$model" | cut -d' ' -f1)"; fi
+    if [ "$actual" = "$pinned" ]; then
+      ok "VAD model sha256 $actual"
+    else
+      fail "VAD model sha256 $actual differs from the pinned $pinned"
+      tool_ok=false
+    fi
+  fi
+  if [ "$tool_ok" = true ]; then
+    check_vad_output
+  fi
+fi
+
+if [ "$failures" -eq 0 ]; then
+  echo "all checks passed"
+else
+  echo "$failures check(s) failed" >&2
+  exit 1
+fi

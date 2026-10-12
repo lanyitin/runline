@@ -13,7 +13,7 @@
 | 管理員 | 共享資源管理 | 定義資源（型別、容量與型別專屬設定）；查看持有者與等待者；修改、刪除（無持有者與等待者時）、檢查實體、強制釋放（[ADR-019](adr/ADR-019-typed-shared-resources.md)） |
 | 開發人員、管理員 | 資源角色綁定 | 查看 pipeline 每個資源角色的型別、用途與綁定，把角色綁定到既有的資源或解除（只能選既有資源，不能建立；[ADR-025](../digest-rss/adr/ADR-025-resource-roles-and-binding.md)） |
 | 管理員 | 機密管理 | 唯讀列出金鑰庫別名與引用者、重載金鑰庫；不接受機密值 |
-| 外部系統 | webhook 入口 | 驗證密鑰後立即回 accepted，run 非同步執行；以呼叫端提供的 delivery 識別碼去重 |
+| 外部系統 | webhook 入口 | 驗證密鑰後立即回 accepted，run 非同步執行；以呼叫端提供的 delivery 識別碼去重；trigger 明列呼叫端提供的參數時，密鑰與識別碼通過後才讀取本文（[ADR-036](../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md)） |
 | 任何已授權者 | run 查詢 | 狀態、結果、log |
 | 任何已授權者 | run log 串流 | 以 WebSocket 或 SSE 推送；客戶端中斷不影響 run（背壓：緩衝有上限，超過則丟棄舊 log 並標記） |
 | 任何已授權者 | 取消 run | 協作式取消（見 [07](07-nfr-risks.md)） |

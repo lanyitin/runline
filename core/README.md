@@ -19,8 +19,52 @@ static initializers.
 | External processes | `processes = AccessLimit(allow = [commands])` | Allowed executables (matched against the first command element), or unrestricted. Not provided means unrestricted |
 | Shared resources | `resources = [names]` | Names only; acquired by the Engine in the initialization phase, never through the context. Does not affect safe/unsafe |
 | Expected resource types | `typedResources = [TypedResource(name, type, purpose = "")]` | A resource role: the name the pipeline uses together with the type it expects (`ResourceTypes.COUNTER`, `FILE`, `JDBC_POOL`, `OPENAI_COMPATIBLE`; the set is closed) and an optional short `purpose` (at most 200 characters, for people only). The name is also a declared resource name, so it is acquired like any other; a run is refused when the resource it resolves to has another type. Which resource a role gets is decided by a binding outside the pipeline, else it is the resource of the same name; the pipeline only ever sees the role (ADR-025). A name declared without a type fits any type. Does not affect safe/unsafe |
+| Views | `views = [View(...)]` | Read-only, named queries over a database role, shown by the Console (ADR-033); see "Declaring views" below. Does not affect safe/unsafe, resource roles or bindings |
 
 Triggers are not part of the metadata; administrators bind them in the Engine.
+
+## Declaring views
+
+A view is a read-only, named query over one of the pipeline's database roles, declared like the rest of the metadata: as
+annotation values, read without running the pipeline. The Engine checks the declaration at upload and refuses the
+whole jar when it is wrong (the checks and the stored form are in `docs/stable/pipeline-engine/08-api.md`, "view
+宣告"). A jar with no `views` behaves exactly as before.
+
+| Member | Meaning |
+|---|---|
+| `View(id, title, description = "", resource, query, parameters = [], columns, sort = [])` | `id` is unique within the pipeline. `resource` is a role declared with `TypedResource(..., ResourceTypes.JDBC_POOL)`. `query` is text in that database's dialect that refers to its parameters by name, as `:name` (see below); parameter values are passed as values, never joined into it |
+| `ViewParam(name, type = TEXT, required = true, options = [])` | `type` is `ViewParamType.TEXT`, `INTEGER` or `CHOICE`; a `CHOICE` lists its fixed `options` |
+| `ViewColumn(name, label, type = TEXT, tones = [], drill = [])` | `type` is `ViewColumnType.TEXT`, `INTEGER`, `TIME` or `STATUS`. For a `STATUS` column, `tones = [StatusTone(value, Tone.POSITIVE / NEUTRAL / NEGATIVE)]`; a value not listed is neutral. `drill` holds at most one `Drill` |
+| `Drill(view, parameter, from = "")` | Opens another view of the same pipeline, giving it the value of column `from` of the row (empty: the column that declares the drill) as its parameter `parameter` |
+| `ViewSort(column, descending = false)` | The default order, by column names of the view |
+
+```kotlin
+@PipelineDefinition(
+    name = "feed",
+    typedResources = [TypedResource("feed-db", ResourceTypes.JDBC_POOL)],
+    views = [
+        View(
+            id = "articles", title = "Articles", resource = "feed-db",
+            query = "SELECT title, state FROM article WHERE run = :run",
+            parameters = [ViewParam("run", ViewParamType.INTEGER)],
+            columns = [
+                ViewColumn("title", "Title"),
+                ViewColumn("state", "State", ViewColumnType.STATUS,
+                    tones = [StatusTone("downloaded", Tone.POSITIVE), StatusTone("failed", Tone.NEGATIVE)]),
+            ],
+            sort = [ViewSort("title")],
+        ),
+    ],
+)
+```
+
+A query refers to its parameters by name: `:run` is the value of the parameter `run`, as many times as it is written,
+and every declared parameter must be referred to at least once. A `:name` is a placeholder only outside strings,
+quoted identifiers, comments and `$tag$ ... $tag$` quotes, and not after another `:` or a name character, so `x::text`,
+`a[1:n]` and `'10:30'` are not placeholders. A `?` (position) is refused at upload, and so is a placeholder for a
+parameter that is not declared; `@name`, `$name`, `?NNN` and `$1` are not supported.
+
+The Runner does not read `views`: a run reads the same metadata with or without them.
 
 ## Using the context
 

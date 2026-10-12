@@ -36,6 +36,13 @@ interface TriggerStore {
    */
   fun claimDelivery(triggerId: Long, deliveryId: String, at: Instant): Long?
 
+  /**
+   * Whether [claimDelivery] would refuse the delivery [deliveryId] of a trigger as a repeat. Looks
+   * only; a repeat found here may still be claimed by a call racing with this one, which the claim
+   * decides.
+   */
+  fun isDeliveryClaimed(triggerId: Long, deliveryId: String): Boolean
+
   /** Claims the scheduled time [scheduledFor] of a cron trigger; null when already claimed. */
   fun claimOccurrence(triggerId: Long, scheduledFor: Instant, at: Instant): Long?
 

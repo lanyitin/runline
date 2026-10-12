@@ -65,3 +65,6 @@ export const isStringMap = (value: unknown): value is Record<string, string> =>
   value !== null &&
   !Array.isArray(value) &&
   Object.values(value).every((v) => typeof v === 'string');
+
+export const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((v) => typeof v === 'string');

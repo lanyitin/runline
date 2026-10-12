@@ -24,6 +24,8 @@ data class Trigger(
     val pipeline: String,
     /** The fixed parameters of every run it creates, defaults applied. */
     val parameters: Map<String, String>,
+    /** Webhook only: the parameters every call provides in its body (ADR-036), by declaration. */
+    val callerParameters: List<String>,
     val enabled: Boolean,
     val cronExpression: String?,
     val timeZone: String?,
@@ -46,6 +48,7 @@ data class NewTrigger(
     val secretHash: String?,
     val by: String,
     val at: Instant,
+    val callerParameters: List<String> = emptyList(),
 )
 
 /** The whole new state of a trigger after a change; its kind and secret never change here. */
@@ -55,6 +58,7 @@ data class TriggerChange(
     val enabled: Boolean,
     val cronExpression: String?,
     val timeZone: String?,
+    val callerParameters: List<String> = emptyList(),
 )
 
 /** What checking a webhook call needs: the stored hash of the secret, never the secret. */

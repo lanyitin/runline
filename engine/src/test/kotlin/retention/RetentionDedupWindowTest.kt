@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.retention
 
 import dev.lawlan.runline.engine.config.RetentionSettings
+import dev.lawlan.runline.engine.config.WebhookSettings
 import dev.lawlan.runline.engine.run.RunState
 import dev.lawlan.runline.engine.support.TriggerRig
 import dev.lawlan.runline.engine.trigger.*
@@ -20,7 +21,15 @@ import kotlin.test.*
 class RetentionDedupWindowTest {
   private val rig = TriggerRig()
   private val h = rig.harness
-  private val receiver = WebhookReceiver(rig.store, rig.firer, rig.telemetry, rig.clock)
+  private val receiver =
+      WebhookReceiver(
+          rig.store,
+          rig.firer,
+          rig.telemetry,
+          rig.clock,
+          rig.harness.definitions,
+          WebhookSettings(maxBodyBytes = 1024),
+      )
   private val window = Duration.ofDays(7)
 
   private fun cleaner(settings: RetentionSettings = settings()) =

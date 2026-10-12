@@ -1,5 +1,7 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.ReadOnlyQuery
+import dev.lawlan.runline.accessors.ReadOnlyRead
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.jdbc.JdbcCredential
 import dev.lawlan.runline.accessors.jdbc.JdbcLocation
@@ -10,6 +12,7 @@ import dev.lawlan.runline.accessors.jdbc.JdbcProfiles
 import dev.lawlan.runline.accessors.jdbc.JdbcSettings
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsProblem
 import dev.lawlan.runline.accessors.jdbc.JdbcSettingsResult
+import dev.lawlan.runline.accessors.jdbc.JdbcViewRead
 import dev.lawlan.runline.accessors.jdbc.PropertyRule
 import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.accessors.tls.TlsFailure
@@ -132,6 +135,21 @@ internal class JdbcPoolBehavior(
               observer,
               tls.tls,
           )
+    }
+  }
+
+  /**
+   * The read of a view: the password and the certificates as the keystore has them now, as for a
+   * run. What cannot be had leaves the resource unusable, and the read says so when it begins.
+   */
+  override fun readOnly(resource: SharedResource, query: ReadOnlyQuery): ReadOnlyRead {
+    val settings = settingsOf(resource) ?: throw ResourceUnavailable(resource.name)
+    val profile = profiles.find(settings.kind) ?: throw ResourceUnavailable(resource.name)
+    return when (val tls = aliases.resolve(settings.tls)) {
+      is ResourceAliases.Resolved.Unusable ->
+          JdbcViewRead(profile, settings, JdbcCredential.Unavailable, query)
+      is ResourceAliases.Resolved.Ready ->
+          JdbcViewRead(profile, settings, credentialOf(resource), query, tls.tls)
     }
   }
 

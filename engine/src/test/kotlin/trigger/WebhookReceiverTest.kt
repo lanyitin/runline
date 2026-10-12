@@ -1,6 +1,7 @@
 package dev.lawlan.runline.engine.trigger
 
 import ch.qos.logback.classic.Level
+import dev.lawlan.runline.engine.config.WebhookSettings
 import dev.lawlan.runline.engine.run.RunSource
 import dev.lawlan.runline.engine.run.RunState
 import dev.lawlan.runline.engine.support.CapturedLogs
@@ -14,7 +15,15 @@ class WebhookReceiverTest {
   private val rig = TriggerRig()
   private val h = rig.harness
   private val logs = CapturedLogs()
-  private val receiver = WebhookReceiver(rig.store, rig.firer, rig.telemetry, rig.clock)
+  private val receiver =
+      WebhookReceiver(
+          rig.store,
+          rig.firer,
+          rig.telemetry,
+          rig.clock,
+          rig.harness.definitions,
+          WebhookSettings(maxBodyBytes = 1024),
+      )
   private val unsafeBody = "java.nio.file.Files.exists(java.nio.file.Path.of(\"x\"));"
 
   @AfterTest

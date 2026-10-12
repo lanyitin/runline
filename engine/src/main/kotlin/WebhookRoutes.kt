@@ -1,12 +1,16 @@
 package dev.lawlan.runline.engine
 
 import dev.lawlan.runline.engine.artifact.ErrorResponse
+import dev.lawlan.runline.engine.run.ParameterErrorResponse
+import dev.lawlan.runline.engine.run.ParameterProblemDoc
 import dev.lawlan.runline.engine.trigger.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.di.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.utils.io.jvm.javaio.toInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -39,7 +43,9 @@ fun Application.configureWebhookRoutes() {
                 call.parameters["name"].orEmpty(),
                 call.request.headers[WEBHOOK_SECRET_HEADER],
                 call.request.headers[WEBHOOK_DELIVERY_HEADER],
-            )
+            ) {
+              call.request.receiveChannel().toInputStream()
+            }
           }
       when (result) {
         WebhookResult.Accepted -> call.respond(HttpStatusCode.Accepted, WebhookAccepted())
@@ -54,6 +60,48 @@ fun Application.configureWebhookRoutes() {
                 ErrorResponse(
                     "invalid_delivery_id",
                     "請在 $WEBHOOK_DELIVERY_HEADER 標頭提供 1 至 200 個可見 ASCII 字元的 delivery 識別碼。",
+                ),
+            )
+        is WebhookResult.InvalidBody ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                InvalidBodyResponse(
+                    "invalid_body",
+                    when (result.problem) {
+                      BodyProblem.NOT_A_JSON_OBJECT -> "not_a_json_object"
+                      BodyProblem.TOO_LARGE -> "too_large"
+                    },
+                    when (result.problem) {
+                      BodyProblem.NOT_A_JSON_OBJECT -> "請求本文需為 JSON 物件，鍵為參數名稱、值為文字。"
+                      BodyProblem.TOO_LARGE -> "請求本文超過大小上限。"
+                    },
+                ),
+            )
+        is WebhookResult.InvalidParameters ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ParameterErrorResponse(
+                    "invalid_caller_parameters",
+                    "請求本文的參數不符：" +
+                        result.problems.joinToString("；") {
+                          when (it.kind) {
+                            CallerProblemKind.MISSING -> "缺少必填參數 ${it.name}"
+                            CallerProblemKind.UNDECLARED -> "不接受的參數 ${it.name}"
+                            CallerProblemKind.NOT_TEXT -> "參數 ${it.name} 的值需為文字"
+                            CallerProblemKind.NUL_IN_VALUE -> "參數 ${it.name} 的值含有 NUL 字元"
+                          }
+                        },
+                    result.problems.map {
+                      ParameterProblemDoc(
+                          it.name,
+                          when (it.kind) {
+                            CallerProblemKind.MISSING -> "missing"
+                            CallerProblemKind.UNDECLARED -> "undeclared"
+                            CallerProblemKind.NOT_TEXT -> "not_text"
+                            CallerProblemKind.NUL_IN_VALUE -> "contains_nul"
+                          },
+                      )
+                    },
                 ),
             )
         WebhookResult.Failed ->

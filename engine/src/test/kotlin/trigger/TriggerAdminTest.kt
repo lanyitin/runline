@@ -342,4 +342,154 @@ class TriggerAdminTest {
     assertNull(store.find("every-night"))
     assertFalse(admin.delete("every-night", ops))
   }
+
+  // ---- caller-provided parameters (WI-1400, ADR-036) ----
+
+  private fun callerHook(
+      name: String = "on-upload",
+      fixed: Map<String, String> = emptyMap(),
+      caller: List<String> = listOf("env"),
+  ) = hook(name, fixed).copy(callerParameters = caller)
+
+  @Test
+  fun `a webhook trigger can name parameters its callers provide`() {
+    val trigger = created(callerHook())
+
+    assertEquals(listOf("env"), trigger.callerParameters)
+    assertEquals(emptyMap(), trigger.parameters)
+    assertEquals(listOf("env"), store.find("on-upload")!!.callerParameters)
+  }
+
+  @Test
+  fun `a trigger without the list has none`() {
+    assertEquals(emptyList(), created(hook()).callerParameters)
+    assertEquals(emptyList(), created(cron()).callerParameters)
+  }
+
+  @Test
+  fun `a cron trigger cannot have caller parameters`() {
+    assertEquals(
+        CreateTriggerResult.Invalid(InvalidTrigger.CALLER_PARAMETERS_ON_CRON),
+        admin.create(cron().copy(callerParameters = listOf("env")), root),
+    )
+    created(cron())
+    assertEquals(
+        UpdateTriggerResult.Invalid(InvalidTrigger.CALLER_PARAMETERS_ON_CRON),
+        admin.update("every-night", UpdateTrigger(callerParameters = listOf("retries")), ops),
+    )
+    assertEquals(emptyList(), store.find("every-night")!!.callerParameters)
+  }
+
+  @Test
+  fun `a caller parameter must be declared by the bound version`() {
+    assertEquals(
+        CreateTriggerResult.InvalidParameters(
+            listOf(ParameterProblem("nope", ParameterProblemKind.UNDECLARED))
+        ),
+        admin.create(callerHook(fixed = mapOf("env" to "prod"), caller = listOf("nope")), root),
+    )
+    assertTrue(store.list().isEmpty())
+  }
+
+  @Test
+  fun `a parameter cannot be both fixed and provided by the caller`() {
+    assertEquals(
+        CreateTriggerResult.InvalidParameters(
+            listOf(ParameterProblem("env", ParameterProblemKind.FIXED_AND_CALLER))
+        ),
+        admin.create(callerHook(fixed = mapOf("env" to "prod"), caller = listOf("env")), root),
+    )
+    assertTrue(store.list().isEmpty())
+  }
+
+  @Test
+  fun `a required parameter that is neither fixed nor provided by the caller is refused`() {
+    assertEquals(
+        CreateTriggerResult.InvalidParameters(
+            listOf(ParameterProblem("env", ParameterProblemKind.MISSING))
+        ),
+        admin.create(callerHook(caller = listOf("retries")), root),
+    )
+    assertTrue(store.list().isEmpty())
+  }
+
+  @Test
+  fun `an update changes the list and a refused update changes nothing`() {
+    created(callerHook())
+
+    val updated =
+        assertIs<UpdateTriggerResult.Updated>(
+                admin.update(
+                    "on-upload",
+                    UpdateTrigger(
+                        parameters = mapOf("env" to "prod"),
+                        callerParameters = listOf("retries"),
+                    ),
+                    ops,
+                )
+            )
+            .trigger
+    assertEquals(listOf("retries"), updated.callerParameters)
+
+    assertEquals(
+        UpdateTriggerResult.InvalidParameters(
+            listOf(ParameterProblem("env", ParameterProblemKind.FIXED_AND_CALLER))
+        ),
+        admin.update("on-upload", UpdateTrigger(callerParameters = listOf("env")), ops),
+    )
+    assertEquals(updated, store.find("on-upload"))
+  }
+
+  @Test
+  fun `an update that leaves the list out keeps it`() {
+    created(callerHook())
+
+    admin.update("on-upload", UpdateTrigger(enabled = false), ops)
+
+    assertEquals(listOf("env"), store.find("on-upload")!!.callerParameters)
+  }
+
+  @Test
+  fun `moving to another version checks the list against that version`() {
+    created(callerHook())
+    val v2 =
+        pipelines.save(
+            "v2",
+            "nightly",
+            metadata =
+                pipelines.metadata.copy(
+                    parameters = listOf(ParameterDoc("region", required = true))
+                ),
+        )
+
+    assertEquals(
+        UpdateTriggerResult.InvalidParameters(
+            listOf(
+                ParameterProblem("region", ParameterProblemKind.MISSING),
+                ParameterProblem("env", ParameterProblemKind.UNDECLARED),
+            )
+        ),
+        admin.update("on-upload", UpdateTrigger(contentHash = v2), ops),
+    )
+    assertEquals(v1, store.find("on-upload")!!.contentHash)
+
+    val moved =
+        assertIs<UpdateTriggerResult.Updated>(
+                admin.update(
+                    "on-upload",
+                    UpdateTrigger(contentHash = v2, callerParameters = listOf("region")),
+                    ops,
+                )
+            )
+            .trigger
+    assertEquals(v2, moved.contentHash)
+    assertEquals(listOf("region"), moved.callerParameters)
+  }
+
+  @Test
+  fun `the list is kept without repeats and in the order of the declaration`() {
+    val trigger = created(callerHook(caller = listOf("retries", "env", "retries")))
+
+    assertEquals(listOf("env", "retries"), trigger.callerParameters)
+  }
 }

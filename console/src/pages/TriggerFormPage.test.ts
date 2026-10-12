@@ -454,3 +454,171 @@ describe('the same content uploaded by two people', () => {
     expect((await app.context.api.trigger('bobs')).uploader).toBe('ada');
   });
 });
+
+describe('the parameters the caller of a webhook provides (ADR-036)', () => {
+  const callerBox = (view: HTMLElement, parameter: string) => field<HTMLInputElement>(view, `caller-${parameter}`);
+  const webhook = async (view: HTMLElement) => {
+    view.querySelector<HTMLInputElement>('input[name="kind"][value="webhook"]')!.click();
+    await tick();
+  };
+  const intake = `?contentHash=${HASH}&pipeline=needs-token`;
+
+  test('lets a webhook say, for each parameter of the version, that its caller provides it; a cron trigger has no such choice', async () => {
+    const { view } = await page({ query: `?contentHash=${HASH}&pipeline=demo-slow` });
+    await ready(view);
+    await tick();
+    expect(callerBox(view, 'steps')).toBeNull();
+
+    await webhook(view);
+
+    expect(callerBox(view, 'steps')).not.toBeNull();
+    expect(callerBox(view, 'label')).not.toBeNull();
+    expect(callerBox(view, 'steps').checked).toBe(false);
+    expect(view.querySelector('[for="caller-steps"]')!.textContent).toContain('Provided by the caller');
+
+    view.querySelector<HTMLInputElement>('input[name="kind"][value="cron"]')!.click();
+    await tick();
+    expect(callerBox(view, 'steps')).toBeNull();
+  });
+
+  test('cannot have a parameter both fixed and provided by the caller: a fixed value locks the choice, the choice locks the value', async () => {
+    const { view } = await page({ query: intake });
+    await ready(view);
+    await tick();
+    await webhook(view);
+
+    type(field(view, 'param-token'), 'abc');
+    await tick();
+    expect(callerBox(view, 'token').disabled).toBe(true);
+
+    type(field(view, 'param-token'), '');
+    await tick();
+    expect(callerBox(view, 'token').disabled).toBe(false);
+
+    callerBox(view, 'token').click();
+    await tick();
+    expect(callerBox(view, 'token').checked).toBe(true);
+    expect(field<HTMLInputElement>(view, 'param-token').disabled).toBe(true);
+  });
+
+  test('makes a webhook whose caller provides a parameter, and the trigger says so', async () => {
+    const { view } = await page({ query: intake });
+    await ready(view);
+    await tick();
+    await webhook(view);
+    type(field(view, 'trigger-name'), 'intake');
+    callerBox(view, 'token').click();
+    await tick();
+    submit(view);
+
+    await vi.waitFor(() => expect(view.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(await app.context.api.trigger('intake')).toMatchObject({
+      kind: 'webhook',
+      parameters: {},
+      callerParameters: ['token'],
+    });
+  });
+
+  test('says at the parameter what the Engine reports when a required parameter without a default is neither fixed nor provided, with its name, and makes nothing', async () => {
+    const { view } = await page({ query: intake });
+    await ready(view);
+    await tick();
+    await webhook(view);
+    type(field(view, 'trigger-name'), 'intake');
+    submit(view);
+
+    await vi.waitFor(() => expect(errorAt(view, 'param-token')).not.toBeNull());
+    expect(errorAt(view, 'param-token')).toContain('token');
+    expect(errorAt(view, 'param-token')).toContain('Provided by the caller');
+    expect(await app.context.api.triggers()).toEqual([]);
+
+    callerBox(view, 'token').click();
+    await tick();
+    expect(errorAt(view, 'param-token')).toBeNull();
+    submit(view);
+    await vi.waitFor(() => expect(view.querySelector('[role="dialog"]')).not.toBeNull());
+  });
+
+  test('does not send a list for a cron trigger, even after a webhook was chosen and given up', async () => {
+    const { view } = await page({ query: intake });
+    await ready(view);
+    await tick();
+    await webhook(view);
+    callerBox(view, 'token').click();
+    view.querySelector<HTMLInputElement>('input[name="kind"][value="cron"]')!.click();
+    await tick();
+    type(field(view, 'trigger-name'), 'plain');
+    type(field(view, 'trigger-cron'), '* * * * *');
+    type(field(view, 'param-token'), 'x');
+    submit(view);
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+    expect(await app.context.api.trigger('plain')).toMatchObject({ kind: 'cron', callerParameters: [] });
+  });
+
+  test('starts a change from the list the trigger has, and saves a new one, also an empty one', async () => {
+    const seed = async (api: TestApp['context']['api']) => {
+      await api.createTrigger({
+        name: 'hook',
+        kind: 'webhook',
+        contentHash: HASH,
+        pipeline: 'needs-token',
+        callerParameters: ['token'],
+      });
+    };
+    const { view } = await page({ mode: 'edit', query: '?name=hook', seed });
+    await ready(view);
+    await tick();
+    expect(callerBox(view, 'token').checked).toBe(true);
+    expect(field<HTMLInputElement>(view, 'param-token').disabled).toBe(true);
+
+    callerBox(view, 'token').click();
+    await tick();
+    type(field(view, 'param-token'), 'fixed');
+    submit(view);
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+    expect(await app.context.api.trigger('hook')).toMatchObject({
+      parameters: { token: 'fixed' },
+      callerParameters: [],
+    });
+  });
+
+  test('still shows what the Engine says when a parameter is both fixed and provided, as it can be in a trigger that came to be so', async () => {
+    const { view } = await page({
+      mode: 'edit',
+      query: '?name=odd',
+      seed: async () => {
+        app.engine.backend.triggers.seed({
+          name: 'odd',
+          kind: 'webhook',
+          contentHash: HASH,
+          pipeline: 'needs-token',
+          cron: null,
+          timeZone: null,
+          parameters: { token: 'x' },
+          callerParameters: ['token'],
+        });
+      },
+    });
+    await ready(view);
+    await tick();
+    expect(callerBox(view, 'token').checked).toBe(true);
+    expect(field<HTMLInputElement>(view, 'param-token').value).toBe('x');
+
+    submit(view);
+
+    await vi.waitFor(() => expect(errorAt(view, 'param-token')).not.toBeNull());
+    expect(errorAt(view, 'param-token')).toContain('token');
+    expect(errorAt(view, 'param-token')).toContain('fixed value');
+  });
+
+  test('speaks the language of the screen', async () => {
+    const { view } = await page({ query: intake, languages: ['zh-TW'] });
+    await ready(view);
+    await tick();
+    await webhook(view);
+
+    expect(view.querySelector('[for="caller-token"]')!.textContent).toContain('由呼叫端提供');
+  });
+});

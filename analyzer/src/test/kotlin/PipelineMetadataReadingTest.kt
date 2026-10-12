@@ -82,6 +82,138 @@ class PipelineMetadataReadingTest {
     assertEquals(mapOf<String, String>(), metadataOf(without).resourcePurposes)
   }
 
+  private val viewsDeclaration =
+      """
+      network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}),
+      typedResources = { @TypedResource(name = "feed-db", type = ResourceTypes.JDBC_POOL) },
+      views = {
+        @View(
+            id = "runs", title = "Runs", description = "Every run",
+            resource = "feed-db", query = "SELECT id, state FROM run",
+            parameters = {
+              @ViewParam(name = "state", type = ViewParamType.CHOICE, options = {"ok", "failed"}, required = false),
+              @ViewParam(name = "limit", type = ViewParamType.INTEGER)
+            },
+            columns = {
+              @ViewColumn(name = "id", label = "Run", type = ViewColumnType.INTEGER,
+                  drill = @Drill(view = "articles", parameter = "run")),
+              @ViewColumn(name = "state", label = "State", type = ViewColumnType.STATUS,
+                  tones = { @StatusTone(value = "ok", tone = Tone.POSITIVE),
+                            @StatusTone(value = "failed", tone = Tone.NEGATIVE) }),
+              @ViewColumn(name = "started", label = "Started", type = ViewColumnType.TIME),
+              @ViewColumn(name = "note", label = "Note")
+            },
+            sort = { @ViewSort(column = "started", descending = true), @ViewSort(column = "id") }),
+        @View(id = "articles", title = "Articles", resource = "feed-db", query = "SELECT 1",
+            parameters = { @ViewParam(name = "run") },
+            columns = { @ViewColumn(name = "title", label = "Title",
+                drill = @Drill(view = "runs", parameter = "limit", from = "id")) })
+      }
+      """
+          .trimIndent()
+
+  @Test
+  fun `reads the declared views as written, without running anything and leaving the verdict alone`() {
+    val path =
+        jar(
+            "demo.Views" to
+                CompiledJars.pipeline(
+                    "demo.Views",
+                    limits = viewsDeclaration,
+                    members =
+                        "static { if (true) throw new IllegalStateException(\"initialised\"); }",
+                )
+        )
+
+    val pipeline = report(path).pipelines.single()
+
+    assertEquals(
+        listOf(
+            ViewMetadata(
+                id = "runs",
+                title = "Runs",
+                description = "Every run",
+                resource = "feed-db",
+                query = "SELECT id, state FROM run",
+                parameters =
+                    listOf(
+                        ViewParameterMetadata("state", "CHOICE", false, listOf("ok", "failed")),
+                        ViewParameterMetadata("limit", "INTEGER", true, listOf()),
+                    ),
+                columns =
+                    listOf(
+                        ViewColumnMetadata(
+                            "id",
+                            "Run",
+                            "INTEGER",
+                            listOf(),
+                            DrillMetadata("articles", "run", "id"),
+                        ),
+                        ViewColumnMetadata(
+                            "state",
+                            "State",
+                            "STATUS",
+                            listOf(
+                                StatusToneMetadata("ok", "POSITIVE"),
+                                StatusToneMetadata("failed", "NEGATIVE"),
+                            ),
+                            null,
+                        ),
+                        ViewColumnMetadata("started", "Started", "TIME", listOf(), null),
+                        ViewColumnMetadata("note", "Note", "TEXT", listOf(), null),
+                    ),
+                sort = listOf(ViewSortMetadata("started", true), ViewSortMetadata("id", false)),
+            ),
+            ViewMetadata(
+                id = "articles",
+                title = "Articles",
+                description = "",
+                resource = "feed-db",
+                query = "SELECT 1",
+                parameters = listOf(ViewParameterMetadata("run", "TEXT", true, listOf())),
+                columns =
+                    listOf(
+                        ViewColumnMetadata(
+                            "title",
+                            "Title",
+                            "TEXT",
+                            listOf(),
+                            DrillMetadata("runs", "limit", "id"),
+                        )
+                    ),
+                sort = listOf(),
+            ),
+        ),
+        pipeline.metadata.views,
+    )
+    assertEquals(Verdict.SAFE, pipeline.verdict)
+  }
+
+  @Test
+  fun `a pipeline that declares no views has none, and views change neither the verdict nor the roles`() {
+    val plain =
+        jar(
+            "demo.Plain" to
+                CompiledJars.pipeline(
+                    "demo.Plain",
+                    limits =
+                        "network = @AccessLimit(allow = {}), processes = @AccessLimit(allow = {}), " +
+                            "typedResources = { @TypedResource(name = \"feed-db\", type = ResourceTypes.JDBC_POOL) }",
+                )
+        )
+    val withViews =
+        jar("demo.Views" to CompiledJars.pipeline("demo.Views", limits = viewsDeclaration))
+
+    val a = report(plain).pipelines.single()
+    val b = report(withViews).pipelines.single()
+
+    assertEquals(listOf(), a.metadata.views)
+    assertEquals(a.verdict, b.verdict)
+    assertEquals(a.reasons, b.reasons)
+    assertEquals(a.metadata.resources, b.metadata.resources)
+    assertEquals(a.metadata.resourceTypes, b.metadata.resourceTypes)
+  }
+
   @Test
   fun `reads parameters, files, limits and resources without running anything`() {
     val path =

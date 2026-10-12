@@ -1,0 +1,13 @@
+#!/bin/bash
+# The command name of the VAD tool (docs/stable/transcribe-pipeline/05-ipc.md): runs the jar of the
+# tool, which is delivered apart from the runtime (WI-1407, project runline-transcribe) and put at
+# RUNLINE_VAD_JAR. All arguments go to the tool unchanged. Without the jar it says so and exits 127.
+#
+#   RUNLINE_VAD_JAR   default /opt/runline/vad/runline-vad.jar
+set -u
+jar="${RUNLINE_VAD_JAR:-/opt/runline/vad/runline-vad.jar}"
+if [ ! -f "$jar" ]; then
+  echo "VAD tool is not installed: $jar does not exist (see deploy/transcribe.md)" >&2
+  exit 127
+fi
+exec java -jar "$jar" "$@"

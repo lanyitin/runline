@@ -7,6 +7,7 @@ import type { DemoJars } from '../test-support/fake-jars';
 import { describeAuthMethodsContract } from './auth-contract';
 import { describeAdminContract } from './admin-contract';
 import { describeBindingsContract } from './bindings-contract';
+import { describeViewsContract } from './views-contract';
 import { describeInfoContract } from './info-contract';
 import { describeResourceTypesContract } from './resource-types-contract';
 import { describePipelinesContract } from './pipelines-contract';
@@ -48,6 +49,8 @@ const jars = (): DemoJars => ({
   resource: jar('demo-resource'),
   typed: jar('demo-typed'),
   roles: jar('demo-roles'),
+  views: jar('demo-views'),
+  intake: jar('demo-intake'),
   noPipeline: storedZip({ 'hello.txt': 'there is no pipeline here' }),
   junk: new TextEncoder().encode('this is not a jar'),
 });
@@ -76,6 +79,12 @@ describeBindingsContract('the real Engine', {
   baseUrl: () => url,
   callers: () => callers,
   jars,
+  uploadLimitBytes,
+});
+describeViewsContract('the real Engine', {
+  baseUrl: () => url,
+  callers: () => callers,
+  jars: jars,
   uploadLimitBytes,
 });
 describeResourceTypesContract('the real Engine', {

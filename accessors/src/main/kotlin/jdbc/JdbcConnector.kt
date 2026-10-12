@@ -12,13 +12,23 @@ internal object JdbcConnector {
       connectTimeoutMillis: Long = settings.connectTimeoutMillis,
       /** The pool's TLS (WI-52); null: the profile's connection as before. */
       tls: PoolTls? = null,
+      /** A connection of a view's read (ADR-033): made by the profile's way of reading. */
+      reading: Boolean = false,
   ): Connection {
     val properties =
         profile.properties(settings.location, password, connectTimeoutMillis, settings.properties)
     tls?.let { properties.putAll(profile.tlsProperties(it.id)) }
-    val connection = profile.connect(profile.url(settings.location), properties)
+    val url = profile.url(settings.location)
+    val connection =
+        if (reading) profile.reading.connect(url, properties) else profile.connect(url, properties)
     try {
       start(profile, settings, connection)
+      if (reading) {
+        connection.createStatement().use { s ->
+          profile.reading.startStatements.forEach { s.execute(it) }
+        }
+        profile.reading.begin(connection)
+      }
     } catch (e: Throwable) {
       runCatching { connection.close() }
       throw e

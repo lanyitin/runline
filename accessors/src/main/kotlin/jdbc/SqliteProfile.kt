@@ -2,6 +2,7 @@ package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.Confinement
 import dev.lawlan.runline.accessors.FileProblem
+import dev.lawlan.runline.accessors.ReadOnlyFailure
 import dev.lawlan.runline.accessors.ResourceOperationFailure
 import dev.lawlan.runline.core.ResourceFailure
 import java.io.IOException
@@ -21,6 +22,7 @@ import org.sqlite.SQLiteConfig
 import org.sqlite.SQLiteConnection
 import org.sqlite.SQLiteException
 import org.sqlite.SQLiteLimits
+import org.sqlite.SQLiteOpenMode
 
 /**
  * SQLite, the second database (WI-1003, ADR-024): one file below the resource root, opened by the
@@ -198,6 +200,8 @@ class SqliteProfile(private val root: Path) : JdbcProfile {
     }
   }
 
+  override val reading: ReadDialect = SqliteReading
+
   override fun classify(e: SQLException): Classified {
     val code = (e as? SQLiteException)?.resultCode?.code
     val primary = code?.and(0xff)
@@ -302,4 +306,62 @@ internal object SqliteValues : JdbcValues {
         is Number -> if (value is Double || value is Float) value.toDouble() else value.toLong()
         else -> rows.getString(index)
       }
+}
+
+/**
+ * Reading a SQLite file for a view (WI-1301). The file is opened the way the runs open it, not with
+ * the driver's read-only mode: that mode cannot make the `-wal` and `-shm` files of the log when no
+ * run has the file open, and fails (docs/stable/digest-rss/runbook.md section 8). What keeps the
+ * read from writing is the text (one statement inside a `SELECT`) and `query_only`.
+ */
+internal object SqliteReading : ReadDialect {
+  override val syntax = SqlSyntax.SQLITE
+
+  override fun quote(name: String) = "`" + name.replace("`", "``") + "`"
+
+  override fun connect(url: String, properties: Properties): Connection {
+    val file = java.nio.file.Path.of(url.removePrefix("jdbc:sqlite:"))
+    // Opening a file that is not there would make an empty database in its place.
+    if (!Files.isRegularFile(file)) throw SQLException("no database file", NO_DATABASE)
+    val config = SQLiteConfig().apply { resetOpenMode(SQLiteOpenMode.CREATE) }
+    val connection =
+        org.sqlite.JDBC().connect(url, config.toProperties()) as SQLiteConnection?
+            ?: throw SQLException("the driver does not take the address", "08001")
+    try {
+      connection.setLimit(SQLiteLimits.SQLITE_LIMIT_ATTACHED, 0)
+    } catch (e: Throwable) {
+      runCatching { connection.close() }
+      throw e
+    }
+    return connection
+  }
+
+  /** With `query_only` the connection refuses every change of the file, whatever it is given. */
+  override val startStatements: List<String> = listOf("PRAGMA query_only = ON")
+
+  override fun begin(connection: Connection) {}
+
+  override fun classify(e: SQLException): ReadOnlyFailure =
+      when {
+        e.sqlState == NO_DATABASE -> ReadOnlyFailure.SCHEMA_MISMATCH
+        e !is SQLiteException -> ReadOnlyFailure.FAILED
+        e.resultCode.code.and(0xff) == ERROR && NOT_THERE.containsMatchIn(e.message.orEmpty()) ->
+            ReadOnlyFailure.SCHEMA_MISMATCH
+        // Text the database cannot read as a statement of a read, or a change it refuses.
+        e.resultCode.code.and(0xff) in listOf(ERROR, READONLY, AUTH) ->
+            ReadOnlyFailure.QUERY_REJECTED
+        e.resultCode.code.and(0xff) in listOf(CANTOPEN, NOTADB) -> ReadOnlyFailure.CONNECTION_FAILED
+        else -> ReadOnlyFailure.FAILED
+      }
+
+  /** What the driver says when a table, a view or a column is not there. */
+  private val NOT_THERE = Regex("no such (table|column|view)")
+
+  const val CANTOPEN = 14
+  const val NOTADB = 26
+
+  const val ERROR = 1
+  const val READONLY = 8
+  const val AUTH = 23
+  const val NO_DATABASE = "3D000"
 }

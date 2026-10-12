@@ -2,7 +2,6 @@ package dev.lawlan.runline.engine.trigger
 
 import dev.lawlan.runline.engine.artifact.DefinitionStore
 import dev.lawlan.runline.engine.run.ParameterCheck
-import dev.lawlan.runline.engine.run.validateParameters
 
 /** A trigger with the parameters its runs will get once the defaults of the version are added. */
 data class TriggerView(val trigger: Trigger, val effectiveParameters: Map<String, String>)
@@ -26,7 +25,7 @@ class TriggerCatalog(
             .find(trigger.contentHash, trigger.uploader, trigger.pipeline)
             ?.metadata
             ?.parameters
-    val check = declared?.let { validateParameters(it, trigger.parameters) }
+    val check = declared?.let { checkBinding(it, trigger.parameters, trigger.callerParameters) }
     // The binding was checked when it was made, and a version never changes.
     val effective = (check as? ParameterCheck.Valid)?.effective ?: trigger.parameters
     return TriggerView(trigger, effective)

@@ -296,6 +296,48 @@ class PostgresTriggerStoreTest {
   }
 
   @Test
+  fun `a delivery counts as claimed unless its attempt failed unexpectedly, and looking claims nothing`() {
+    val (_, id) = bound()
+    val trigger = store.insert(webhook(definitionId = id))!!
+    assertFalse(store.isDeliveryClaimed(trigger.id, "d-1"))
+
+    val pending = store.claimDelivery(trigger.id, "d-1", t0)!!
+    assertTrue(store.isDeliveryClaimed(trigger.id, "d-1"))
+    assertFalse(store.isDeliveryClaimed(trigger.id, "d-2"))
+    store.settle(pending, FiringOutcome.FAILED, "why", null, null)
+    assertFalse(store.isDeliveryClaimed(trigger.id, "d-1"))
+    store.settle(pending, FiringOutcome.REFUSED, "why", null, null)
+    assertTrue(store.isDeliveryClaimed(trigger.id, "d-1"))
+    assertEquals(1, store.firings(trigger.id, 10).size)
+  }
+
+  @Test
+  fun `the parameters a webhook caller provides are stored and replaced with the trigger`() {
+    val (_, id) = bound()
+    val trigger = store.insert(webhook(definitionId = id).copy(callerParameters = listOf("env")))!!
+    assertEquals(listOf("env"), trigger.callerParameters)
+    assertEquals(listOf("env"), store.find("on-push")!!.callerParameters)
+
+    val changed =
+        store.update(
+            "on-push",
+            TriggerChange(id, emptyMap(), true, null, null, listOf("env", "retries")),
+            "ops",
+            t0.plusSeconds(1),
+        )!!
+
+    assertEquals(listOf("env", "retries"), changed.callerParameters)
+  }
+
+  @Test
+  fun `the database allows caller parameters on a webhook only`() {
+    val (_, id) = bound()
+
+    assertFails { store.insert(cron(definitionId = id).copy(callerParameters = listOf("env"))) }
+    assertEquals(emptyList(), store.insert(cron(definitionId = id))!!.callerParameters)
+  }
+
+  @Test
   fun `a scheduled time of a cron trigger is claimed once`() {
     val (_, id) = bound()
     val trigger = store.insert(cron(definitionId = id))!!

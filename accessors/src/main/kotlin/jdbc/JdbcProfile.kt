@@ -1,6 +1,7 @@
 package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.FileProblem
+import dev.lawlan.runline.accessors.ReadOnlyFailure
 import dev.lawlan.runline.core.ResourceFailure
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -168,6 +169,36 @@ interface JdbcProfile {
   fun connect(url: String, properties: Properties): Connection
 
   fun classify(e: SQLException): Classified
+
+  /** How a view reads this kind of database (ADR-033): apart from the runs' connections. */
+  val reading: ReadDialect
+}
+
+/**
+ * What differs between databases when a view reads one (ADR-033, WI-1301): how a connection is made
+ * that can only read, how the text of a query is told into statements, how a name is quoted and
+ * what a failure of the database means for a read.
+ */
+interface ReadDialect {
+  /** How the text of a query is read to see that it is one statement. */
+  val syntax: SqlSyntax
+
+  /** [name] as an identifier that cannot be taken for anything else. */
+  fun quote(name: String): String
+
+  /**
+   * A connection to read with, made so that it can be opened whether or not a run has the database
+   * open, and whether or not it is already in use; the driver is asked directly, as for [connect].
+   */
+  fun connect(url: String, properties: Properties): Connection
+
+  /** Statements that make the connection refuse every change, run when it is opened. */
+  val startStatements: List<String>
+
+  /** Begins what the read runs in, on a connection that is [startStatements]-ready. */
+  fun begin(connection: Connection)
+
+  fun classify(e: SQLException): ReadOnlyFailure
 }
 
 /** How values pass between Java and the database, as the profile of a database decides. */

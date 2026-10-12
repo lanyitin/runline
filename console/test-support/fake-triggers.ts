@@ -9,6 +9,7 @@ import {
   answer,
   ambiguousVersion,
   failure,
+  isStringList,
   isStringMap,
   jsonObject,
   type ApiAnswer,
@@ -25,6 +26,8 @@ export interface FakeTrigger {
   uploader: string;
   pipeline: string;
   parameters: Record<string, string>;
+  /** The names of the parameters the caller of a webhook provides (ADR-036), in the order the version declares. */
+  callerParameters: string[];
   enabled: boolean;
   cron: string | null;
   timeZone: string | null;
@@ -148,6 +151,7 @@ export class FakeTriggers {
     const made: FakeTrigger = {
       kind: 'cron',
       parameters: {},
+      callerParameters: [],
       enabled: true,
       cron: '* * * * *',
       timeZone: 'UTC',
@@ -186,6 +190,18 @@ export class FakeTriggers {
     };
   }
 
+  /** The names in the order the version declares its parameters, without repeats. */
+  private inDeclarationOrder(
+    contentHash: string,
+    uploader: string,
+    pipeline: string,
+    names: string[],
+  ): string[] {
+    const declared =
+      this.backend.definitionOf(contentHash, uploader, pipeline)?.metadata.parameters ?? [];
+    return declared.map((p) => p.name).filter((name) => names.includes(name));
+  }
+
   private doc(trigger: FakeTrigger) {
     return {
       name: trigger.name,
@@ -195,6 +211,7 @@ export class FakeTriggers {
       pipeline: trigger.pipeline,
       parameters: trigger.parameters,
       effectiveParameters: this.effective(trigger),
+      callerParameters: trigger.callerParameters,
       enabled: trigger.enabled,
       cron: trigger.cron,
       timeZone: trigger.timeZone,
@@ -220,17 +237,23 @@ export class FakeTriggers {
     uploader: string,
     pipeline: string,
     parameters: Record<string, string>,
+    callerParameters: string[],
   ): ApiAnswer | null {
     const definition = this.backend.definitionOf(contentHash, uploader, pipeline);
     if (!definition) return failure(404, 'definition_not_found', 'No such version and pipeline.');
     const declared = definition.metadata.parameters;
+    const provided = (name: string) => name in parameters || callerParameters.includes(name);
     const problems = [
-      ...Object.keys(parameters)
+      ...[...Object.keys(parameters), ...callerParameters]
+        .filter((name, at, all) => all.indexOf(name) === at)
         .filter((name) => !declared.some((p) => p.name === name))
         .map((name) => ({ name, problem: 'undeclared' })),
       ...declared
-        .filter((p) => p.required && p.default === null && !(p.name in parameters))
+        .filter((p) => p.required && p.default === null && !provided(p.name))
         .map((p) => ({ name: p.name, problem: 'missing' })),
+      ...declared
+        .filter((p) => p.name in parameters && callerParameters.includes(p.name))
+        .map((p) => ({ name: p.name, problem: 'fixed_and_caller' })),
     ];
     return problems.length > 0
       ? failure(422, 'invalid_parameters', 'The parameters do not match.', { problems })
@@ -248,6 +271,7 @@ export class FakeTriggers {
       (request.uploader !== undefined && typeof request.uploader !== 'string') ||
       typeof request.pipeline !== 'string' ||
       (request.parameters !== undefined && !isStringMap(request.parameters)) ||
+      (request.callerParameters !== undefined && !isStringList(request.callerParameters)) ||
       (request.cron !== undefined && typeof request.cron !== 'string') ||
       (request.timeZone !== undefined && typeof request.timeZone !== 'string') ||
       (request.enabled !== undefined && typeof request.enabled !== 'boolean')
@@ -269,6 +293,10 @@ export class FakeTriggers {
         return this.invalid('time_zone', 'Not a time zone.');
       }
     }
+    const requested = (request.callerParameters as string[] | undefined) ?? [];
+    if (kind === 'cron' && requested.length > 0) {
+      return this.invalid('caller_parameters_not_allowed', 'A cron trigger has no caller.');
+    }
     if (this.triggers.has(request.name)) {
       return failure(409, 'trigger_exists', `The trigger ${request.name} exists.`);
     }
@@ -284,7 +312,13 @@ export class FakeTriggers {
       return failure(404, 'definition_not_found', 'No such version and pipeline.');
     }
     const uploader = found.version.uploadedBy;
-    const refused = this.checkBinding(request.contentHash, uploader, request.pipeline, parameters);
+    const refused = this.checkBinding(
+      request.contentHash,
+      uploader,
+      request.pipeline,
+      parameters,
+      requested,
+    );
     if (refused) return refused;
 
     const now = new Date().toISOString();
@@ -296,6 +330,12 @@ export class FakeTriggers {
       uploader,
       pipeline: request.pipeline,
       parameters,
+      callerParameters: this.inDeclarationOrder(
+        request.contentHash,
+        uploader,
+        request.pipeline,
+        requested,
+      ),
       enabled: request.enabled ?? true,
       cron: kind === 'cron' ? (request.cron as string) : null,
       timeZone: kind === 'cron' ? ((request.timeZone as string | undefined) ?? 'UTC') : null,
@@ -329,6 +369,7 @@ export class FakeTriggers {
       (request.uploader !== undefined && typeof request.uploader !== 'string') ||
       (request.pipeline !== undefined && typeof request.pipeline !== 'string') ||
       (request.parameters !== undefined && !isStringMap(request.parameters)) ||
+      (request.callerParameters !== undefined && !isStringList(request.callerParameters)) ||
       (request.enabled !== undefined && typeof request.enabled !== 'boolean') ||
       (request.cron !== undefined && typeof request.cron !== 'string') ||
       (request.timeZone !== undefined && typeof request.timeZone !== 'string')
@@ -340,6 +381,7 @@ export class FakeTriggers {
       'uploader',
       'pipeline',
       'parameters',
+      'callerParameters',
       'enabled',
       'cron',
       'timeZone',
@@ -352,6 +394,12 @@ export class FakeTriggers {
     }
     if (request.cron !== undefined && !validCron(request.cron as string)) {
       return this.invalid('cron_expression', 'Not a cron expression.');
+    }
+    if (
+      trigger.kind === 'cron' &&
+      ((request.callerParameters as string[] | undefined) ?? []).length > 0
+    ) {
+      return this.invalid('caller_parameters_not_allowed', 'A cron trigger has no caller.');
     }
     if (request.timeZone !== undefined && !validTimeZone(request.timeZone as string)) {
       return this.invalid('time_zone', 'Not a time zone.');
@@ -374,13 +422,21 @@ export class FakeTriggers {
       }
       uploader = found.version.uploadedBy;
     }
-    const refused = this.checkBinding(contentHash, uploader, pipeline, parameters);
+    const callerParameters =
+      (request.callerParameters as string[] | undefined) ?? trigger.callerParameters;
+    const refused = this.checkBinding(contentHash, uploader, pipeline, parameters, callerParameters);
     if (refused) return refused;
 
     trigger.contentHash = contentHash;
     trigger.uploader = uploader;
     trigger.pipeline = pipeline;
     trigger.parameters = parameters;
+    trigger.callerParameters = this.inDeclarationOrder(
+      contentHash,
+      uploader,
+      pipeline,
+      callerParameters,
+    );
     if (request.enabled !== undefined) trigger.enabled = request.enabled as boolean;
     if (request.cron !== undefined) trigger.cron = request.cron as string;
     if (request.timeZone !== undefined) trigger.timeZone = request.timeZone as string;

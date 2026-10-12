@@ -26,6 +26,33 @@ export interface FakeReason {
   detail?: string | null;
 }
 
+/**
+ * A view as a jar of the Fake declares it (08-api.md: view 宣告). The Fake does not run a query: the
+ * rows it answers are those of the [table] in the database of the resource (test-support/fake-views.ts),
+ * and a parameter filters the rows on the column of its own name.
+ */
+export interface FakeView {
+  id: string;
+  title: string;
+  description?: string;
+  resource: string;
+  table: string;
+  parameters?: Array<{
+    name: string;
+    type: 'TEXT' | 'INTEGER' | 'CHOICE';
+    required?: boolean;
+    options?: string[];
+  }>;
+  columns: Array<{
+    name: string;
+    label: string;
+    type?: 'TEXT' | 'INTEGER' | 'TIME' | 'STATUS';
+    tones?: Array<{ value: string; tone: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' }>;
+    drill?: { view: string; parameter: string; from: string } | null;
+  }>;
+  sort?: Array<{ column: string; descending?: boolean }>;
+}
+
 export interface FakePipeline {
   name: string;
   className: string;
@@ -38,6 +65,8 @@ export interface FakePipeline {
   resourceTypes?: Record<string, string>;
   /** What a declared resource is for, by its name; only those declared with a purpose (ADR-025). */
   resourcePurposes?: Record<string, string>;
+  /** The read-only views the pipeline declares (ADR-033). */
+  views?: FakeView[];
   reasons?: FakeReason[];
   /** Classes the pipeline refers to: UNSAFE for as long as no allow-list entry covers one. */
   references?: string[];
@@ -91,6 +120,17 @@ const resource: FakePipeline = {
   references: ['java.io.PrintStream'],
 };
 
+/** As `samples.intake.IntakePipeline`: `file` is required and has no default (ADR-036). */
+const intake: FakePipeline = {
+  name: 'demo-intake',
+  className: 'samples.intake.IntakePipeline',
+  parameters: [
+    { name: 'file', required: true, default: null },
+    { name: 'language', required: false, default: 'en' },
+  ],
+  references: ['java.io.PrintStream'],
+};
+
 const typed: FakePipeline = {
   name: 'demo-typed',
   className: 'samples.typed.TypedPipeline',
@@ -112,6 +152,61 @@ const roles: FakePipeline = {
   references: ['java.io.PrintStream'],
 };
 
+/** As `samples.views.ViewsPipeline`: two views over the role `view-db`, a `jdbc-pool` it fills when it runs. */
+export const viewsPipeline: FakePipeline = {
+  name: 'demo-views',
+  className: 'samples.views.ViewsPipeline',
+  resources: ['view-db'],
+  resourceTypes: { 'view-db': 'jdbc-pool' },
+  resourcePurposes: { 'view-db': 'Where the demo articles are kept' },
+  views: [
+    {
+      id: 'feeds',
+      title: 'Feeds',
+      description: 'The feeds and how many articles each has',
+      resource: 'view-db',
+      table: 'feed',
+      columns: [
+        {
+          name: 'name',
+          label: 'Feed',
+          type: 'TEXT',
+          drill: { view: 'articles', parameter: 'feed', from: 'name' },
+        },
+        { name: 'items', label: 'Articles', type: 'INTEGER' },
+      ],
+      sort: [{ column: 'name' }],
+    },
+    {
+      id: 'articles',
+      title: 'Articles',
+      description: 'What was fetched, and what became of it',
+      resource: 'view-db',
+      table: 'article',
+      parameters: [
+        { name: 'feed', type: 'TEXT' },
+        { name: 'state', type: 'CHOICE', options: ['kept', 'failed', 'skipped'] },
+      ],
+      columns: [
+        { name: 'id', label: 'ID', type: 'INTEGER' },
+        { name: 'title', label: 'Title', type: 'TEXT' },
+        {
+          name: 'state',
+          label: 'State',
+          type: 'STATUS',
+          tones: [
+            { value: 'kept', tone: 'POSITIVE' },
+            { value: 'failed', tone: 'NEGATIVE' },
+          ],
+        },
+        { name: 'fetched_at', label: 'Fetched', type: 'TIME' },
+        { name: 'feed', label: 'Feed', type: 'TEXT' },
+      ],
+      sort: [{ column: 'fetched_at', descending: true }],
+    },
+  ],
+};
+
 export interface DemoJars {
   slow: Uint8Array;
   failing: Uint8Array;
@@ -121,6 +216,10 @@ export interface DemoJars {
   typed: Uint8Array;
   /** `demo-roles`: the roles `report-store` (file), `ticket-counter` (counter) and `scratch` (any type). */
   roles: Uint8Array;
+  /** `demo-views`: two views over the role `view-db` (a `jdbc-pool`) and a run that fills the database. */
+  views: Uint8Array;
+  /** `demo-intake`: a required parameter `file` without a default, and an optional `language`. */
+  intake: Uint8Array;
   /** A zip file with nothing in it that is a pipeline. */
   noPipeline: Uint8Array;
   /** Bytes that are no zip file at all. */
@@ -135,6 +234,8 @@ export function demoJars(): DemoJars {
     resource: fakeJar([resource]),
     typed: fakeJar([typed]),
     roles: fakeJar([roles]),
+    views: fakeJar([viewsPipeline]),
+    intake: fakeJar([intake]),
     noPipeline: storedZip({ 'hello.txt': 'there is no pipeline here' }),
     junk: new TextEncoder().encode('this is not a jar'),
   };

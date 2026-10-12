@@ -494,6 +494,50 @@ class EngineConfigTest {
     assertEquals(java.time.Duration.ofDays(1), retention.logRetention)
   }
 
+  // ---- webhook body limit (WI-1400) ----
+
+  @Test
+  fun `the body of a webhook call has a limit with a default`() {
+    assertEquals(16384L, parse().webhook.maxBodyBytes)
+  }
+
+  @Test
+  fun `the limit of a webhook body can be set`() {
+    assertEquals(512L, parse("webhook.maxBodyBytes" to "512").webhook.maxBodyBytes)
+  }
+
+  @Test
+  fun `a webhook body limit that is not a positive number is reported by name`() {
+    for (value in listOf("big", "0", "-1", "1.5")) {
+      val e =
+          assertFailsWith<ConfigurationException>(value) { parse("webhook.maxBodyBytes" to value) }
+      assertTrue(e.message!!.contains("webhook.maxBodyBytes"), e.message)
+    }
+  }
+
+  // ---- limit of view reads at once (WI-1305, ADR-035) ----
+
+  @Test
+  fun `view reads at once per resource have a limit of 4 unless set`() {
+    assertEquals(4, parse().views.maxReadsPerResource)
+  }
+
+  @Test
+  fun `the limit of view reads at once can be set`() {
+    assertEquals(9, parse("views.maxReadsPerResource" to "9").views.maxReadsPerResource)
+  }
+
+  @Test
+  fun `a limit of view reads that is not a positive whole number fails startup naming the key`() {
+    for (value in listOf("0", "-1", "many", "1.5", "  ", "")) {
+      val e =
+          assertFailsWith<ConfigurationException>("'$value'") {
+            parse("views.maxReadsPerResource" to value)
+          }
+      assertTrue(e.message!!.contains("views.maxReadsPerResource"), e.message)
+    }
+  }
+
   @Test
   fun `parses every retention setting`() {
     val retention =

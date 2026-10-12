@@ -98,7 +98,9 @@ abstract class ResourceApiSupport {
       network: List<String> = emptyList(),
       /** What a typed role is for, by role name (ADR-025). */
       purposes: Map<String, String> = emptyMap(),
-  ): HttpResponse = uploadBytes(jarBytes(name, names, types, body, network, purposes), token)
+      /** The `@View(...)` declarations of the pipeline, as written between the braces. */
+      views: String = "",
+  ): HttpResponse = uploadBytes(jarBytes(name, names, types, body, network, purposes, views), token)
 
   /** The bytes of a compiled pipeline, to upload more than once (as different uploaders). */
   protected fun jarBytes(
@@ -108,6 +110,7 @@ abstract class ResourceApiSupport {
       body: String = "",
       network: List<String> = emptyList(),
       purposes: Map<String, String> = emptyMap(),
+      views: String = "",
   ): ByteArray {
     val fqcn = "demo.R${counter++}"
     var declaration =
@@ -128,6 +131,7 @@ abstract class ResourceApiSupport {
               } +
               "}"
     }
+    if (views.isNotEmpty()) declaration += ", views = {$views}"
     val jar =
         PipelineJars.build(
             dir,
@@ -153,8 +157,9 @@ abstract class ResourceApiSupport {
       types: Map<String, String> = emptyMap(),
       body: String = "",
       purposes: Map<String, String> = emptyMap(),
+      views: String = "",
   ): String {
-    val response = upload(name, names, types, body, purposes = purposes)
+    val response = upload(name, names, types, body, purposes = purposes, views = views)
     assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
     return response.json().text("contentHash")
   }

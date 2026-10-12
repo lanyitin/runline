@@ -53,6 +53,23 @@ const button = (root: ParentNode, label: string) =>
   [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.trim() === label)!;
 
 describe('the triggers list', () => {
+  test('has for a webhook the names of the parameters its caller provides, and nothing of the kind for a cron trigger', async () => {
+    const { view } = await page({
+      seed: async (api) => {
+        await cron(api, 'nightly');
+        await hook(api, 'on-push', { callerParameters: ['steps'] });
+        await hook(api, 'plain');
+      },
+    });
+    await loaded(view);
+
+    expect(view.querySelector('thead')!.textContent).toContain('Provided by the caller');
+    const [nightly, onPush, plain] = rows(view);
+    expect(onPush.querySelector('.callers')!.textContent!.trim()).toBe('steps');
+    expect(plain.querySelector('.callers')!.textContent!.trim()).toBe('none');
+    expect(nightly.querySelector('.callers')!.textContent!.trim()).toBe('');
+  });
+
   test('has each trigger: its name, kind, what it runs and in which version, and who changed it last', async () => {
     const { view } = await page({
       seed: async (api) => {

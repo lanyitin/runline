@@ -55,6 +55,21 @@ class PipelineMetadataTest {
   }
 
   @Test
+  fun `views are declared on the class and a run reads the same metadata with or without them`() {
+    val views = ViewsPipeline::class.java.getAnnotation(PipelineDefinition::class.java).views
+    val meta = PipelineMetadataReader.read(ViewsPipeline::class.java)
+
+    assertEquals(listOf("articles"), views.map { it.id })
+    assertEquals(setOf("feed-db"), meta.resources)
+    assertEquals(mapOf("feed-db" to "jdbc-pool"), meta.resourceTypes)
+    assertEquals(emptyList(), PipelineMetadataReader.read(MinimalPipeline::class.java).parameters)
+    assertEquals(
+        0,
+        MinimalPipeline::class.java.getAnnotation(PipelineDefinition::class.java).views.size,
+    )
+  }
+
+  @Test
   fun `a pipeline that declares only names declares no type`() {
     assertEquals(emptyMap(), PipelineMetadataReader.read(FullPipeline::class.java).resourceTypes)
   }

@@ -3,7 +3,9 @@ package dev.lawlan.runline.analyzer
 import demo.KotlinEdgeMetadataPipeline
 import demo.KotlinMetadataPipeline
 import dev.lawlan.runline.core.AccessPolicy
+import dev.lawlan.runline.core.PipelineDefinition
 import dev.lawlan.runline.core.PipelineMetadataReader
+import dev.lawlan.runline.core.View
 import java.net.URLClassLoader
 import java.nio.file.Path
 import kotlin.test.Test
@@ -27,10 +29,12 @@ class MetadataMatchesCoreTest {
             .pipelines
             .single { it.className == className }
             .metadata
-    val fromCore =
+    val (fromCore, viewsFromCore) =
         URLClassLoader(arrayOf(jar.toUri().toURL()), javaClass.classLoader).use { loader ->
           // Not initialised: reading the annotation never runs the class.
-          PipelineMetadataReader.read(Class.forName(className, false, loader))
+          val type = Class.forName(className, false, loader)
+          PipelineMetadataReader.read(type) to
+              type.getAnnotation(PipelineDefinition::class.java).views.map { it.toExpected() }
         }
 
     assertEquals(fromCore.name, fromAnalyzer.name, "name")
@@ -49,7 +53,33 @@ class MetadataMatchesCoreTest {
     assertEquals(fromCore.resources.toList(), fromAnalyzer.resources, "resources")
     assertEquals(fromCore.resourceTypes, fromAnalyzer.resourceTypes, "resource types")
     assertEquals(fromCore.resourcePurposes, fromAnalyzer.resourcePurposes, "resource purposes")
+    // Views are not part of the metadata a run reads, so core's annotation is read directly.
+    assertEquals(viewsFromCore, fromAnalyzer.views, "views")
   }
+
+  private fun View.toExpected() =
+      ViewMetadata(
+          id,
+          title,
+          description,
+          resource,
+          query,
+          parameters.map {
+            ViewParameterMetadata(it.name, it.type.name, it.required, it.options.toList())
+          },
+          columns.map { column ->
+            ViewColumnMetadata(
+                column.name,
+                column.label,
+                column.type.name,
+                column.tones.map { StatusToneMetadata(it.value, it.tone.name) },
+                column.drill.firstOrNull()?.let {
+                  DrillMetadata(it.view, it.parameter, it.from.ifEmpty { column.name })
+                },
+            )
+          },
+          sort.map { ViewSortMetadata(it.column, it.descending) },
+      )
 
   /** An unrestricted limit has no allow list in core; only a restricted one carries entries. */
   private fun assertLimit(core: AccessPolicy, analyzer: AccessLimitMetadata, what: String) {
@@ -132,6 +162,28 @@ class MetadataMatchesCoreTest {
             "typedResources = { @TypedResource(name = \"p\", type = \"file\", purpose = \"What it is for\"), " +
                 "@TypedResource(name = \"q\", type = \"file\", purpose = \"\"), " +
                 "@TypedResource(name = \"s\", type = \"counter\") }",
+        )
+        .forEach { assertDeclaration(it) }
+  }
+
+  @Test
+  fun `declared views, with every member written and with every default left out`() {
+    listOf(
+            "views = {}",
+            "views = { @View(id = \"v\", title = \"V\", resource = \"db\", query = \"SELECT 1\", columns = {}) }",
+            "typedResources = { @TypedResource(name = \"db\", type = ResourceTypes.JDBC_POOL) }, " +
+                "views = { @View(id = \"a\", title = \"A\", description = \"d\", resource = \"db\", " +
+                "query = \"SELECT 1\", " +
+                "parameters = { @ViewParam(name = \"p\"), " +
+                "@ViewParam(name = \"q\", type = ViewParamType.INTEGER, required = false), " +
+                "@ViewParam(name = \"c\", type = ViewParamType.CHOICE, options = {\"x\", \"y\"}) }, " +
+                "columns = { @ViewColumn(name = \"n\", label = \"N\"), " +
+                "@ViewColumn(name = \"s\", label = \"S\", type = ViewColumnType.STATUS, " +
+                "tones = { @StatusTone(value = \"ok\", tone = Tone.POSITIVE) }, " +
+                "drill = @Drill(view = \"a\", parameter = \"p\")), " +
+                "@ViewColumn(name = \"t\", label = \"T\", type = ViewColumnType.TIME, " +
+                "drill = @Drill(view = \"a\", parameter = \"q\", from = \"n\")) }, " +
+                "sort = { @ViewSort(column = \"n\"), @ViewSort(column = \"t\", descending = true) }) }",
         )
         .forEach { assertDeclaration(it) }
   }

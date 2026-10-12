@@ -100,7 +100,13 @@ fun Application.configureRunRoutes() {
                     ErrorResponse("definition_not_found", "找不到這個 pipeline 定義。"),
                 )
             is CreateRunResult.InvalidParameters ->
-                call.respond(HttpStatusCode.UnprocessableEntity, result.toResponse())
+                call.respond(
+                    // A value the database cannot hold is a malformed request, not a mismatch.
+                    if (result.problems.any { it.kind == ParameterProblemKind.NUL_IN_VALUE })
+                        HttpStatusCode.BadRequest
+                    else HttpStatusCode.UnprocessableEntity,
+                    result.toResponse(),
+                )
             is CreateRunResult.ResourcesUnavailable ->
                 call.respond(HttpStatusCode.Conflict, result.toResponse())
             is CreateRunResult.UnsafeNotAllowed ->
@@ -275,6 +281,8 @@ private fun CreateRunResult.InvalidParameters.toResponse() =
               when (it.kind) {
                 ParameterProblemKind.MISSING -> "缺少必填參數 ${it.name}"
                 ParameterProblemKind.UNDECLARED -> "未宣告的參數 ${it.name}"
+                ParameterProblemKind.FIXED_AND_CALLER -> "參數 ${it.name} 不能同時固定又由呼叫端提供"
+                ParameterProblemKind.NUL_IN_VALUE -> "參數 ${it.name} 的值含有 NUL 字元"
               }
             },
         problems.map {
@@ -283,6 +291,8 @@ private fun CreateRunResult.InvalidParameters.toResponse() =
               when (it.kind) {
                 ParameterProblemKind.MISSING -> "missing"
                 ParameterProblemKind.UNDECLARED -> "undeclared"
+                ParameterProblemKind.FIXED_AND_CALLER -> "fixed_and_caller"
+                ParameterProblemKind.NUL_IN_VALUE -> "contains_nul"
               },
           )
         },

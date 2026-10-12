@@ -104,9 +104,7 @@ internal constructor(
 
   /** Cuts off a statement that has run too long; made when it is first needed. */
   private val timerOnce = lazy {
-    ScheduledThreadPoolExecutor(1) { task ->
-          Thread.ofPlatform().name("jdbc-statement-timer-$resource").daemon().unstarted(task)
-        }
+    ScheduledThreadPoolExecutor(1) { task -> hostThread("jdbc-statement-timer-$resource", task) }
         .apply { removeOnCancelPolicy = true }
   }
   private val timer: ScheduledThreadPoolExecutor by timerOnce
@@ -166,10 +164,19 @@ internal constructor(
 
   /** Where statements are carried out, so that the run's own thread can be told to stop. */
   private val workers: ExecutorService by lazy {
-    Executors.newCachedThreadPool { task ->
-      Thread.ofPlatform().name("jdbc-statement-$resource").daemon().unstarted(task)
-    }
+    Executors.newCachedThreadPool { task -> hostThread("jdbc-statement-$resource", task) }
   }
+
+  /**
+   * A thread of the binding. It is made by whichever thread first needs it, the run's, and would
+   * inherit the run's class loader; the binding is closed only after the run has ended, so the
+   * runner would report the idle thread as one the run left running. It is the host's, so it gets
+   * the host's loader.
+   */
+  private fun hostThread(name: String, task: Runnable): Thread =
+      Thread.ofPlatform().name(name).daemon().unstarted(task).also {
+        it.contextClassLoader = JdbcBinding::class.java.classLoader
+      }
 
   /**
    * Carries [body] out on a thread of the binding and waits for it on the run's own. A socket read

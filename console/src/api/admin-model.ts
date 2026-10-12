@@ -18,6 +18,8 @@ export interface Trigger {
   parameters: Record<string, string>;
   /** What every run gets: those, and the defaults of the version. */
   effectiveParameters: Record<string, string>;
+  /** The names of the parameters the caller of a webhook provides (ADR-036); always empty for cron. */
+  callerParameters: string[];
   enabled: boolean;
   cron: string | null;
   timeZone: string | null;
@@ -255,6 +257,7 @@ function readTrigger(value: unknown): Trigger {
     pipeline: str(r.pipeline, 'trigger pipeline'),
     parameters: stringMap(r.parameters, 'trigger parameters'),
     effectiveParameters: stringMap(r.effectiveParameters, 'trigger effectiveParameters'),
+    callerParameters: strings(r.callerParameters, 'trigger callerParameters'),
     enabled: bool(r.enabled, 'trigger enabled'),
     cron: strOrNull(r.cron, 'trigger cron'),
     timeZone: strOrNull(r.timeZone, 'trigger timeZone'),

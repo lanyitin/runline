@@ -21,6 +21,7 @@
 | `bin/runline-browser-probe` | 讀出 Chrome 取得的 WebGL 渲染器；可要求硬體渲染 |
 | `bin/runline-build-truststore` | 把 JDK 的 CA 與目錄中的 PEM 合成一個 JVM 信任庫 |
 | `systemd/runline-engine-browser.conf` | systemd 的 drop-in |
+| `docker/compose.browser-transcribe.yaml`、`Dockerfile` 的 `browser-transcribe` 階段 | 與轉錄覆蓋層並用時的單一映像（Chrome 與 ffmpeg、VAD 工具位置、模型檔）；用法見 [transcribe.md](transcribe.md) 的「與瀏覽器並用」 |
 
 ## 發佈映像檔與引用它的 Compose 範本（WI-1100）
 
@@ -115,7 +116,7 @@ cp deploy/docker/.env.example deploy/docker/.env        # 取代每個佔位值
 docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.yaml up --build -d
 ```
 
-（或在 `.env` 設 `COMPOSE_FILE=compose.yaml:compose.browser.yaml`。）疊加檔設定 `platform: linux/amd64`：Google 只提供 amd64 的 Chrome。在 arm64 的開發機上，Docker 的虛擬機必須以 Rosetta 模擬 amd64（Colima：`vmType: vz`、`rosetta: true`）；以 qemu 模擬時 Chrome 155 在啟動時中止（WI-1000 實測）。
+（或在 `.env` 設 `COMPOSE_FILE=compose.yaml:compose.browser.yaml`。）同一個 Engine 還要跑 transcribe pipeline 時，加上 `compose.transcribe.yaml` 與排在最後的 `compose.browser-transcribe.yaml`，得到同時有 Chrome 與 ffmpeg 的單一映像（[transcribe.md](transcribe.md) 的「與瀏覽器並用」）。疊加檔設定 `platform: linux/amd64`：Google 只提供 amd64 的 Chrome。在 arm64 的開發機上，Docker 的虛擬機必須以 Rosetta 模擬 amd64（Colima：`vmType: vz`、`rosetta: true`）；以 qemu 模擬時 Chrome 155 在啟動時中止（WI-1000 實測）。
 
 | 項目 | 內容 |
 |---|---|
@@ -162,6 +163,8 @@ browser-probe: WARNING: the container has no /dev/dri; give it the device for ha
 
 3. 在 `/etc/runline/runline.env` 設定 `runline.env.example` 的「browser」各項（選用）。`JDK_JAVA_OPTIONS` 由 drop-in 為 Engine 單元設定（`-Djava.io.tmpdir=/var/cache/runline`），不要在 `runline.env` 再設：環境檔的值會取代它，而且遷移單元也讀環境檔，那時目錄還不存在。
 4. `systemctl restart runline-engine`。
+
+與轉錄 drop-in 同時安裝時，兩者放在同一個 `runline-engine.service.d/` 目錄（`browser.conf`、`transcribe.conf`），沒有衝突；步驟見 [transcribe.md](transcribe.md) 的「與瀏覽器並用」。
 
 顯示來源：drop-in 讓 `ExecStart` 經由 `runline-entrypoint`，它在服務的 control group 內啟動 Xvfb（停止服務即結束它），顯示號碼是 `DISPLAY`（預設在 `runline.env` 設 `:99`；與主機上其他 X 伺服器不同號碼）。Chrome 由 Engine 的 pipeline 啟動，在同一個 control group 內，所以 `systemctl stop` 與 `restart` 會一併結束所有遺留的 Chrome 行程；回收殭屍由 systemd 與 init 負責，不需另設。
 

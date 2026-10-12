@@ -1,13 +1,13 @@
 package dev.lawlan.runline.engine.trigger
 
 import dev.lawlan.runline.engine.artifact.DefinitionStore
+import dev.lawlan.runline.engine.artifact.ParameterDoc
 import dev.lawlan.runline.engine.artifact.VersionOutcome
 import dev.lawlan.runline.engine.artifact.VersionResolver
 import dev.lawlan.runline.engine.artifact.visibility
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.run.ParameterCheck
 import dev.lawlan.runline.engine.run.ParameterProblem
-import dev.lawlan.runline.engine.run.validateParameters
 import java.time.Clock
 import org.slf4j.LoggerFactory
 
@@ -23,6 +23,8 @@ data class CreateTrigger(
     val enabled: Boolean = true,
     /** Whose version of the content, when an administrator can see several (ADR-020). */
     val uploader: String? = null,
+    /** Webhook only: the parameters callers provide in the body of each call (ADR-036). */
+    val callerParameters: List<String> = emptyList(),
 )
 
 /** What to change about a trigger; what is null stays as it is. */
@@ -37,6 +39,7 @@ data class UpdateTrigger(
     val enabled: Boolean? = null,
     val cronExpression: String? = null,
     val timeZone: String? = null,
+    val callerParameters: List<String>? = null,
 )
 
 enum class InvalidTrigger {
@@ -54,6 +57,9 @@ enum class InvalidTrigger {
 
   /** A schedule given to a webhook trigger. */
   SCHEDULE_ON_WEBHOOK,
+
+  /** Caller-provided parameters given to a cron trigger, which has no caller. */
+  CALLER_PARAMETERS_ON_CRON,
 
   /** An update that changes nothing. */
   NOTHING_TO_CHANGE,
@@ -119,6 +125,9 @@ class TriggerAdmin(
     if (!NAME.matches(request.name)) return CreateTriggerResult.Invalid(InvalidTrigger.NAME)
     val schedule = scheduleOf(request.kind, request.cronExpression, request.timeZone)
     if (schedule is Schedule.Refused) return CreateTriggerResult.Invalid(schedule.problem)
+    if (request.kind == TriggerKind.CRON && request.callerParameters.isNotEmpty()) {
+      return CreateTriggerResult.Invalid(InvalidTrigger.CALLER_PARAMETERS_ON_CRON)
+    }
     // An administrator sees every version, and none is preferred: the uploader must be clear.
     val owner =
         when (
@@ -132,7 +141,8 @@ class TriggerAdmin(
     val definition =
         definitions.find(request.contentHash, owner, request.pipeline)
             ?: return CreateTriggerResult.DefinitionNotFound
-    (validateParameters(definition.metadata.parameters, request.parameters)
+    val callerParameters = request.callerParameters.distinct()
+    (checkBinding(definition.metadata.parameters, request.parameters, callerParameters)
             as? ParameterCheck.Invalid)
         ?.let {
           return CreateTriggerResult.InvalidParameters(it.problems)
@@ -152,6 +162,7 @@ class TriggerAdmin(
                 secret?.let(WebhookSecrets::hash),
                 by.name,
                 clock.instant(),
+                inDeclarationOrder(definition.metadata.parameters, callerParameters),
             )
         ) ?: return CreateTriggerResult.NameTaken
     log.info(
@@ -177,6 +188,9 @@ class TriggerAdmin(
             request.timeZone ?: current.timeZone,
         )
     if (schedule is Schedule.Refused) return UpdateTriggerResult.Invalid(schedule.problem)
+    if (current.kind == TriggerKind.CRON && request.callerParameters?.isNotEmpty() == true) {
+      return UpdateTriggerResult.Invalid(InvalidTrigger.CALLER_PARAMETERS_ON_CRON)
+    }
     // The binding stays on the version it has unless the request says to move it: a content hash
     // alone is a move and must be clear about whose version; an uploader alone picks among the
     // versions of the current content.
@@ -197,7 +211,9 @@ class TriggerAdmin(
         definitions.find(contentHash, owner, request.pipeline ?: current.pipeline)
             ?: return UpdateTriggerResult.DefinitionNotFound
     val parameters = request.parameters ?: current.parameters
-    (validateParameters(definition.metadata.parameters, parameters) as? ParameterCheck.Invalid)
+    val callerParameters = request.callerParameters?.distinct() ?: current.callerParameters
+    (checkBinding(definition.metadata.parameters, parameters, callerParameters)
+            as? ParameterCheck.Invalid)
         ?.let {
           return UpdateTriggerResult.InvalidParameters(it.problems)
         }
@@ -211,6 +227,7 @@ class TriggerAdmin(
                 request.enabled ?: current.enabled,
                 (schedule as? Schedule.Cron)?.expression,
                 (schedule as? Schedule.Cron)?.timeZone,
+                inDeclarationOrder(definition.metadata.parameters, callerParameters),
             ),
             by.name,
             clock.instant(),
@@ -243,6 +260,10 @@ class TriggerAdmin(
     if (deleted) log.info("Trigger {} deleted by {}", name, by.name)
     return deleted
   }
+
+  /** The names in the order the version declares its parameters. */
+  private fun inDeclarationOrder(declared: List<ParameterDoc>, names: List<String>) =
+      declared.map { it.name }.filter { it in names }
 
   private sealed interface Schedule {
     data class Cron(val expression: String, val timeZone: String) : Schedule

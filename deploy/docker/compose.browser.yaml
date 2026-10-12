@@ -6,6 +6,9 @@
 #
 # The image is linux/amd64 only (Google ships no other Chrome); on an arm64 host the Docker VM must
 # emulate amd64 with Rosetta (Colima: vmType vz, rosetta true).
+#
+# It names the browser image. For Chrome and the transcribe tools in one image, add compose.transcribe.yaml
+# and, last, compose.browser-transcribe.yaml (deploy/transcribe.md, "與瀏覽器並用").
 
 x-browser: &browser
   image: runline-engine-browser:${RUNLINE_IMAGE_TAG:-local}

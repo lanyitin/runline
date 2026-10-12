@@ -96,6 +96,26 @@ data class ResourceSettings(
  */
 data class SecretSettings(val keystore: Path, val password: SecretValue)
 
+/** How webhook calls are taken (ADR-036). */
+data class WebhookSettings(
+    /** The most bytes of a call's body that are read; a longer body is refused. */
+    val maxBodyBytes: Long = DEFAULT_MAX_BODY_BYTES
+) {
+  companion object {
+    const val DEFAULT_MAX_BODY_BYTES = 16L * 1024
+  }
+}
+
+/** How view reads are limited (ADR-035). */
+data class ViewSettings(
+    /** At most this many view reads of one resource go on at once; the same for every resource. */
+    val maxReadsPerResource: Int = DEFAULT_MAX_READS_PER_RESOURCE
+) {
+  companion object {
+    const val DEFAULT_MAX_READS_PER_RESOURCE = 4
+  }
+}
+
 /** How long run, log and trigger records are kept, and how the clean-up runs (WI-20). */
 data class RetentionSettings(
     /** A run that has ended is removed, with its log, this long after it ended. */
@@ -160,6 +180,8 @@ data class EngineConfig(
     val secrets: SecretSettings? = null,
     /** Null when OIDC login is not configured (ADR-029). */
     val oidc: OidcSettings? = null,
+    val webhook: WebhookSettings = WebhookSettings(),
+    val views: ViewSettings = ViewSettings(),
 ) {
   companion object {
     private const val DEFAULT_MAX_UPLOAD_BYTES = 50L * 1024 * 1024
@@ -301,6 +323,9 @@ data class EngineConfig(
                   ?: DEFAULT_CERTIFICATE_WARNING_DAYS)
               .coerceAtMost(Int.MAX_VALUE.toLong())
               .toInt()
+      val webhook =
+          WebhookSettings(positive("webhook.maxBodyBytes", WebhookSettings.DEFAULT_MAX_BODY_BYTES))
+      val views = ViewSettings(viewReadLimit(config, problems))
       val secrets = secretSettings(::text, problems)
       val runtimeDir = required("runs.runtimeDir")
       val runs =
@@ -362,7 +387,24 @@ data class EngineConfig(
           ),
           secrets,
           oidc,
+          webhook,
+          views,
       )
+    }
+
+    /**
+     * The limit of view reads at once (ADR-035). Unlike the other settings a blank value is not
+     * "unset": the variable was given, so the value must be a positive whole number.
+     */
+    private fun viewReadLimit(config: ApplicationConfig, problems: MutableList<String>): Int {
+      val key = "views.maxReadsPerResource"
+      val raw =
+          config.propertyOrNull(key)?.getString()
+              ?: return ViewSettings.DEFAULT_MAX_READS_PER_RESOURCE
+      return raw.trim().toIntOrNull()?.takeIf { it >= 1 }
+          ?: ViewSettings.DEFAULT_MAX_READS_PER_RESOURCE.also {
+            problems += "$key must be a whole number of at least 1"
+          }
     }
 
     /**

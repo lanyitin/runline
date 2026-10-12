@@ -5,6 +5,7 @@ import { describeAuthMethodsContract, describeOidcSessionContract } from './auth
 import { describeUsersContract } from './users-contract';
 import { describeAdminContract } from './admin-contract';
 import { describeBindingsContract } from './bindings-contract';
+import { describeViewsContract } from './views-contract';
 import { describeInfoContract } from './info-contract';
 import { describeResourceTypesContract } from './resource-types-contract';
 import { describePipelinesContract } from './pipelines-contract';
@@ -49,6 +50,12 @@ describeAdminContract('the Fake Engine', {
   uploadLimitBytes,
 });
 describeBindingsContract('the Fake Engine', {
+  baseUrl: () => engine.url,
+  callers: () => callers,
+  jars: demoJars,
+  uploadLimitBytes,
+});
+describeViewsContract('the Fake Engine', {
   baseUrl: () => engine.url,
   callers: () => callers,
   jars: demoJars,

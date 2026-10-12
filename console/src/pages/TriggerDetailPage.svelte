@@ -251,6 +251,16 @@
           </tbody>
         </table>
       {/if}
+      {#if trigger.kind === 'webhook'}
+        <p class="callers">
+          <strong>{i18n.t('triggers.col.callers')}:</strong>
+          {#if trigger.callerParameters.length === 0}
+            <span class="rl-help">{i18n.t('triggers.callers.none')}</span>
+          {:else}
+            {#each trigger.callerParameters as parameter, at (parameter)}{#if at > 0}, {/if}<PlainText value={parameter} mono />{/each}
+          {/if}
+        </p>
+      {/if}
     </section>
 
     {#if trigger.cron !== null}

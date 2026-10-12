@@ -7,6 +7,7 @@
   import { enumLabel } from '../i18n/enums';
   import { formatBytes } from '../i18n/format';
   import ResourceBindings from '../pipelines/ResourceBindings.svelte';
+  import PipelineViews from '../views/PipelineViews.svelte';
   import { browserClock, pageVisibility } from '../runs/run-watch.svelte';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
   import Badge from '../ui/Badge.svelte';
@@ -159,6 +160,8 @@
           </div>
         {/if}
       </section>
+
+      <PipelineViews {artifact} {pipeline} />
 
       <h2 class="group">{i18n.t('pipeline.section.metadata')}</h2>
 

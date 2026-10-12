@@ -70,6 +70,40 @@ const firing = (backend: TestApp['engine']['backend'], extra: object) =>
     ...extra,
   });
 
+describe('the parameters the caller provides', () => {
+  test('are named on the page of a webhook, apart from what the trigger gives', async () => {
+    const { view } = await page({
+      query: '?name=on.push',
+      seed: async (api) => {
+        await api.createTrigger({
+          name: 'on.push',
+          kind: 'webhook',
+          contentHash: HASH,
+          pipeline: 'demo-slow',
+          callerParameters: ['steps'],
+        });
+      },
+    });
+    await ready(view);
+
+    const params = section(view, 'Parameters');
+    expect(params.querySelector('.callers')!.textContent).toContain('Provided by the caller');
+    expect(params.querySelector('.callers')!.textContent).toContain('steps');
+  });
+
+  test('say none for a webhook that has none to provide, and are not on the page of a cron trigger', async () => {
+    const { view } = await page({ query: '?name=on.push', seed: async (api) => void (await hook(api)) });
+    await ready(view);
+    expect(section(view, 'Parameters').querySelector('.callers')!.textContent).toContain('none');
+    app.dispose();
+
+    const other = await page({ seed: async (api) => void (await cron(api)) });
+    await ready(other.view);
+    expect(other.view.querySelector('.callers')).toBeNull();
+    expect(other.view.textContent).not.toContain('Provided by the caller');
+  });
+});
+
 describe('the page of a cron trigger', () => {
   test('says what it is: its name, kind, whether it is on, and who made it and changed it', async () => {
     const { view } = await page({ seed: async (api) => void (await cron(api)) });

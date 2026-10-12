@@ -28,6 +28,7 @@ internal fun Annotation.toMetadata(): PipelineMetadata {
               .map { it.string("name") to it.string("purpose", "") }
               .filter { it.second.isNotEmpty() }
               .toMap(),
+      views = annotations("views").map { it.toView() },
   )
 }
 
@@ -71,4 +72,47 @@ private fun Annotation.limit(name: String): AccessLimitMetadata {
       (element(name) as AnnotationValue.OfAnnotation?)?.annotation()
           ?: return AccessLimitMetadata(unrestricted = true)
   return AccessLimitMetadata(limit.boolean("unrestricted", false), limit.strings("allow"))
+}
+
+// The defaults below mirror those on the view annotations in core: a parameter is text and
+// required, a column is text, a description and an option list are empty, a sort is ascending.
+private fun Annotation.toView() =
+    ViewMetadata(
+        id = string("id"),
+        title = string("title"),
+        description = string("description", ""),
+        resource = string("resource"),
+        query = string("query"),
+        parameters =
+            annotations("parameters").map {
+              ViewParameterMetadata(
+                  it.string("name"),
+                  it.enum("type", "TEXT"),
+                  it.boolean("required", true),
+                  it.strings("options"),
+              )
+            },
+        columns = annotations("columns").map { it.toViewColumn() },
+        sort =
+            annotations("sort").map {
+              ViewSortMetadata(it.string("column"), it.boolean("descending", false))
+            },
+    )
+
+private fun Annotation.toViewColumn(): ViewColumnMetadata {
+  val name = string("name")
+  return ViewColumnMetadata(
+      name = name,
+      label = string("label"),
+      type = enum("type", "TEXT"),
+      tones = annotations("tones").map { StatusToneMetadata(it.string("value"), it.enum("tone")) },
+      drill =
+          annotations("drill").firstOrNull()?.let {
+            DrillMetadata(
+                it.string("view"),
+                it.string("parameter"),
+                it.string("from", "").ifEmpty { name },
+            )
+          },
+  )
 }

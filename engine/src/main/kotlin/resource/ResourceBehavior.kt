@@ -1,5 +1,7 @@
 package dev.lawlan.runline.engine.resource
 
+import dev.lawlan.runline.accessors.ReadOnlyQuery
+import dev.lawlan.runline.accessors.ReadOnlyRead
 import dev.lawlan.runline.accessors.ResourceBinding
 import dev.lawlan.runline.accessors.jdbc.JdbcObserver
 import dev.lawlan.runline.accessors.jdbc.JdbcPools
@@ -78,6 +80,12 @@ interface ResourceBehavior {
    * type that has no accessor. Fails with [ResourceUnavailable] when the entity cannot be used.
    */
   fun bind(resource: SharedResource): ResourceBinding?
+
+  /**
+   * A read of [resource] that only reads, for a view (ADR-033), apart from the connections runs
+   * hold: it takes no capacity and no share of any run. Null for a type that cannot be read so.
+   */
+  fun readOnly(resource: SharedResource, query: ReadOnlyQuery): ReadOnlyRead? = null
 
   /**
    * Looks at the real entity and says what stops it from being used, or null when nothing does. May

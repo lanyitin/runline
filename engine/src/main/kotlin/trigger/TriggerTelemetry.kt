@@ -13,6 +13,13 @@ enum class WebhookRejection(val reason: String, val cause: String) {
   WRONG_SECRET("unauthorized", "wrong_secret"),
   NO_DELIVERY_ID("invalid_delivery_id", "missing"),
   BAD_DELIVERY_ID("invalid_delivery_id", "malformed"),
+
+  /** The body of a call to a trigger that takes parameters from it is not a JSON object. */
+  BODY_NOT_OBJECT("invalid_parameters", "body_not_object"),
+  BODY_TOO_LARGE("invalid_parameters", "body_too_large"),
+
+  /** A key outside the trigger's list, a missing required key or a value that is not text. */
+  INVALID_PARAMETERS("invalid_parameters", "invalid_parameters"),
 }
 
 /**

@@ -125,6 +125,7 @@ class TriggerRig(
       pipeline: String,
       parameters: Map<String, String> = emptyMap(),
       enabled: Boolean = true,
+      callerParameters: List<String> = emptyList(),
   ): Pair<Trigger, String> {
     val created =
         assertIs<CreateTriggerResult.Created>(
@@ -136,6 +137,7 @@ class TriggerRig(
                     pipeline,
                     parameters,
                     enabled = enabled,
+                    callerParameters = callerParameters,
                 ),
                 root,
             )

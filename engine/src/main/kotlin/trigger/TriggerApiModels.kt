@@ -17,6 +17,8 @@ data class CreateTriggerRequest(
     /** Cron triggers: an IANA time zone; UTC when left out. */
     val timeZone: String? = null,
     val enabled: Boolean = true,
+    /** Webhook triggers: the parameters callers provide in the body of each call (ADR-036). */
+    val callerParameters: List<String> = emptyList(),
 )
 
 /** Every field is optional; at least one must be given. */
@@ -30,6 +32,7 @@ data class UpdateTriggerRequest(
     val enabled: Boolean? = null,
     val cron: String? = null,
     val timeZone: String? = null,
+    val callerParameters: List<String>? = null,
 )
 
 /**
@@ -48,6 +51,8 @@ data class TriggerResponse(
     val parameters: Map<String, String>,
     /** What every run gets: those, plus the defaults of the bound version. */
     val effectiveParameters: Map<String, String>,
+    /** Webhook triggers: the parameters the caller provides; empty for a cron trigger. */
+    val callerParameters: List<String>,
     val enabled: Boolean,
     val cron: String?,
     val timeZone: String?,
@@ -84,6 +89,10 @@ data class FiringResponse(
 @Serializable
 data class InvalidTriggerResponse(val error: String, val problem: String, val message: String)
 
+/** A webhook body that cannot be used at all; says what is wrong with it, never what it holds. */
+@Serializable
+data class InvalidBodyResponse(val error: String, val problem: String, val message: String)
+
 @Serializable data class WebhookAccepted(val status: String = "accepted")
 
 fun TriggerView.toResponse(): TriggerResponse =
@@ -95,6 +104,7 @@ fun TriggerView.toResponse(): TriggerResponse =
         pipeline = trigger.pipeline,
         parameters = trigger.parameters,
         effectiveParameters = effectiveParameters,
+        callerParameters = trigger.callerParameters,
         enabled = trigger.enabled,
         cron = trigger.cronExpression,
         timeZone = trigger.timeZone,

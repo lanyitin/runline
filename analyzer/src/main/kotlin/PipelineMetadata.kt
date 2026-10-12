@@ -28,7 +28,46 @@ data class PipelineMetadata(
     val resourceTypes: Map<String, String> = mapOf(),
     /** What some of [resources] are for (ADR-025); only the roles that say it, as written. */
     val resourcePurposes: Map<String, String> = mapOf(),
+    /** The views declared (ADR-033); none for a pipeline that declares none. */
+    val views: List<ViewMetadata> = listOf(),
 )
+
+/**
+ * A declared view, as written. Types and tones are the names of the corresponding core enum
+ * constants; whether they are known is for the reader of this metadata to judge.
+ */
+data class ViewMetadata(
+    val id: String,
+    val title: String,
+    val description: String,
+    val resource: String,
+    val query: String,
+    val parameters: List<ViewParameterMetadata>,
+    val columns: List<ViewColumnMetadata>,
+    val sort: List<ViewSortMetadata>,
+)
+
+data class ViewParameterMetadata(
+    val name: String,
+    val type: String,
+    val required: Boolean,
+    val options: List<String>,
+)
+
+data class ViewColumnMetadata(
+    val name: String,
+    val label: String,
+    val type: String,
+    val tones: List<StatusToneMetadata>,
+    val drill: DrillMetadata?,
+)
+
+data class StatusToneMetadata(val value: String, val tone: String)
+
+/** [from] is always a column name: a drill that names none takes the column that declares it. */
+data class DrillMetadata(val view: String, val parameter: String, val from: String)
+
+data class ViewSortMetadata(val column: String, val descending: Boolean)
 
 /** A class annotated as a pipeline whose declaration could not be read. */
 data class MetadataProblem(val className: String, val detail: String)

@@ -6,6 +6,7 @@ import dev.lawlan.runline.engine.artifact.PostgresDefinitionStore
 import dev.lawlan.runline.engine.artifact.Visibility
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.db.dataSourceOf
+import dev.lawlan.runline.engine.support.CapturedLogs
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.RunHarness
 import dev.lawlan.runline.engine.support.SnapshotListAppender
@@ -252,6 +253,32 @@ class RunApiTest {
         assertEquals(listOf("env" to "missing", "colour" to "undeclared"), problems)
         assertTrue(body.text("message").contains("env") && body.text("message").contains("colour"))
         assertEquals(0, runCount())
+      }
+
+  @Test
+  fun `a parameter value with a NUL character is refused 400 naming the parameter`() =
+      testApplication {
+        CapturedLogs().use { logs ->
+          engine()
+          val hash =
+              upload(
+                  "needs",
+                  declaration =
+                      RunHarness.DEFAULT_DECLARATION + ", parameters = {@Param(name = \"env\")}",
+              )
+
+          val response = createRun(hash, "needs", mapOf("env" to "private-77\u0000od"))
+
+          assertEquals(HttpStatusCode.BadRequest, response.status)
+          val body = response.json()
+          assertEquals("invalid_parameters", body.text("error"))
+          val problem = body["problems"]!!.jsonArray.single().jsonObject
+          assertEquals("env", problem.text("name"))
+          assertEquals("contains_nul", problem.text("problem"))
+          assertFalse(response.bodyAsText().contains("private-77"))
+          assertEquals(0, runCount())
+          assertTrue(logs.at(ch.qos.logback.classic.Level.ERROR).isEmpty())
+        }
       }
 
   @Test

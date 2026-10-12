@@ -29,6 +29,12 @@ annotation class PipelineDefinition(
      * allowed.
      */
     val typedResources: Array<TypedResource> = [],
+    /**
+     * Read-only views of the data the pipeline accumulates, shown by the Console (ADR-033). Purely
+     * declarative: nothing here is run to read it, and it does not influence safe/unsafe
+     * classification, resource roles or bindings.
+     */
+    val views: Array<View> = [],
 )
 
 /**
@@ -65,3 +71,88 @@ annotation class AccessLimit(
     val unrestricted: Boolean = false,
     val allow: Array<String> = [],
 )
+
+/** The kind of value a [ViewParam] takes. */
+enum class ViewParamType {
+  TEXT,
+  INTEGER,
+  /** One of the fixed [ViewParam.options]. */
+  CHOICE,
+}
+
+/** The kind of value a [ViewColumn] shows. */
+enum class ViewColumnType {
+  TEXT,
+  INTEGER,
+  TIME,
+  /** One of a few values, each with a [Tone] the Console shows in colour and in words. */
+  STATUS,
+}
+
+/** How a status value is to be read by a person. */
+enum class Tone {
+  POSITIVE,
+  NEUTRAL,
+  NEGATIVE,
+}
+
+/**
+ * A named, read-only query over a database resource role of the pipeline (ADR-033). [id] names the
+ * view within the pipeline; [resource] is a role declared in [PipelineDefinition.typedResources]
+ * with type [ResourceTypes.JDBC_POOL]. The [query] is text for that database and refers to the
+ * declared parameters by name, as `:name` (ADR-034); parameter values are only ever passed as
+ * values, never joined into it.
+ */
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class View(
+    val id: String,
+    val title: String,
+    val description: String = "",
+    val resource: String,
+    val query: String,
+    val parameters: Array<ViewParam> = [],
+    val columns: Array<ViewColumn>,
+    /** The default order, by column names; empty means the order of the query. */
+    val sort: Array<ViewSort> = [],
+)
+
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ViewParam(
+    val name: String,
+    val type: ViewParamType = ViewParamType.TEXT,
+    val required: Boolean = true,
+    /** The allowed values of a [ViewParamType.CHOICE] parameter. */
+    val options: Array<String> = [],
+)
+
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ViewColumn(
+    val name: String,
+    val label: String,
+    val type: ViewColumnType = ViewColumnType.TEXT,
+    /**
+     * The tone of each value of a [ViewColumnType.STATUS] column; a value not listed is neutral.
+     */
+    val tones: Array<StatusTone> = [],
+    /** At most one: opens another view of the same pipeline with a value of the row. */
+    val drill: Array<Drill> = [],
+)
+
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class StatusTone(val value: String, val tone: Tone)
+
+/**
+ * Opens the view [view] with the value of column [from] of the row as its parameter [parameter]. An
+ * empty [from] means the column that declares the drill.
+ */
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Drill(val view: String, val parameter: String, val from: String = "")
+
+@Target()
+@Retention(AnnotationRetention.RUNTIME)
+annotation class ViewSort(val column: String, val descending: Boolean = false)

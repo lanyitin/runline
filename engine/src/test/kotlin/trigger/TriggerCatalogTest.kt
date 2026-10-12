@@ -45,6 +45,25 @@ class TriggerCatalogTest {
   }
 
   @Test
+  fun `what the caller provides is not part of the effective parameters`() {
+    admin.create(
+        CreateTrigger(
+            "hook",
+            TriggerKind.WEBHOOK,
+            v1,
+            "nightly",
+            emptyMap(),
+            callerParameters = listOf("env", "retries"),
+        ),
+        root,
+    )
+
+    val view = catalog.find("hook")!!
+    assertEquals(listOf("env", "retries"), view.trigger.callerParameters)
+    assertEquals(emptyMap(), view.effectiveParameters)
+  }
+
+  @Test
   fun `firings are listed for an existing trigger only`() {
     create("a", mapOf("env" to "prod"))
     val trigger = store.find("a")!!

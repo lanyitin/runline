@@ -286,6 +286,119 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       expect([answer.status, answer.body.problem]).toEqual([422, 'schedule_not_allowed']);
     });
 
+    describe('the parameters a caller provides (ADR-036)', () => {
+      const intake = async () => (await uploaded(setup.jars().intake)).contentHash;
+      const intakeHook = (contentHash: string, extra: object = {}) => ({
+        name: fresh('hook'),
+        kind: 'webhook',
+        contentHash,
+        pipeline: 'demo-intake',
+        ...extra,
+      });
+      const problems = (answer: { body: any }) => answer.body.problems;
+
+      test('a webhook is made with the names of the parameters its caller provides, which are no part of the parameters every run gets', async () => {
+        const contentHash = await intake();
+        const body = intakeHook(contentHash, { callerParameters: ['file'] });
+        const made = await call(root(), 'POST', '/api/v1/triggers', body);
+        expect(made.status).toBe(201);
+        expect(made.body.trigger).toMatchObject({
+          callerParameters: ['file'],
+          parameters: {},
+          effectiveParameters: { language: 'en' },
+        });
+        const read = await call(root(), 'GET', `/api/v1/triggers/${body.name}`);
+        expect(read.body.callerParameters).toEqual(['file']);
+        const listed = (await call(root(), 'GET', '/api/v1/triggers')).body.triggers as any[];
+        expect(listed.find((t) => t.name === body.name).callerParameters).toEqual(['file']);
+      });
+
+      test('a trigger that names none has an empty list, a cron trigger always', async () => {
+        const contentHash = await slow();
+        const webhookMade = await call(root(), 'POST', '/api/v1/triggers', hook(contentHash));
+        const cronMade = await call(root(), 'POST', '/api/v1/triggers', cron(contentHash));
+        expect(webhookMade.body.trigger.callerParameters).toEqual([]);
+        expect(cronMade.body.trigger.callerParameters).toEqual([]);
+      });
+
+      test('a required parameter without a default that is neither fixed nor provided by the caller is a 422 invalid_parameters that names it', async () => {
+        const contentHash = await intake();
+        const answer = await call(root(), 'POST', '/api/v1/triggers', intakeHook(contentHash));
+        expect([answer.status, answer.body.error]).toEqual([422, 'invalid_parameters']);
+        expect(problems(answer)).toEqual([{ name: 'file', problem: 'missing' }]);
+
+        const fixed = await call(
+          root(),
+          'POST',
+          '/api/v1/triggers',
+          intakeHook(contentHash, { parameters: { file: 'a.mp4' } }),
+        );
+        expect(fixed.status).toBe(201);
+      });
+
+      test('a parameter both fixed and provided by the caller, or one the version does not declare, is a 422 invalid_parameters that names it', async () => {
+        const contentHash = await intake();
+        const both = await call(
+          root(),
+          'POST',
+          '/api/v1/triggers',
+          intakeHook(contentHash, { parameters: { file: 'a.mp4' }, callerParameters: ['file'] }),
+        );
+        expect([both.status, both.body.error]).toEqual([422, 'invalid_parameters']);
+        expect(problems(both)).toEqual([{ name: 'file', problem: 'fixed_and_caller' }]);
+
+        const unknown = await call(
+          root(),
+          'POST',
+          '/api/v1/triggers',
+          intakeHook(contentHash, { callerParameters: ['file', 'nope'] }),
+        );
+        expect([unknown.status, unknown.body.error]).toEqual([422, 'invalid_parameters']);
+        expect(problems(unknown)).toEqual([{ name: 'nope', problem: 'undeclared' }]);
+      });
+
+      test('a cron trigger has no caller: a list on it is a 422 invalid_trigger caller_parameters_not_allowed', async () => {
+        const contentHash = await slow();
+        const answer = await call(
+          root(),
+          'POST',
+          '/api/v1/triggers',
+          cron(contentHash, { callerParameters: ['label'] }),
+        );
+        expect([answer.status, answer.body.error, answer.body.problem]).toEqual([
+          422,
+          'invalid_trigger',
+          'caller_parameters_not_allowed',
+        ]);
+      });
+
+      test('the list is changed, kept when the change does not give it, cleared by [], and a change that breaks the rules changes nothing', async () => {
+        const contentHash = await intake();
+        const made = intakeHook(contentHash, { callerParameters: ['file'] });
+        await call(root(), 'POST', '/api/v1/triggers', made);
+        const path = `/api/v1/triggers/${made.name}`;
+
+        const kept = await call(root(), 'PATCH', path, { enabled: false });
+        expect(kept.body.callerParameters).toEqual(['file']);
+
+        const both = await call(root(), 'PATCH', path, { parameters: { file: 'a.mp4' } });
+        expect([both.status, both.body.error]).toEqual([422, 'invalid_parameters']);
+        expect(problems(both)).toEqual([{ name: 'file', problem: 'fixed_and_caller' }]);
+
+        const emptied = await call(root(), 'PATCH', path, { callerParameters: [] });
+        expect([emptied.status, emptied.body.error]).toEqual([422, 'invalid_parameters']);
+        expect(problems(emptied)).toEqual([{ name: 'file', problem: 'missing' }]);
+        expect((await call(root(), 'GET', path)).body.callerParameters).toEqual(['file']);
+
+        const swapped = await call(root(), 'PATCH', path, {
+          callerParameters: [],
+          parameters: { file: 'a.mp4' },
+        });
+        expect(swapped.status).toBe(200);
+        expect(swapped.body).toMatchObject({ callerParameters: [], parameters: { file: 'a.mp4' } });
+      });
+    });
+
     test('rotating the secret of a webhook gives a new one that works, and the old one stops working at once; a cron trigger has none to rotate: 409 not_a_webhook', async () => {
       const contentHash = await slow();
       const made = hook(contentHash);

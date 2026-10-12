@@ -25,6 +25,31 @@ class SqliteBindingTest {
   private val host by lazy { rig.host() }
 
   @Test
+  fun `the threads of the binding do not belong to the class loader of the run that started them`() {
+    val runLoader = java.net.URLClassLoader(emptyArray())
+    val own = Thread.currentThread()
+    val before = own.contextClassLoader
+    own.contextClassLoader = runLoader
+    try {
+      rig.update(host, "CREATE TABLE t (a INTEGER)")
+      rig.query(host, "SELECT a FROM t")
+    } finally {
+      own.contextClassLoader = before
+    }
+
+    val workers =
+        Thread.getAllStackTraces().keys.filter {
+          it.isAlive && it.name.startsWith("jdbc-statement")
+        }
+    assertTrue(workers.isNotEmpty(), "the statements ran on threads of the binding")
+    // A run that ends with threads holding its class loader is reported as leaving them running.
+    assertEquals(
+        emptyList(),
+        workers.filter { it.contextClassLoader === runLoader }.map { it.name },
+    )
+  }
+
+  @Test
   fun `a statement makes the file when it is first needed, and not before`() {
     val binding = host
 

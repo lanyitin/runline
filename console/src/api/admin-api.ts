@@ -47,6 +47,8 @@ export interface CreateTriggerRequest {
   uploader?: string;
   pipeline: string;
   parameters?: Record<string, string>;
+  /** Webhook only: the parameters its caller provides on each call (ADR-036). */
+  callerParameters?: string[];
   cron?: string;
   timeZone?: string;
   enabled?: boolean;
@@ -59,6 +61,8 @@ export interface UpdateTriggerRequest {
   uploader?: string;
   pipeline?: string;
   parameters?: Record<string, string>;
+  /** Not given: the list stays; `[]` clears it. */
+  callerParameters?: string[];
   enabled?: boolean;
   cron?: string;
   timeZone?: string;

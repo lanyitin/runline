@@ -5,8 +5,9 @@
 # builds nothing, and Node and build tools are not in it. No secret and no configuration is baked in:
 # everything comes from environment variables when a container starts.
 #
-# This file has two stages: `engine` (below) and `browser` (at the end, for pipelines that drive a
-# browser). The last stage is what a build without --target makes, so name the one you want:
+# This file has these stages: `engine` (below), `browser` (for pipelines that drive a browser) and
+# `transcribe` (for the transcribe pipeline) and `browser-transcribe` (both; the last one). The last stage is what a build without
+# --target makes, so name the one you want:
 #
 #   docker build --target engine -f deploy/docker/Dockerfile -t runline-engine engine/build/engine-dist
 # Pinned by the hash of the multi-platform index of eclipse-temurin:25-jre (ADR-032). This line is the one
@@ -77,3 +78,48 @@ ENV CHROME_BIN=/usr/bin/google-chrome-stable \
 USER runline
 ENTRYPOINT ["/usr/local/bin/runline-entrypoint"]
 CMD ["java", "-jar", "/app/engine.jar"]
+
+# The Engine for the transcribe pipeline (WI-1402, docs/stable/transcribe-pipeline/04-deployment.md):
+# the same image plus ffmpeg and ffprobe, the silero-vad model and the places for the VAD tool. No Python.
+# The inputs are fetched in a throw-away stage by deploy/bin/runline-transcribe-fetch, which holds their
+# versions and sha256 hashes (ADR-032): a changed download fails the build. The VAD tool's jar is not
+# here: it is delivered by WI-1407 and mounted (deploy/transcribe.md).
+#
+#   docker build --target transcribe --build-context deploy=deploy \
+#       -f deploy/docker/Dockerfile -t runline-engine-transcribe engine/build/engine-dist
+FROM engine AS transcribe-fetch
+ARG TARGETARCH
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=deploy --chmod=0755 bin/runline-transcribe-fetch /usr/local/bin/
+RUN runline-transcribe-fetch /tmp/transcribe "$TARGETARCH"
+
+FROM engine AS transcribe
+USER root
+# /opt/runline/vad is where the jar of the VAD tool is mounted (read-only); root owns everything here,
+# so the Engine account can read and run it and cannot change it. The directories are made before the
+# copies: --chmod on a copy into a missing directory would give the directory the file's mode.
+RUN mkdir -p -m 0755 /opt/runline/models /opt/runline/vad
+COPY --from=transcribe-fetch --chmod=0755 /tmp/transcribe/ffmpeg /tmp/transcribe/ffprobe /usr/local/bin/
+COPY --from=transcribe-fetch --chmod=0644 /tmp/transcribe/silero_vad.onnx /tmp/transcribe/silero_vad.onnx.sha256 /opt/runline/models/
+COPY --from=deploy --chmod=0755 bin/runline-vad bin/runline-transcribe-check /usr/local/bin/
+# The model and the tool are configuration of the pipeline's host, read from these variables.
+ENV RUNLINE_VAD_MODEL=/opt/runline/models/silero_vad.onnx \
+    RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar
+USER runline
+
+# The Engine for pipelines that drive a browser and the transcribe pipeline in one process (WI-1416): the
+# `browser` stage plus what the `transcribe` stage adds, copied from it, so that nothing of the transcribe
+# inputs (versions, hashes, places) is written a second time. It is linux/amd64 only, as `browser` is.
+#
+#   docker build --target browser-transcribe --platform linux/amd64 --build-context deploy=deploy \
+#       -f deploy/docker/Dockerfile -t runline-engine-browser-transcribe engine/build/engine-dist
+FROM browser AS browser-transcribe
+USER root
+COPY --from=transcribe /opt/runline/ /opt/runline/
+COPY --from=transcribe /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/runline-vad /usr/local/bin/runline-transcribe-check /usr/local/bin/
+ENV RUNLINE_VAD_MODEL=/opt/runline/models/silero_vad.onnx \
+    RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar
+USER runline

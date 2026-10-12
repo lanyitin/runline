@@ -35,6 +35,7 @@ import dev.lawlan.runline.engine.retention.*
 import dev.lawlan.runline.engine.run.*
 import dev.lawlan.runline.engine.secret.*
 import dev.lawlan.runline.engine.trigger.*
+import dev.lawlan.runline.engine.view.*
 import dev.lawlan.runline.runner.Runner
 import dev.lawlan.runline.runner.Workspaces
 import io.ktor.server.application.*
@@ -317,6 +318,22 @@ fun Application.configureDependencyInjection() {
           resolve<Clock>(),
       )
     }
+    provide<ViewTargets> {
+      ViewTargets(
+          resolve<VersionResolver>(),
+          resolve<DefinitionStore>(),
+          resolve<ResourceAvailability>(),
+      )
+    }
+    provide<ViewCatalog> { ViewCatalog(resolve<ViewTargets>()) }
+    provide<ViewReader> {
+      ViewReader(
+          resolve<ViewTargets>(),
+          resolve<ResourceBehaviors>(),
+          ViewGate(resolve<EngineConfig>().views.maxReadsPerResource),
+          ViewTelemetry(resolve<OpenTelemetry>()),
+      )
+    }
     provide<ResourceTypeCatalog> { ResourceTypeCatalog(resolve<ResourceBehaviors>()) }
     provide<ResourceRemoval> {
       ResourceRemoval(
@@ -402,6 +419,8 @@ fun Application.configureDependencyInjection() {
           resolve<TriggerFirer>(),
           resolve<TriggerTelemetry>(),
           resolve<Clock>(),
+          resolve<DefinitionStore>(),
+          resolve<EngineConfig>().webhook,
       )
     }
     provide<CronScheduler> {

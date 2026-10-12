@@ -31,6 +31,7 @@ ktor:
       - dev.lawlan.runline.engine.RunRoutesKt.configureRunRoutes
       - dev.lawlan.runline.engine.ResourceRoutesKt.configureResourceRoutes
       - dev.lawlan.runline.engine.ResourceBindingRoutesKt.configureResourceBindingRoutes
+      - dev.lawlan.runline.engine.ViewRoutesKt.configureViewRoutes
       - dev.lawlan.runline.engine.SecretRoutesKt.configureSecretRoutes
       - dev.lawlan.runline.engine.AllowListRoutesKt.configureAllowListRoutes
       - dev.lawlan.runline.engine.TriggerRoutesKt.configureTriggerRoutes
@@ -124,6 +125,23 @@ retention:
   cronFiringSeconds: "$RUNLINE_CRON_FIRING_RETENTION_SECONDS:"
   intervalSeconds: "$RUNLINE_RETENTION_INTERVAL_SECONDS:"
   batchSize: "$RUNLINE_RETENTION_BATCH_SIZE:"
+
+# Webhook calls (WI-1400, ADR-036). RUNLINE_WEBHOOK_MAX_BODY_BYTES (optional, default 16384): the
+# most bytes of the body of a call that are read, for a webhook trigger that lets its callers provide
+# parameters; a longer body is refused with 400 `invalid_body`. A webhook without such parameters
+# never reads the body.
+webhook:
+  maxBodyBytes: "$RUNLINE_WEBHOOK_MAX_BODY_BYTES:"
+
+# View reads (WI-1305, ADR-035). RUNLINE_VIEW_MAX_CONCURRENT_READS (optional, default 4): how many
+# view reads of one resource may go on at once; the one value is the limit of every resource, and
+# a read beyond it is answered `view_busy` at once. It must be a positive whole number: any other
+# value, a blank one included, stops the start naming views.maxReadsPerResource. A view read also
+# ends after 30 seconds, or after the resource's statement timeout when that is shorter; the 30
+# seconds are fixed and have no setting. Unset must stay absent (the `$?` form), not empty: a
+# blank value is an error here, not a default.
+views:
+  maxReadsPerResource: "$?RUNLINE_VIEW_MAX_CONCURRENT_READS"
 
 # Files of `file` shared resources (WI-43, ADR-019). RUNLINE_RESOURCE_ROOT is the directory every such
 # file lives under; it must be persistent storage and must not be, contain or lie inside the shared

@@ -68,6 +68,28 @@ describe('triggers', () => {
     expect(JSON.stringify(await api.triggers())).not.toContain(made.secret!);
   });
 
+  test('a webhook trigger names the parameters its caller provides, and a cron trigger has none', async () => {
+    const api = await start();
+    const contentHash = (await api.uploadJar(asFile(demoJars().intake))).artifact.contentHash;
+
+    const made = await api.createTrigger({
+      name: 'hook',
+      kind: 'webhook',
+      contentHash,
+      pipeline: 'demo-intake',
+      callerParameters: ['file'],
+    });
+    expect(made.trigger.callerParameters).toEqual(['file']);
+    expect((await api.trigger('hook')).callerParameters).toEqual(['file']);
+
+    const changed = await api.updateTrigger('hook', { callerParameters: [], parameters: { file: 'a.mp4' } });
+    expect(changed.callerParameters).toEqual([]);
+
+    const other = await slow(api);
+    const cron = await api.createTrigger({ name: 'c', kind: 'cron', contentHash: other, pipeline: 'demo-slow', cron: '* * * * *' });
+    expect(cron.trigger.callerParameters).toEqual([]);
+  });
+
   test('what is wrong with a trigger is a failure with the problem in its body', async () => {
     const api = await start();
     const contentHash = await slow(api);

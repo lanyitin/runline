@@ -29,8 +29,8 @@ Pipeline 定義與共享資源之間以名稱鬆散關聯（虛線）：定義�
 |---|---|---|
 | Artifact Content | jar 位元組、內容雜湊、大小 | 以內容雜湊為鍵，同一內容只存一份；不可變；最後一個參照它的版本被刪除時，在同一交易內移除（[ADR-020](adr/ADR-020-per-uploader-artifact-versions.md)） |
 | Pipeline Artifact（版本） | 內容雜湊（參照 Artifact Content）、上傳者、上傳時間 | 不可變；（內容雜湊，上傳者）唯一，同一內容可有多個版本、每位上傳者最多一個；definition、trigger、run 仍以版本的代理鍵參照 |
-| Pipeline Definition | 名稱、所屬 artifact、宣告的 metadata（含宣告的資源角色、型別與選填的用途）、safe／unsafe 判定、原因與依賴路徑、判定時使用的白名單版本（文字；白名單由資料庫管理之前儲存的判定為 `config`）、是否允許以 unsafe 執行及設定者與設定時間 | 同名 pipeline 隨 artifact 版本並存；同一 artifact 內，pipeline 名稱與類別名稱各自唯一；判定與 unsafe 設定逐版本獨立保存，不繼承、不共享（同一內容的不同上傳者各有一份），預設不允許 |
-| Trigger | 管理員指定的唯一名稱、類型（cron／webhook）、目標 pipeline 定義、固定參數（原樣保存）、啟用旗標、建立者與修改者及時間；cron：五欄表達式與時區；webhook：密鑰雜湊與最近輪替時間 | 由管理員維護；名稱用於網址與 run 的來源名稱；只存密鑰的雜湊，不存明文；cron 與 webhook 欄位互斥 |
+| Pipeline Definition | 名稱、所屬 artifact、宣告的 metadata（含宣告的資源角色、型別與選填的用途，以及選填的 view 宣告，格式見 [08-api](08-api.md) 的「view 宣告」）、safe／unsafe 判定、原因與依賴路徑、判定時使用的白名單版本（文字；白名單由資料庫管理之前儲存的判定為 `config`）、是否允許以 unsafe 執行及設定者與設定時間 | 同名 pipeline 隨 artifact 版本並存；同一 artifact 內，pipeline 名稱與類別名稱各自唯一；判定與 unsafe 設定逐版本獨立保存，不繼承、不共享（同一內容的不同上傳者各有一份），預設不允許 |
+| Trigger | 管理員指定的唯一名稱、類型（cron／webhook）、目標 pipeline 定義、固定參數（原樣保存）、呼叫端提供的參數名稱清單（只有 webhook 可有，[ADR-036](../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md)）、啟用旗標、建立者與修改者及時間；cron：五欄表達式與時區；webhook：密鑰雜湊與最近輪替時間 | 由管理員維護；名稱用於網址與 run 的來源名稱；只存密鑰的雜湊，不存明文；cron 與 webhook 欄位互斥 |
 | Trigger Firing | 所屬 trigger、觸發時間、cron 的排程時間或 webhook 的 delivery 識別碼、結果（待處理、已建立 run、被拒絕、失敗、中斷）、原因與說明、所建立的 run | 同一 trigger 內 delivery 識別碼唯一、排程時間唯一，由資料庫保證；只記錄 cron 觸發與已通過驗證的 webhook 呼叫；run 被清理時此紀錄保留並清除其 run 參照 |
 | Run | 狀態、觸發來源（手動時為呼叫者名稱，trigger 時為該 trigger）、參數、起訖時間、結果與失敗原因、是否為 unsafe 執行及當時的設定、設定者與時間 | 狀態含：排隊、等待資源、初始化、執行中、逾時未結束、成功、失敗、取消、中斷、逾時。「逾時」是 run 本體逾時後以失敗結束的終態；等待資源逾時屬於「失敗」，失敗原因註明等待資源逾時 |
 | Run Log Entry | 所屬 run、序號、時間、輸出串流、內容 | 序號在 run 內從 1 起遞增 |

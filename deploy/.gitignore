@@ -7,3 +7,5 @@ docker/secrets/
 # The private CA's root certificates of the browser overlay (docker/compose.browser.yaml).
 docker/trusted-ca/
 docker/truststore/
+# The VAD tool jar mounted by compose.transcribe.yaml (WI-1402); delivered by WI-1407, not part of this repository.
+docker/transcribe-vad/

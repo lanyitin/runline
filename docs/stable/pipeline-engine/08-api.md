@@ -212,6 +212,7 @@ Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engin
 | `duplicate_pipeline_name` | 同一個 jar 內有多個 pipeline 使用相同名稱 |
 | `invalid_pipeline_name` | 有 pipeline 的名稱不符規則（只允許字母、數字、`.`、`_`、`-`，且不可為 `.` 或 `..`）；同一 jar 中任一個不合規即整個拒絕，`message` 指出是哪些 pipeline |
 | `resource_purpose_too_long` | 有資源角色的用途說明超過 200 個字元（見下）；同一 jar 中任一個超過即整個拒絕，`message` 指出是哪些 pipeline 的哪些角色 |
+| `view_declaration_invalid` | 有 pipeline 的 view 宣告不合格（見「view 宣告」）；同一 jar 中任一個不合格即整個拒絕，`message` 指出是哪個 pipeline 的哪個 view 與什麼問題 |
 
 解壓上限在 jar 的內容被分析前檢查：Engine 實際解壓計數（不採信 jar 自己宣告的大小），超過任一上限即停止，不展開超量資料。
 
@@ -222,12 +223,26 @@ Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engin
 | `contentHash` | 內容的 SHA-256（十六進位）；與上傳者一起識別版本 |
 | `uploader`、`uploadedBy` | 版本的上傳者名稱（兩者相同；`uploader` 是管理員用來指定版本的 `uploader` 參數的來源，`uploadedBy` 維持既有名稱） |
 | `sizeBytes`、`uploadedAt` | 大小（內容的屬性）、這個版本的上傳時間 |
-| `pipelines[]` | 找到的 pipeline：`className`、`name`、`metadata`（`parameters[]`、`files[]`、`network`、`processes`、`resources[]`、`resourceTypes`、`resourcePurposes`）、`verdict`（`SAFE` 或 `UNSAFE`）、`reasons[]`（`kind`、`category`、`className`、`member`、`path[]`、`detail`）、`allowListVersion`（判定所用的白名單版本，見「白名單」）、`allowUnsafeExecution`、`warnings[]`（例如宣告了尚未定義的共享資源；見下） |
+| `pipelines[]` | 找到的 pipeline：`className`、`name`、`metadata`（`parameters[]`、`files[]`、`network`、`processes`、`resources[]`、`resourceTypes`、`resourcePurposes`、`views[]`）、`verdict`（`SAFE` 或 `UNSAFE`）、`reasons[]`（`kind`、`category`、`className`、`member`、`path[]`、`detail`）、`allowListVersion`（判定所用的白名單版本，見「白名單」）、`allowUnsafeExecution`、`warnings[]`（例如宣告了尚未定義的共享資源；見下） |
 | `limitations` | 判定未涵蓋的範圍 |
 
 **資源角色與用途（[ADR-025](../digest-rss/adr/ADR-025-resource-roles-and-binding.md)）。** pipeline 宣告的是「資源角色」：`metadata.resources[]` 的每個名稱是一個角色，名稱同時是 pipeline 程式取用存取端的名稱（pipeline 看不到實際的資源名稱）；角色實際使用哪個共享資源由綁定決定（見「資源角色與綁定」），沒有綁定時是與角色同名的資源，所以只宣告名稱或名稱加型別的既有 jar 不需重新上傳，行為不變。`metadata.resourcePurposes` 是角色名稱到「用途說明」的對照，只含寫了用途的角色（沒有任何用途時為 `{}`）；用途是供人閱讀的短文字，**最長 200 個字元**（超過則上傳被拒絕為 `resource_purpose_too_long`），不影響 safe 或 unsafe 判定，也不影響綁定與取得資源的任何判定。用途承載於型別宣告：`@TypedResource(name, type, purpose = "...")` 的選填成員 `purpose`（預設為空，空字串視為沒有）；因此用途一定隨一個型別一起宣告，只宣告名稱的角色沒有用途。這個成員在 core 的註解、analyzer 讀 class 檔的統一 metadata 讀取路徑（Engine 上傳、開發入口、查詢都用它）上只有一種讀法：註解上沒有 `purpose` 成員的既有 jar 讀為沒有用途，不破壞既有 jar 的讀取；錄製（[ADR-004](adr/ADR-004-recording.md)）產生的 metadata 提案不含用途，開發人員自行補寫。
 
 `metadata.resources[]` 是 pipeline 宣告的全部資源角色名稱；`metadata.resourceTypes` 是名稱到「期望型別」的對照，只含另外宣告了型別的名稱（型別取自 `counter`、`file`、`jdbc-pool`、`openai-compatible`，即使該型別尚未實作也可宣告），只宣告名稱者不在其中，沒有任何型別宣告時為 `{}`。型別宣告不影響 safe 或 unsafe 判定。
+
+**view 宣告（[ADR-033](../pipeline-views/adr/ADR-033-pipeline-views.md)）。** `metadata.views[]` 是 pipeline 宣告的唯讀 view，依宣告順序；沒有宣告時為 `[]`，不含 view 的既有 jar 與儲存的既有 metadata 都讀為 `[]`，行為不變。宣告只是 metadata：讀取它不執行 pipeline 邏輯（[ADR-003](adr/ADR-003-jar-and-discovery.md)），不影響 safe 或 unsafe 判定，也不影響資源角色與綁定的任何判定；它隨版本保存，由上傳回應、`GET /api/v1/artifacts/{contentHash}` 與 `GET /api/v1/definitions` 原樣回傳（本項不執行 view 的查詢）。每個 view：
+
+| 欄位 | 說明 |
+|---|---|
+| `id` | view 在 pipeline 內的識別，不得重複 |
+| `title`、`description` | 標題與說明，原樣顯示的單一語言文字；`description` 沒有時為 `""` |
+| `resource` | 掛載的資源角色名稱：必須是此 pipeline 宣告的角色，且宣告的型別為 `jdbc-pool` |
+| `query` | 唯讀查詢的文字（該資料庫的方言）；參數值只作為查詢參數傳遞，不拼接進查詢 |
+| `parameters[]` | 參數：`name`、`type`（`TEXT`、`INTEGER`、`CHOICE`）、`required`、`options[]`（`CHOICE` 的固定選項，至少一個；其他型別為 `[]`） |
+| `columns[]` | 欄位：`name`、`label`（顯示標籤）、`type`（`TEXT`、`INTEGER`、`TIME`、`STATUS`）、`tones[]`（`STATUS` 欄各個值的語氣 `{value, tone}`，`tone` 為 `POSITIVE`、`NEUTRAL`、`NEGATIVE`；未列出的值視為中性）、`drill`（沒有鑽取為 `null`，否則 `{view, parameter, from}`：點選時開啟同一 pipeline 的 view `view`，把該列欄位 `from` 的值帶入其參數 `parameter`） |
+| `sort[]` | 預設排序，依序為 `{column, descending}`，`column` 是此 view 的欄位；沒有時為 `[]` |
+
+上傳時驗證，任一項不合格即整個 jar 拒絕為 `view_declaration_invalid`（不留下資料），`message` 列出全部問題，每項指出 pipeline、view 與問題：view 識別重複；掛載的角色未宣告，或宣告的型別不是 `jdbc-pool`（含沒有宣告型別）；鑽取的目標 view 不存在、要帶入的參數不是目標 view 的參數、取值的欄位不是本 view 的欄位；同一 view 內欄位名稱或參數名稱重複；欄位型別、參數型別或語氣不在上列允許的集合；`CHOICE` 參數沒有選項；預設排序的欄位不是本 view 的欄位；查詢的具名佔位符指向沒有宣告的參數、已宣告的參數沒有被查詢引用、查詢使用位置參數標記 `?`（[ADR-034](../pipeline-views/adr/ADR-034-view-parameter-binding.md)，規則見「查詢與參數」；佔位符的檢查只讀查詢文字，因為資料庫要到綁定資源時才知道，所以文字依 PostgreSQL 與 SQLite 兩種語法各讀一次，任一種讀到的佔位符都算，兩種都讀不完的文字交給讀取時判定）。作者端的註解寫法見 [core 的說明](../../../core/README.md)。
 
 `warnings[].kind` 的值（只是警告，不影響判定與上傳結果；資源之後被定義、改變或綁定時，查詢時重新計算，依「綁定後的結果」：角色綁定到某資源時，警告針對該資源，`resource` 為該資源的名稱，`message` 另說明是哪個角色；沒有綁定的角色針對同名資源，與先前相同）：`resource_unknown`（宣告的資源尚未定義）、`resource_disabled`（已停用）、`resource_type_mismatch`（資源的型別與宣告的型別不同）、`resource_type_unknown`（宣告的型別不在 `counter`、`file`、`jdbc-pool`、`openai-compatible` 之內；建立 run 時視為型別不符）、`network_host_has_resource`（`network` 宣告的主機與某個 `openai-compatible` 資源的根位址主機相同，不分大小寫；提示應改經由資源存取，`resource` 為該資源；使用資源不需要在 `network` 宣告其主機，也不使 `network` 變成不限制）。每項含 `kind`、`resource`、`message`。
 
@@ -263,6 +278,7 @@ Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engin
 |---|---|
 | 201 | 已建立（排入佇列），`Location` 為 `/api/v1/runs/{runId}`，本文為 run |
 | 400 `bad_request` | 本文不是預期的 JSON |
+| 400 `invalid_parameters` | 某個參數值含 U+0000（NUL 字元），資料庫無法儲存這種值；本文同 422 的 `invalid_parameters`，`problems[]` 的 `problem` 為 `contains_nul`，只指出參數名稱，不回傳值，且不再報告其他問題。不建立 run。其他控制字元不受此限 |
 | 404 `definition_not_found` | 沒有這個版本與 pipeline，或呼叫者不得使用（含開發人員給了別人的 `uploader`） |
 | 409 `ambiguous_version` | 管理員可見同一內容的多個版本而未給 `uploader`；本文 `{error, message, uploaders[]}`，不建立 run |
 | 409 `unsafe_not_allowed` | pipeline 被判為 unsafe，且管理員尚未允許它以 unsafe 執行 |
@@ -574,6 +590,50 @@ pipeline 宣告資源角色（名稱、型別、用途），綁定決定每個�
 
 解除角色的綁定，之後該角色回到與角色同名的資源。這個版本宣告的角色，或這位上傳者有綁定的角色（所以也用來清理 `staleBindings`），都可解除；沒有綁定時不是錯誤，什麼都不改變，同樣回 200（冪等）。這個版本沒有宣告、這位上傳者也沒有綁定的角色，包括只有別的上傳者綁過的角色，一律回 404 `role_not_found`，本文固定、不含角色名稱，位元組級相同。選填的查詢參數 `uploader` 同上。200，本文同 `GET`；404 `definition_not_found`、`role_not_found`；409 `ambiguous_version`。解除記錄於 log（操作者名稱與時間，只在確實有綁定時）。
 
+## Pipeline view（唯讀）
+
+pipeline 在 metadata 宣告的 view（見「view 宣告」）由兩個唯讀端點提供：列出，與讀取一頁資料列（[ADR-033](../pipeline-views/adr/ADR-033-pipeline-views.md)、[05-ipc](../pipeline-views/05-ipc.md)、[WI-1301](../pipeline-views/work-items/WI-1301-view-api.md)）。兩者都是 GET，無副作用，重複呼叫安全；回應不快取（`Cache-Control: no-store`，讀取端點）。
+
+**定址、認證與隔離。** 同資源綁定：以內容雜湊與 pipeline 名稱指定版本，選填的查詢參數 `uploader` 規則同 `GET /api/v1/artifacts/{contentHash}`；Bearer（developer）或 OIDC 工作階段。開發人員只能存取自己上傳的版本；別人的版本、給了別人名稱的 `uploader`、不存在的內容雜湊與不存在的 pipeline，回應位元組級相同（404 `definition_not_found`），且在檢查參數之前回答，所以參數怎麼寫都不洩漏版本是否存在。管理員以 `uploader` 指定上傳者，可見同一內容的多個版本而未指定時回 409 `ambiguous_version`。view 讀取的資源由角色解析而得，解析規則與 run 完全相同（見「資源角色與綁定」）：未綁定、未定義、停用、型別不符各有明確的 `problem` 值；view 不放寬綁定規則。
+
+### `GET /api/v1/definitions/{contentHash}/{pipeline}/views`
+
+認證：Bearer（developer）
+
+列出這個版本宣告的 view，依宣告順序；不執行任何查詢（資源連不連得上不在這裡檢查）。200，本文 `{contentHash, uploader, pipeline, views[]}`，每個 view：`id`、`title`、`description`、`resource`（掛載的資源角色名稱）、`status`（`ready`，或該角色目前不能使用的原因：`unbound`、`unknown`、`disabled`、`type_mismatch`，與建立 run 時的 `problem` 相同）、`parameters[]`、`columns[]`、`sort[]`（形狀同「view 宣告」）。**回應不含查詢文字。** 沒有宣告 view 的 pipeline 回 `views: []`。404 `definition_not_found`；409 `ambiguous_version`。
+
+### `GET /api/v1/definitions/{contentHash}/{pipeline}/views/{view}`
+
+認證：Bearer（developer）
+
+讀取一個 view 的一頁資料列。查詢參數：`uploader`（同上）；`limit`（每頁筆數，預設 50，1 至 200）；`offset`（略過的筆數，預設 0）；view 的每個參數以 `param.<名稱>` 給值（前綴避免與 `uploader`、`limit`、`offset` 衝突）。200，本文 `{view, columns[], rows[][], hasMore, limit, offset}`：`columns[]` 是宣告的欄位定義（`name`、`label`、`type`、`tones[]`、`drill`），`rows` 的每一列是一個陣列，依 `columns` 的順序各有一個值（JSON 的 `null`、字串、數字或布林，原樣取自資料庫，不依欄位型別轉換；二進位值不顯示，以 `(binary, N bytes)` 代替；不是有限數值的浮點數以文字表示）；儲存格的值是不可信文字，不得解譯為標記。`hasMore` 表示後面還有資料；**不提供總筆數**。
+
+**查詢與參數。** 查詢文字是該資料庫的方言，由 Engine 當作一個 `SELECT` 的內部執行（`SELECT <宣告的欄位> FROM (<查詢>) ORDER BY <排序> LIMIT ? OFFSET ?`），所以欄位名稱必須是查詢結果的欄位標籤，只取宣告的欄位。查詢以**具名佔位符**引用宣告的參數：冒號加參數名稱（`:state`），名稱是字母或 `_` 開頭、其後為字母、數字、`_`，大小寫須與宣告相同；同一參數可出現多次，每次綁定同一個值。Engine 只在字串、識別符（雙引號、反引號、方括號）、註解、錢字號引號（`$$ … $$`、`$tag$ … $tag$`）之外辨識佔位符，且冒號前面不得是冒號或名稱字元，所以型別轉換 `x::text`、切片 `a[1:n]`、時間 `'10:30'` 不是佔位符（但 `a[:n]` 是）。Engine 把每個佔位符換成 JDBC 的綁定位置後交給資料庫，值只作為綁定值傳遞，不拼接進查詢文字（含引號、分號、佔位符樣式的值都只是值）。查詢文字不得使用位置參數標記 `?`（PostgreSQL 的 `?` 運算子也不行；上傳時拒絕），也不支援 SQLite 的 `@name`、`$name`、`?NNN` 與 PostgreSQL 的 `$1`（讀取時為 `view_query_rejected`）。各參數的值：`TEXT` 為文字，`INTEGER` 為整數，`CHOICE` 必須是固定選項之一；非必填且沒給（或給空值）的參數是 `NULL`。排序依宣告的預設排序，其後再依所有宣告的欄位（依宣告順序）補成決定性的全序，所以翻頁（`offset`）不重複不遺漏；沒有宣告排序時只依所有宣告的欄位排序。
+
+**唯讀與單一語句的保證（不依賴資料庫帳號的權限，也不依賴 pipeline 的自律）。** (1) 查詢文字先經 Engine 自己的檢查：必須是一個語句（分號、括號、字串、註解、`$$` 引用與 `E'...'` 跳脫都依方言讀過），括號必須配對，否則 `view_query_rejected`；(2) 查詢只能放在上述 `SELECT` 之內，寫入、DDL、`PRAGMA`、`SET`、`ATTACH`、`BEGIN`／`COMMIT` 等語句在其中不是合法語法，資料庫拒絕；(3) 連線本身唯讀：PostgreSQL 以 `default_transaction_read_only = on` 並在唯讀交易內執行，且一律不提交；SQLite 以 `PRAGMA query_only = ON`，且不允許 `ATTACH`；(4) 每次讀取使用自己的連線並在結束時關閉，查詢對連線設定做的任何變更（例如以函式改設定）隨連線消失，不留給下一次讀取。以上由真實 PostgreSQL 與真實 SQLite 驗證寫入、多語句、改回可寫三類企圖。唯一未涵蓋的是資料庫端的「自帶副作用」函式（例如 PostgreSQL 的 `dblink`、`pg_advisory_lock` 這類擴充或鎖），其可用與否仍是資料庫帳號與擴充安裝的事。
+
+**SQLite。** 以 run 開啟檔案的同一方式開啟（不用驅動程式的 `readonly` 模式，那個模式在沒有 run 進行、尚無 `-wal` 與 `-shm` 檔時無法開啟，見 digest-rss 的 runbook 第 8 節）：沒有 run 進行時也能讀；由 Engine 自己的帳號開啟，所以不會留下該帳號無法使用的檔案，最後一個連線關閉時日誌檔隨之清除。日誌模式下讀取不阻塞 run 的寫入，run 持有寫入鎖時讀到的是已提交的資料，且不使 run 的寫入失敗或逾時。檔案不存在時不會被這次讀取建立，回 `view_schema_mismatch`。
+
+**上限與資源。** 套用資源既有的設定：`timeouts.statementMs`（逾時，超過即在資料庫取消並切斷連線，回 504 `view_timeout`）、`maxRows`（這一頁實際的列數超過即 `view_result_too_large`；每頁筆數大於 `maxRows` 但實際列數不多時不受影響）、`maxResponseBytes`（這一頁的文字與位元組總量，計法同 run 的查詢）。view 讀取不占用 run 的資源容量，也不計入持有者或等待者，不使用 run 的連線池；每個資源有自己的並行上限（同時進行的 view 讀取最多 4 個，由 Engine 固定，不另設組態），超過不排隊，立即回 429 `view_busy`。處理請求的協程被取消時（逾時，或 Engine 關閉時超過寬限而中止進行中的請求），讀取隨之取消：在資料庫取消查詢並切斷連線，不留下連線。
+
+**可觀測性。** 每次讀取一筆 log（`View read: pipeline= view= uploader= caller= result= durationMs= rows=`）、一個 span（`runline.views.read`，屬性 `runline.view.pipeline`、`runline.view.id`、`runline.view.result`、`runline.view.rows`）與 metric：`runline.views.reads`（次數）、`runline.views.read.failures`（失敗，`result` 不是 `ok`）、`runline.views.read.duration`（秒）、`runline.views.read.rows`（列數），標籤只有 `pipeline`、`view`、`result`。`result` 為 `ok`、`invalid_parameter`、`resource_unavailable`、`busy`、`query_rejected`、`schema_mismatch`、`too_large`、`timeout`、`connection_failed`、`failed`、`cancelled`。**查詢文字與參數值不出現在任何回應、log、span 或 metric。** 找不到版本或 view（404）不計入，因為還沒有可記錄的 view 識別。
+
+| 狀態 | 意義 |
+|---|---|
+| 200 | 一頁資料列 |
+| 400 `invalid_view_parameter` | 本文 `{error, message, parameter, reason}`：`parameter` 是有問題的參數名稱（`limit`、`offset` 或 view 的參數名稱），`reason` 為 `missing`（必填而缺少）、`invalid_type`（不是整數）、`not_an_option`（不在固定選項內）、`repeated`（給了多次）、`unknown`（view 沒有宣告這個參數）、`out_of_range`（`limit` 不在 1 至 200，`offset` 為負）。**不回顯值** |
+| 404 `definition_not_found` | 沒有這個版本與 pipeline，或呼叫者不得使用（位元組級相同，見上） |
+| 404 `view_not_found` | 這個版本的 pipeline 沒有宣告這個 view（只有呼叫者自己能使用的版本才會到這一步） |
+| 409 `ambiguous_version` | 管理員可見同一內容的多個版本而未給 `uploader` |
+| 409 `view_resource_unavailable` | view 掛載的角色不能使用；本文多 `problem`（`unbound`、`unknown`、`disabled`、`type_mismatch`）與 `role` |
+| 409 `view_schema_mismatch` | 查詢與資料庫的結構不符：資料表或欄位不存在，或資料庫（SQLite 檔）尚未建立；新版 view 對尚未升級的資料庫時如此，待 pipeline 下一次 run 升級結構後恢復 |
+| 422 `view_query_rejected` | 查詢不是單一的唯讀查詢（含多個語句、寫入、改變連線設定、括號不配對、查詢有 `?` 或 `@name`、`$name`、`?NNN`、`$1` 這類不支援的參數標記），或資料庫不接受它；什麼都沒有改變 |
+| 422 `view_result_too_large` | 這一頁超過資源的列數或大小上限 |
+| 429 `view_busy` | 這個資源同時進行的 view 讀取已達上限 |
+| 502 `view_connection_failed` | 連不上資料庫、帳號不被接受，或資源的密碼或憑證現在取不到 |
+| 504 `view_timeout` | 超過資源的陳述逾時，已取消 |
+| 500 `internal_error` | 未預期的失敗（見通則）；log 只記錄 SQLState 與例外的類別，不含查詢與值 |
+
 ## 機密（管理員）
 
 機密保存在 Engine 唯讀開啟的 PKCS12 金鑰庫，由維運以 JDK 的金鑰庫工具管理；API 只認別名，**不接受也不回傳任何機密值**，也不回傳項目內容與金鑰庫密碼（[ADR-019](adr/ADR-019-typed-shared-resources.md) 第 6 點、[WI-41](work-items/WI-41-keystore-secrets.md)）。別名一律以小寫（`Locale.ROOT`）正規化：請求與回應中的別名都是正規化後的形式，資源引用別名時大小寫不同視為同一個。
@@ -692,11 +752,11 @@ Trigger 將 cron 排程或 webhook 綁定到某個版本的某個 pipeline，規
 
 認證：Bearer（admin）
 
-建立 trigger。本文 `{"name", "kind": "cron"|"webhook", "contentHash", "uploader"?, "pipeline", "parameters"?, "cron"?, "timeZone"?, "enabled"?}`。`cron` 是標準五欄表達式（cron trigger 必填），`timeZone` 是 IANA 時區（預設 UTC），`enabled` 預設 true；webhook trigger 不可設定 `cron` 與 `timeZone`。`uploader` 指定綁定哪位上傳者的版本；同一內容有多個版本時必須給，否則 409 `ambiguous_version`（本文 `{error, message, uploaders[]}`，不建立 trigger）。綁定永不隨新版本或同一內容的其他版本移動。
+建立 trigger。本文 `{"name", "kind": "cron"|"webhook", "contentHash", "uploader"?, "pipeline", "parameters"?, "callerParameters"?, "cron"?, "timeZone"?, "enabled"?}`。`cron` 是標準五欄表達式（cron trigger 必填），`timeZone` 是 IANA 時區（預設 UTC），`enabled` 預設 true；webhook trigger 不可設定 `cron` 與 `timeZone`。`callerParameters` 是「呼叫端提供的參數」名稱清單（預設空），只有 webhook trigger 可設定，cron 設定時被拒絕（422 `invalid_trigger`，`problem` 為 `caller_parameters_not_allowed`）；規則見 [ADR-036](../../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md)：清單中的名稱必須是綁定版本宣告的參數，不能同時是 `parameters` 的固定參數，綁定版本中必填且沒有預設值的參數必須在 `parameters` 或 `callerParameters` 其一；違反者 422 `invalid_parameters`，`problems[]` 指出參數名稱，`problem` 為 `undeclared`（未宣告）、`fixed_and_caller`（同時固定與由呼叫端提供）或 `missing`（必填而兩處皆無）；固定參數的值含 U+0000（NUL 字元）時 `problem` 為 `contains_nul`。清單依綁定版本宣告的順序保存、不重複。`uploader` 指定綁定哪位上傳者的版本；同一內容有多個版本時必須給，否則 409 `ambiguous_version`（本文 `{error, message, uploaders[]}`，不建立 trigger）。綁定永不隨新版本或同一內容的其他版本移動。
 
 201（帶 `Location`）回傳 `{"trigger": {...}, "secret": "..."}`，`secret` 只有 webhook trigger 有，且只在這個回應出現這一次。錯誤：400 `bad_request`；404 `definition_not_found`；409 `trigger_exists`、409 `ambiguous_version`；422 `invalid_parameters`（同建立 run，`problems[]`）；422 `invalid_trigger`，`problem` 指出哪一部分：`name`、`cron_required`、`cron_expression`、`time_zone`、`schedule_not_allowed`、`nothing_to_change`。
 
-Trigger 的欄位：`name`、`kind`、`contentHash`、`uploader`（綁定的版本的上傳者）、`pipeline`、`parameters`（管理員給的）、`effectiveParameters`（套用預設值後每個 run 實際得到的）、`enabled`、`cron`、`timeZone`、`webhookPath`、`secretConfigured`、`secretRotatedAt`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`。任何回應都不含 webhook 密鑰或其雜湊。
+Trigger 的欄位：`name`、`kind`、`contentHash`、`uploader`（綁定的版本的上傳者）、`pipeline`、`parameters`（管理員給的）、`effectiveParameters`（套用預設值後每個 run 實際得到的，不含呼叫端提供的參數）、`callerParameters`（呼叫端提供的參數名稱；cron trigger 一律為空）、`enabled`、`cron`、`timeZone`、`webhookPath`、`secretConfigured`、`secretRotatedAt`、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`。任何回應都不含 webhook 密鑰或其雜湊。
 
 ### `GET /api/v1/triggers`
 
@@ -714,7 +774,7 @@ Trigger 的欄位：`name`、`kind`、`contentHash`、`uploader`（綁定的版�
 
 認證：Bearer（admin）
 
-修改綁定、參數、排程、啟用狀態。本文可含 `contentHash`、`uploader`、`pipeline`、`parameters`、`enabled`、`cron`、`timeZone`，至少一項。給了 `contentHash` 或 `uploader` 即表示移動綁定的版本，須明確到某位上傳者的版本（同一內容有多個版本而未給 `uploader`：409 `ambiguous_version`）；兩者都沒給時綁定留在原版本，不受同一內容其他版本影響。不通過驗證的修改不改變任何東西。200 回傳 trigger；錯誤同建立（400、404 `trigger_not_found` 或 `definition_not_found`、409 `ambiguous_version`、422）。
+修改綁定、參數、排程、啟用狀態。本文可含 `contentHash`、`uploader`、`pipeline`、`parameters`、`callerParameters`、`enabled`、`cron`、`timeZone`，至少一項；沒給 `callerParameters` 時清單不變，給 `[]` 即清空。每次修改（包含移動綁定的版本）都依上述規則重新檢查固定參數與清單。給了 `contentHash` 或 `uploader` 即表示移動綁定的版本，須明確到某位上傳者的版本（同一內容有多個版本而未給 `uploader`：409 `ambiguous_version`）；兩者都沒給時綁定留在原版本，不受同一內容其他版本影響。不通過驗證的修改不改變任何東西。200 回傳 trigger；錯誤同建立（400、404 `trigger_not_found` 或 `definition_not_found`、409 `ambiguous_version`、422）。
 
 ### `DELETE /api/v1/triggers/{name}`
 
@@ -747,14 +807,18 @@ Trigger 的欄位：`name`、`kind`、`contentHash`、`uploader`（綁定的版�
 | `X-Runline-Webhook-Secret` | 建立 trigger 或換發密鑰時顯示的密鑰；Engine 只存其 SHA-256，以固定時間比對 |
 | `X-Runline-Delivery-Id` | 呼叫端對這次投遞的識別，1 至 200 個可見 ASCII 字元，必填；同一 trigger 內在去重視窗內唯一，重送（即使同時）不會產生第二個 run。去重視窗等於 webhook 觸發紀錄的保留期限（預設 7 天，下限 24 小時）；視窗之後同一識別可再次被接受，產生新的 run |
 
-請求本文不會被讀取，也不影響 run 的參數。
+**請求本文。** trigger 的 `callerParameters` 為空時，本文不會被讀取，也不影響 run 的參數。不為空時（[ADR-036](../../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md)），本文為 JSON 物件，鍵是清單中的參數名稱、值是文字，例如 `{"file": "videos/a.mp4"}`。處理順序固定：先驗證密鑰（失敗的回應不變），再驗證投遞識別（失敗的回應不變），兩者通過後才讀取本文。已收過的投遞識別直接回與第一次相同的 202，本文被忽略（不讀取）。本文大小上限由 `RUNLINE_WEBHOOK_MAX_BODY_BYTES` 決定（預設 16384 位元組）。通過檢查的值與 trigger 的固定參數合併後走與手動 run 相同的建立流程（unsafe、參數檢查、共享資源、並行限制皆適用），run 的 `parameters` 含這些值。**呼叫端提供的值是不可信輸入，不得用於機密**：持有密鑰者即可影響 run 的參數，值也會出現在 run 的紀錄；pipeline 應自行驗證其參數（例如路徑）。
 
 | 狀態 | 意義 |
 |---|---|
 | 202 `{"status": "accepted"}` | 通過驗證。不論 run 之後如何（被拒絕建立由管理員在觸發紀錄查看），以及投遞已收過（與第一次相同的回應），都是這個回應 |
 | 401 `unauthorized` | 密鑰缺少或錯誤、trigger 已停用、不是 webhook、或不存在，一律同一個固定回應 |
 | 400 `invalid_delivery_id` | 已通過驗證，但投遞識別缺少或格式不符 |
+| 400 `invalid_body` | 清單不為空時：本文不是 JSON 物件（`problem` 為 `not_a_json_object`）或超過大小上限（`too_large`）。本文 `{error, problem, message}` |
+| 400 `invalid_caller_parameters` | 清單不為空時：含清單外的鍵（`undeclared`）、缺少必填的鍵（`missing`）、值不是文字（`not_text`）、或文字值含 U+0000（NUL 字元，`contains_nul`；資料庫無法儲存，其他控制字元不受此限）。本文 `{error, message, problems[{name, problem}]}`，只指出參數名稱，不回傳任何值 |
 | 500 `internal_error` | 發生未預期的失敗；本文固定為請以相同投遞識別重送的說明，不含 `errorId`，原因寫在 log。重送同一投遞是安全的 |
+
+兩個 400 `invalid_body` 與 `invalid_caller_parameters` 不消耗投遞識別，也不寫入觸發紀錄：呼叫端修正本文後可用同一個識別重送並成功。它們與驗證失敗一樣只記 log 與 metric（`runline.triggers.webhook.rejected`，`reason` 為 `invalid_parameters`，`cause` 為 `body_not_object`、`body_too_large` 或 `invalid_parameters`），因此可與其他拒絕區分；密鑰、參數值與本文內容不出現在 log、metric 或錯誤訊息。值只在被接受的 run 的參數紀錄中。
 
 ## 不屬於 API 契約的端點
 

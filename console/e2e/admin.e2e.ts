@@ -205,6 +205,98 @@ describe('triggers', () => {
     await context.close();
   }, 120_000);
 
+  test('a webhook says which parameters its caller provides: the form holds fixed and provided apart, the Engine names what is missing, a call gives the value to the run, and the list and the page name the parameter', async () => {
+    const { contentHash } = await putJar('demo-intake');
+    const name = `e2e.intake-${stamp()}`;
+    const cronName = `e2e.intake-cron-${stamp()}`;
+    const context = await newContext(browser, 'en-US');
+    const { page, problems } = await signedIn(
+      context,
+      root,
+      `/triggers/new?contentHash=${contentHash}&pipeline=demo-intake`,
+    );
+
+    // a cron trigger has no such choice
+    expect(await page.locator('#caller-file').count()).toBe(0);
+    await page.locator('input[name="kind"][value="webhook"]').check();
+    await page.locator('#caller-file').waitFor();
+    await page.locator('#trigger-name').fill(name);
+
+    // a fixed value and the choice exclude each other in the form
+    await page.locator('#param-file').fill('fixed.mp4');
+    expect(await page.locator('#caller-file').isDisabled()).toBe(true);
+    await page.locator('#param-file').fill('');
+    await page.locator('#caller-file').check();
+    expect(await page.locator('#param-file').isDisabled()).toBe(true);
+
+    // a required parameter that is neither fixed nor provided: the Engine's word, with the name
+    await page.locator('#caller-file').uncheck();
+    await page.locator('button.submit').click();
+    const error = page.locator('#param-file').locator('xpath=ancestor::*[contains(@class,"rl-field")]').locator('.rl-field-error');
+    await error.waitFor();
+    expect(await error.innerText()).toContain('file');
+    await shot(page, 'admin-trigger-caller-missing-en');
+    expect((await api(root, `/api/v1/triggers/${name}`)).status).toBe(404);
+
+    await page.locator('#caller-file').check();
+    await page.locator('button.submit').click();
+    await dialog(page).waitFor();
+    const secret = (await dialog(page).locator('.secret').innerText()).trim();
+    await dialog(page).locator('input[type="checkbox"]').check();
+    await dialog(page).getByRole('button', { name: 'Done' }).click();
+    await page.waitForURL(/\/triggers\/detail\?name=/);
+    await page.getByRole('heading', { name, level: 1 }).waitFor();
+    expect(await page.locator('p.callers').innerText()).toContain('file');
+    await shot(page, 'admin-trigger-detail-caller-en');
+    const made = await json(await api(root, `/api/v1/triggers/${name}`));
+    expect(made).toMatchObject({ parameters: {}, callerParameters: ['file'] });
+
+    // a call gives the value, and the run it makes has it
+    const delivery = `d-${stamp()}`;
+    const called = await fetch(`${engineUrl}/api/v1/webhooks/${name}`, {
+      method: 'POST',
+      headers: { 'X-Runline-Webhook-Secret': secret, 'X-Runline-Delivery-Id': delivery, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: 'videos/a.mp4' }),
+    });
+    expect(called.status).toBe(202);
+    const rows = page.locator('section', { hasText: 'Firings' }).locator('tbody tr');
+    await rows.first().locator('.outcome').getByText('Run created').waitFor({ timeout: 20_000 });
+    const firings = (await json(await api(root, `/api/v1/triggers/${name}/firings`))).firings as any[];
+    const run = await json(await api(root, `/api/v1/runs/${firings[0].runId}`));
+    expect(run.parameters).toMatchObject({ file: 'videos/a.mp4' });
+
+    // the list names it for the webhook; a cron trigger has nothing in that column
+    await api(root, '/api/v1/triggers', {
+      method: 'POST',
+      body: JSON.stringify({ name: cronName, kind: 'cron', contentHash, pipeline: 'demo-intake', cron: '0 3 * * *', parameters: { file: 'x.mp4' } }),
+    });
+    await page.goto(`${engineUrl}/triggers`);
+    const listed = (trigger: string) => page.locator('tbody tr', { hasText: trigger }).locator('.callers');
+    await listed(name).waitFor();
+    expect((await listed(name).innerText()).trim()).toBe('file');
+    expect((await listed(cronName).innerText()).trim()).toBe('');
+    await shot(page, 'admin-triggers-caller-en');
+
+    // changing it: the choice is there, and swapping it for a fixed value is saved
+    await page.goto(`${engineUrl}/triggers/edit?name=${name}`);
+    await page.locator('#caller-file').waitFor();
+    expect(await page.locator('#caller-file').isChecked()).toBe(true);
+    await page.locator('#caller-file').uncheck();
+    await page.locator('#param-file').fill('fixed.mp4');
+    await page.locator('button.submit').click();
+    await page.waitForURL(/\/triggers\/detail\?name=/);
+    expect(await json(await api(root, `/api/v1/triggers/${name}`))).toMatchObject({
+      parameters: { file: 'fixed.mp4' },
+      callerParameters: [],
+    });
+
+    expect(problems.csp).toEqual([]);
+    expect(problems.foreign).toEqual([]);
+    expect(await violations(page)).toEqual([]);
+    for (const each of [name, cronName]) await api(root, `/api/v1/triggers/${each}`, { method: 'DELETE' });
+    await context.close();
+  }, 120_000);
+
   test('a delivery that makes no run is a refused firing, with its reason in words and the Engine\'s own words apart', async () => {
     const { contentHash } = await putJar('demo-unsafe');
     const name = `e2e-refused-${stamp()}`;

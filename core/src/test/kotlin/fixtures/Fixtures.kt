@@ -66,3 +66,32 @@ class TypedResourcesPipeline : Pipeline {
 class RolesPipeline : Pipeline {
   override fun run(context: PipelineContext) = Unit
 }
+
+@PipelineDefinition(
+    name = "viewed",
+    typedResources = [TypedResource("feed-db", ResourceTypes.JDBC_POOL)],
+    views =
+        [
+            View(
+                id = "articles",
+                title = "Articles",
+                resource = "feed-db",
+                query = "SELECT title, state FROM article WHERE run = ?",
+                parameters = [ViewParam("run", ViewParamType.INTEGER)],
+                columns =
+                    [
+                        ViewColumn("title", "Title"),
+                        ViewColumn(
+                            "state",
+                            "State",
+                            ViewColumnType.STATUS,
+                            tones = [StatusTone("downloaded", Tone.POSITIVE)],
+                        ),
+                    ],
+                sort = [ViewSort("title")],
+            )
+        ],
+)
+class ViewsPipeline : Pipeline {
+  override fun run(context: PipelineContext) = Unit
+}

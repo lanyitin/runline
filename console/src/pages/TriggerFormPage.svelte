@@ -21,6 +21,9 @@
   // typed; the Engine decides what it accepts, so what the page cannot read has no preview and is
   // not called wrong. What the Engine finds wrong is said at the field it is about. The secret of a
   // webhook is shown once, in a dialog that has to be answered (SecretDialog), and nowhere else.
+  // A webhook can also say which of the parameters its caller provides on each call (ADR-036): such
+  // a parameter has no fixed value, and a fixed one cannot be chosen, so the form holds the two apart;
+  // what the Engine says of them (a required parameter that is neither, both) is shown all the same.
   interface Props {
     mode: 'create' | 'edit';
   }
@@ -66,6 +69,8 @@
   let zone = $state('UTC');
   let enabled = $state(true);
   let values = $state<Record<string, string>>({});
+  // The parameters whose caller provides them, by name.
+  let callers = $state<Record<string, boolean>>({});
   let fieldErrors = $state<Record<string, string>>({});
   let failure = $state.raw<ApiFailure | null>(null);
   let busy = $state(false);
@@ -76,11 +81,14 @@
   const original = $derived<Trigger | null>(loaded.data?.trigger ?? null);
 
   /** Chooses what the trigger runs, with the values of the parameters it starts from. */
-  function choose(key: string, given: Record<string, string> = {}) {
+  function choose(key: string, given: Record<string, string> = {}, byCaller: string[] = []) {
     targetKey = key;
     const definition = definitions.find((d) => keyOf(d) === key);
     values = Object.fromEntries(
       (definition?.metadata.parameters ?? []).map((p) => [p.name, given[p.name] ?? '']),
+    );
+    callers = Object.fromEntries(
+      (definition?.metadata.parameters ?? []).map((p) => [p.name, byCaller.includes(p.name)]),
     );
     fieldErrors = {};
     failure = null;
@@ -101,6 +109,7 @@
       choose(
         keyOf({ contentHash: trigger.contentHash, uploader: trigger.uploader, name: trigger.pipeline }),
         trigger.parameters,
+        trigger.callerParameters,
       );
       return;
     }
@@ -161,7 +170,16 @@
       const rest: unknown[] = [];
       for (const item of body.problems as Array<{ name?: unknown; problem?: unknown }>) {
         if (typeof item?.name === 'string' && declared.has(item.name) && item.problem === 'missing') {
-          errors[`param-${item.name}`] = i18n.t('createRun.requiredError');
+          errors[`param-${item.name}`] =
+            kind === 'webhook'
+              ? i18n.t('triggerForm.caller.missing', { name: item.name })
+              : i18n.t('createRun.requiredError');
+        } else if (
+          typeof item?.name === 'string' &&
+          declared.has(item.name) &&
+          item.problem === 'fixed_and_caller'
+        ) {
+          errors[`param-${item.name}`] = i18n.t('triggerForm.caller.both', { name: item.name });
         } else {
           rest.push(item);
         }
@@ -185,7 +203,8 @@
     if (!editing && name.trim() === '') errors['trigger-name'] = i18n.t('triggerForm.name.required');
     if (selected === null) errors['trigger-target'] = i18n.t('triggerForm.target.required');
     if (kind === 'cron' && cron.trim() === '') errors['trigger-cron'] = i18n.t('triggerForm.cron.required');
-    for (const parameter of selected?.metadata.parameters ?? []) {
+    // A webhook may leave a required parameter to its caller: the Engine says whether it is settled.
+    for (const parameter of kind === 'cron' ? (selected?.metadata.parameters ?? []) : []) {
       if (parameter.required && parameter.default === null && (values[parameter.name] ?? '') === '') {
         errors[`param-${parameter.name}`] = i18n.t('createRun.requiredError');
       }
@@ -194,6 +213,11 @@
     if (Object.keys(errors).length > 0 || selected === null) return;
 
     const parameters = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
+    // Only a webhook has a caller; a change always says the list, so that clearing it is possible.
+    const callerParameters =
+      kind === 'webhook'
+        ? { callerParameters: selected.metadata.parameters.map((p) => p.name).filter((n) => callers[n]) }
+        : {};
     const schedule = kind === 'cron' ? { cron: cron.trim(), timeZone: zone.trim() || undefined } : {};
     busy = true;
     try {
@@ -203,6 +227,7 @@
           uploader: selected.uploader,
           pipeline: selected.name,
           parameters,
+          ...callerParameters,
           enabled,
           ...schedule,
         });
@@ -215,6 +240,7 @@
           uploader: selected.uploader,
           pipeline: selected.name,
           parameters,
+          ...callerParameters,
           enabled,
           ...schedule,
         });
@@ -382,6 +408,7 @@
             <p>{i18n.t('createRun.noParams')}</p>
           {:else}
             <p class="rl-help">{i18n.t('triggerForm.params.help')}</p>
+            {#if kind === 'webhook'}<p class="rl-help">{i18n.t('triggerForm.caller.help')}</p>{/if}
           {/if}
           {#each selected.metadata.parameters as parameter (parameter.name)}
             <div class="rl-field">
@@ -399,9 +426,22 @@
                 spellcheck="false"
                 placeholder={parameter.default ?? ''}
                 aria-invalid={errorOf(`param-${parameter.name}`) ? 'true' : undefined}
+                disabled={kind === 'webhook' && callers[parameter.name] && (values[parameter.name] ?? '') === ''}
                 bind:value={values[parameter.name]}
                 oninput={() => delete fieldErrors[`param-${parameter.name}`]}
               />
+              {#if kind === 'webhook'}
+                <label class="by-caller" for={`caller-${parameter.name}`}>
+                  <input
+                    id={`caller-${parameter.name}`}
+                    type="checkbox"
+                    disabled={!callers[parameter.name] && (values[parameter.name] ?? '') !== ''}
+                    bind:checked={callers[parameter.name]}
+                    onchange={() => delete fieldErrors[`param-${parameter.name}`]}
+                  />
+                  {i18n.t('triggerForm.caller.label')}
+                </label>
+              {/if}
               {#if parameter.default !== null}
                 <span class="rl-help">{i18n.t('createRun.default', { value: parameter.default })}</span>
               {/if}
@@ -495,6 +535,12 @@
     font: inherit;
     cursor: pointer;
     text-decoration: underline;
+  }
+  .by-caller {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-secondary);
   }
   .enabled {
     display: flex;

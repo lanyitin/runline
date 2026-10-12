@@ -9,6 +9,7 @@ import { jsonCall, send, succeed, type Transport } from './call.ts';
 import { createAdminApi } from './admin-api.ts';
 import { createBindingsApi } from './bindings-api.ts';
 import { createUsersApi } from './users-api.ts';
+import { createViewsApi } from './views-api.ts';
 import {
   parseArtifact,
   parseCancellation,
@@ -43,6 +44,7 @@ export function createEngineApi(transport: Transport) {
     ...createAdminApi(transport),
     ...createBindingsApi(transport),
     ...createUsersApi(transport),
+    ...createViewsApi(transport),
 
     /**
      * Puts a jar on the Engine: a new version of the uploader (201), or the one the uploader made

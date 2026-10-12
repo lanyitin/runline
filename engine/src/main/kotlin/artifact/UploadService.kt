@@ -4,6 +4,7 @@ import dev.lawlan.runline.analyzer.AccessLimitMetadata
 import dev.lawlan.runline.analyzer.PipelineMetadata
 import dev.lawlan.runline.analyzer.PipelineSafety
 import dev.lawlan.runline.analyzer.SafetyAnalyzer
+import dev.lawlan.runline.analyzer.ViewMetadata
 import java.io.IOException
 import java.time.Clock
 
@@ -18,6 +19,7 @@ enum class RejectionReason {
   JAR_TOO_MANY_ENTRIES,
   JAR_ENTRY_TOO_LARGE,
   JAR_EXPANDED_TOO_LARGE,
+  VIEW_DECLARATION_INVALID,
 }
 
 sealed interface UploadResult {
@@ -44,6 +46,7 @@ class UploadService(
     private val store: ArtifactStore,
     private val telemetry: UploadTelemetry,
     private val clock: Clock,
+    private val viewRule: ViewDeclarationRule = ViewDeclarationRule(),
 ) {
   fun upload(staged: StagedJar, uploader: String): UploadResult =
       telemetry.observe(uploader) { process(staged, uploader) }
@@ -111,6 +114,19 @@ class UploadService(
                 "pipeline「$pipeline」的角色「$role」"
               } +
               "。用途說明是給人看的短文字，請縮短後重新上傳。",
+      )
+    }
+    val viewProblems = definitions.flatMap { d ->
+      viewRule.problems(d.metadata).map { d.name to it }
+    }
+    if (viewProblems.isNotEmpty()) {
+      return rejected(
+          RejectionReason.VIEW_DECLARATION_INVALID,
+          "view 的宣告不合格，整個 jar 不接受：" +
+              viewProblems.joinToString("；") { (pipeline, problem) ->
+                "pipeline「$pipeline」的 view「${problem.viewId}」：${problem.detail}"
+              } +
+              "。請修正宣告後重新上傳。",
       )
     }
     definitions
@@ -204,7 +220,28 @@ class UploadService(
           resources = resources,
           resourceTypes = resourceTypes,
           resourcePurposes = resourcePurposes,
+          views = views.map { it.toDoc() },
       )
 
   private fun AccessLimitMetadata.toDoc() = AccessLimitDoc(unrestricted, allow)
 }
+
+private fun ViewMetadata.toDoc() =
+    ViewDoc(
+        id,
+        title,
+        description,
+        resource,
+        query,
+        parameters.map { ViewParameterDoc(it.name, it.type, it.required, it.options) },
+        columns.map { column ->
+          ViewColumnDoc(
+              column.name,
+              column.label,
+              column.type,
+              column.tones.map { StatusToneDoc(it.value, it.tone) },
+              column.drill?.let { DrillDoc(it.view, it.parameter, it.from) },
+          )
+        },
+        sort.map { ViewSortDoc(it.column, it.descending) },
+    )

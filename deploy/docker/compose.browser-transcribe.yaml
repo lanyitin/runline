@@ -1,0 +1,23 @@
+# One Engine image with both a real Google Chrome and the transcribe runtime (WI-1416): the Engine that
+# runs digest-rss and the transcribe pipeline at once (deploy/transcribe.md, deploy/browser.md). The third
+# overlay of the two; it only names the combined image and must come after them, because the file that
+# comes last decides the image and the stage:
+#
+#   TRANSCRIBE_INTAKE_HOST_DIR=/srv/intake \
+#   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.yaml \
+#       -f deploy/docker/compose.transcribe.yaml -f deploy/docker/compose.browser-transcribe.yaml up --build -d
+#   (or COMPOSE_FILE=compose.yaml:compose.browser.yaml:compose.transcribe.yaml:compose.browser-transcribe.yaml in .env)
+#
+# Everything else (linux/amd64, init, the private CA's directory, the intake root, the VAD tool's directory)
+# comes from the two overlays; the image has Chrome and the transcribe tools, so both are needed.
+
+x-browser-transcribe: &browser-transcribe
+  image: runline-engine-browser-transcribe:${RUNLINE_IMAGE_TAG:-local}
+  build:
+    target: browser-transcribe
+
+services:
+  migrate:
+    <<: *browser-transcribe
+  engine:
+    <<: *browser-transcribe

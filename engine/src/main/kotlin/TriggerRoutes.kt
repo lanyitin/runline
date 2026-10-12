@@ -76,6 +76,7 @@ fun Application.configureTriggerRoutes() {
                         request.timeZone,
                         request.enabled,
                         request.uploader,
+                        request.callerParameters,
                     ),
                     call.caller,
                 )
@@ -139,6 +140,7 @@ fun Application.configureTriggerRoutes() {
                           request.enabled,
                           request.cron,
                           request.timeZone,
+                          request.callerParameters,
                       ),
                       call.caller,
                   )
@@ -221,6 +223,8 @@ private suspend fun ApplicationCall.respondInvalidParameters(problems: List<Para
                   when (it.kind) {
                     ParameterProblemKind.MISSING -> "缺少必填參數 ${it.name}"
                     ParameterProblemKind.UNDECLARED -> "未宣告的參數 ${it.name}"
+                    ParameterProblemKind.FIXED_AND_CALLER -> "參數 ${it.name} 不能同時固定又由呼叫端提供"
+                    ParameterProblemKind.NUL_IN_VALUE -> "參數 ${it.name} 的值含有 NUL 字元"
                   }
                 },
             problems.map {
@@ -229,6 +233,8 @@ private suspend fun ApplicationCall.respondInvalidParameters(problems: List<Para
                   when (it.kind) {
                     ParameterProblemKind.MISSING -> "missing"
                     ParameterProblemKind.UNDECLARED -> "undeclared"
+                    ParameterProblemKind.FIXED_AND_CALLER -> "fixed_and_caller"
+                    ParameterProblemKind.NUL_IN_VALUE -> "contains_nul"
                   },
               )
             },
@@ -264,6 +270,12 @@ private suspend fun ApplicationCall.respondInvalid(problem: InvalidTrigger) =
                   "invalid_trigger",
                   "schedule_not_allowed",
                   "webhook trigger 不能設定 cron 或 timeZone。",
+              )
+          InvalidTrigger.CALLER_PARAMETERS_ON_CRON ->
+              InvalidTriggerResponse(
+                  "invalid_trigger",
+                  "caller_parameters_not_allowed",
+                  "只有 webhook trigger 可以設定呼叫端提供的參數。",
               )
           InvalidTrigger.NOTHING_TO_CHANGE ->
               InvalidTriggerResponse("invalid_trigger", "nothing_to_change", "請提供要修改的欄位。")

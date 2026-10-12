@@ -2,6 +2,9 @@ package dev.lawlan.runline.accessors.jdbc
 
 import dev.lawlan.runline.accessors.BoundResources
 import dev.lawlan.runline.accessors.Invalidation
+import dev.lawlan.runline.accessors.ReadOnlyException
+import dev.lawlan.runline.accessors.ReadOnlyFailure
+import dev.lawlan.runline.accessors.ReadOnlyQuery
 import dev.lawlan.runline.accessors.tls.ClientCertificate
 import dev.lawlan.runline.accessors.tls.ResourceTls
 import dev.lawlan.runline.accessors.tls.TestPki
@@ -12,6 +15,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -93,6 +97,36 @@ class JdbcTlsTest {
 
     assertEquals(ResourceFailure.CONNECTION_FAILED.name, answer["failure"])
     assertEquals(listOf(TlsFailure.HOSTNAME_MISMATCH), tlsFailures)
+  }
+
+  @Test
+  fun `a read for a view uses the resource's certificates too, and says when they do not hold`() {
+    val (role, password) = role(certificateRequired = true)
+    fun read(tls: ResourceTls?) =
+        JdbcViewRead(
+                PostgresProfile,
+                settings(role),
+                JdbcCredential.Password(password),
+                ReadOnlyQuery(
+                    "SELECT ssl, client_dn FROM pg_stat_ssl WHERE pid = pg_backend_pid()",
+                    emptyMap(),
+                    listOf("ssl", "client_dn"),
+                    emptyList(),
+                    10,
+                    0,
+                ),
+                tls,
+            )
+            .run()
+
+    assertEquals(listOf(listOf<Any?>(true, "/CN=runline-client")), read(withClient).rows)
+    assertEquals(
+        ReadOnlyFailure.CONNECTION_FAILED,
+        assertFailsWith<ReadOnlyException> {
+              read(ResourceTls(listOf(otherAuthority.certificate), clientCertificate))
+            }
+            .failure,
+    )
   }
 
   @Test

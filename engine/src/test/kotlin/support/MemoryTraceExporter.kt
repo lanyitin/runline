@@ -18,8 +18,13 @@ class MemoryTraceExporter : ConfigurableSpanExporterProvider {
   companion object {
     const val NAME = "runline-memory"
 
-    /** Everything exported since the last [reset]. */
-    val spans: InMemorySpanExporter = InMemorySpanExporter.create()
+    /**
+     * Everything exported since the current [recording] began. An Engine that ends shuts its
+     * exporter down, and a shut down exporter takes nothing more, so each recording has a new one.
+     */
+    @Volatile
+    var spans: InMemorySpanExporter = InMemorySpanExporter.create()
+      private set
 
     /**
      * Runs [block] with the Engine's traces going to [spans], and restores what was set. The
@@ -30,7 +35,7 @@ class MemoryTraceExporter : ConfigurableSpanExporterProvider {
       val key = "otel.traces.exporter"
       val before = System.getProperty(key)
       System.setProperty(key, NAME)
-      spans.reset()
+      spans = InMemorySpanExporter.create()
       try {
         return block()
       } finally {

@@ -1,0 +1,46 @@
+# The Engine with ffmpeg, ffprobe and the places for the VAD tool, for the transcribe pipeline
+# (docs/stable/transcribe-pipeline/04-deployment.md, WI-1402, deploy/transcribe.md). An overlay on
+# compose.yaml; without it the Engine is as before:
+#
+#   TRANSCRIBE_INTAKE_HOST_DIR=/srv/intake \
+#   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe.yaml up --build -d
+#   (or COMPOSE_FILE=compose.yaml:compose.transcribe.yaml in .env)
+#
+# It names the transcribe image. For Chrome and the transcribe tools in one image, add compose.browser.yaml
+# and, last, compose.browser-transcribe.yaml (deploy/transcribe.md, "與瀏覽器並用").
+
+x-transcribe: &transcribe
+  image: runline-engine-transcribe:${RUNLINE_IMAGE_TAG:-local}
+  build:
+    target: transcribe
+    # The scripts of deploy/bin that the image copies in; the Dockerfile itself is outside the
+    # build context, so are they.
+    additional_contexts:
+      deploy: ..
+
+services:
+  migrate:
+    <<: *transcribe
+  engine:
+    <<: *transcribe
+    environment:
+      # Where the pipeline finds the videos (ADR-037); the mount below. A pipeline parameter cannot
+      # change it.
+      TRANSCRIBE_INTAKE_ROOT: /var/lib/runline/intake
+      # TRANSCRIBE_WORK_DIR and TRANSCRIBE_VAD_COMMAND are not set: the work directory is the container's
+      # /tmp (writable layer; size: deploy/transcribe.md) and the command is runline-vad on the PATH.
+    volumes:
+      # The videos. Read-only for everyone in the container: the Engine's account (uid 10001) can read
+      # the files if the host gives "other" read (or the account's group) on them, and cannot write.
+      - type: bind
+        source: ${TRANSCRIBE_INTAKE_HOST_DIR:?set TRANSCRIBE_INTAKE_HOST_DIR to the directory of the videos}
+        target: /var/lib/runline/intake
+        read_only: true
+      # The VAD tool (WI-1407): a host directory with runline-vad.jar in it. It may be empty or not
+      # exist yet; runline-transcribe-check then says the tool is not installed.
+      - type: bind
+        source: ${TRANSCRIBE_VAD_HOST_DIR:-./transcribe-vad}
+        target: /opt/runline/vad
+        read_only: true
+        bind:
+          create_host_path: true

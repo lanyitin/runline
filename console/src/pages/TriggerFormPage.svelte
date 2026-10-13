@@ -13,6 +13,7 @@
   import { browserClock, pageVisibility } from '../runs/run-watch.svelte';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
   import Link from '../ui/Link.svelte';
+  import ParameterValue from '../ui/ParameterValue.svelte';
   import PlainText from '../ui/PlainText.svelte';
 
   // Makes a trigger (`POST /api/v1/triggers`) or changes one (`PATCH`): a cron trigger with its
@@ -418,33 +419,28 @@
                   {parameter.required ? i18n.t('common.required') : i18n.t('common.optional')}
                 </span>
               </label>
-              <input
+              <ParameterValue
                 id={`param-${parameter.name}`}
-                class="rl-input mono"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder={parameter.default ?? ''}
-                aria-invalid={errorOf(`param-${parameter.name}`) ? 'true' : undefined}
+                parameter={parameter.name}
+                defaultValue={parameter.default}
+                invalid={!!errorOf(`param-${parameter.name}`)}
                 disabled={kind === 'webhook' && callers[parameter.name] && (values[parameter.name] ?? '') === ''}
                 bind:value={values[parameter.name]}
                 oninput={() => delete fieldErrors[`param-${parameter.name}`]}
-              />
-              {#if kind === 'webhook'}
-                <label class="by-caller" for={`caller-${parameter.name}`}>
-                  <input
-                    id={`caller-${parameter.name}`}
-                    type="checkbox"
-                    disabled={!callers[parameter.name] && (values[parameter.name] ?? '') !== ''}
-                    bind:checked={callers[parameter.name]}
-                    onchange={() => delete fieldErrors[`param-${parameter.name}`]}
-                  />
-                  {i18n.t('triggerForm.caller.label')}
-                </label>
-              {/if}
-              {#if parameter.default !== null}
-                <span class="rl-help">{i18n.t('createRun.default', { value: parameter.default })}</span>
-              {/if}
+              >
+                {#if kind === 'webhook'}
+                  <label class="by-caller" for={`caller-${parameter.name}`}>
+                    <input
+                      id={`caller-${parameter.name}`}
+                      type="checkbox"
+                      disabled={!callers[parameter.name] && (values[parameter.name] ?? '') !== ''}
+                      bind:checked={callers[parameter.name]}
+                      onchange={() => delete fieldErrors[`param-${parameter.name}`]}
+                    />
+                    {i18n.t('triggerForm.caller.label')}
+                  </label>
+                {/if}
+              </ParameterValue>
               {#if errorOf(`param-${parameter.name}`)}
                 <span class="rl-field-error">{errorOf(`param-${parameter.name}`)}</span>
               {/if}

@@ -22,7 +22,7 @@
 | 轉錄端點選擇 | 依 `asrModel` 在 `models.list` 的 `labels` 選擇：含 `transcription` 走 `audio.transcriptions`，否則走 `chat.completions` 帶音訊輸入（如 Qwen3-ASR）；找不到模型或沒有 `labels` 則設定錯誤 | [ADR-042](adr/ADR-042-asr-by-model-labels.md) |
 | cron 掃描 | `file` 為空時 pipeline 掃描收件根目錄，每個 run 處理一部尚未產生 `_zh-TW.srt` 的影片；沒有待處理時 run 立即成功；同一檔案失敗達上限後不再被選中；仰賴 `llm` 資源容量為 1 | [ADR-040](adr/ADR-040-cron-scan-mode.md)、[runbook](runbook.md) 第 6.3 節 |
 | 字幕檔輸出 | 最後階段 `export` 在影片旁寫出「影片檔名_語系.srt」兩個檔（來源語言與 `zh-TW`），內容與資料庫的 `result` 相同；收件根目錄須可寫 | [ADR-039](adr/ADR-039-subtitle-files-beside-video.md) |
-| 補掃 | VAD 沒涵蓋的空隙（相鄰條目之間，含影片首尾）切成固定長度的窗口，逐窗口送同一個轉錄模型；有語音者成為新的字幕條目（標記來源為補掃、時間為估計值），疑似雜音的幻覺被過濾且可查；預設開啟 | [ADR-044](adr/ADR-044-asr-coverage-sweep.md) |
+| 補掃 | VAD 沒涵蓋的空隙（相鄰條目之間，含影片首尾）切成固定長度的窗口，逐窗口送同一個轉錄模型；有語音者成為新的字幕條目（標記來源為補掃、時間為估計值），疑似雜音的幻覺被過濾且可查；窗口轉錄失敗時略過該窗口，run 繼續，並計入降級（結果為 `success-degraded`）；預設開啟 | [ADR-044](adr/ADR-044-asr-coverage-sweep.md) |
 | 降噪後 VAD | VAD 之前以 DeepFilterNet3 降噪（獨立行程，預設開啟）；降噪音訊只供 VAD，切片與轉錄一律取自原始音訊；取代雙 VAD（ADR-045） | [ADR-046](adr/ADR-046-denoise-before-vad.md) |
 
 ## 元件關係
@@ -67,6 +67,14 @@ flowchart LR
 | `sweepMinChars` | `5` | 窗口回答的語言與整部影片的主要語言不同、且字母與數字少於這麼多個時，視為幻覺而丟棄（正整數） |
 | `denoise` | `true` | VAD 之前是否降噪（`true`／`false`）；`false` 時沒有降噪階段、不呼叫降噪工具 |
 | `denoiseAttenLimitDb` | `24` | 降噪的衰減上限，dB（0 至 100 的數字，含兩端）；0 為不降噪（原樣輸出），100 為不設上限 |
+| `asrSystemPrompt` | 空 | 轉錄的 system prompt 全文，只作用於 chat 型端點（VAD 條目與補掃窗口的每個請求都帶同一份）；空＝請求不含 system 訊息。**預設應保持空**（見下） |
+| `polishSystemPrompt` | 現行 prompt | 潤飾的 system prompt 全文 |
+| `verifySystemPrompt` | 現行 prompt | 畫面核對的 system prompt 全文（畫面觀察與核對是同一個請求）；須保留 `TEXT:`、`OBSERVATION:` 兩行格式 |
+| `summaryGroupSystemPrompt` | 現行 prompt | 各 VAD-A 組摘要的 system prompt 全文；須保留 `SUMMARY:` 標記 |
+| `summaryVideoSystemPrompt` | 現行 prompt | 整支影片摘要的 system prompt 全文；須保留 `LANGUAGE:`、`SUMMARY:` 標記 |
+| `translateSystemPrompt` | 現行 prompt | 翻譯的 system prompt 全文 |
+
+**system prompt 參數**（上表末六列）：每個值替換該階段請求的 system 訊息全文，原樣送出；user 訊息（資料部分）與回答的解析在程式內，不開放。留空或僅含空白時用預設值，預設值（ASR 除外）就是現行的 prompt。每個值至多 8000 個字元，超過者在 `intake` 以 `CONFIGURATION` 失敗並指出參數名稱。回答不符程式解析所需的標記或 SRT 要求時，沿用既有的重試與降級，沒有新的失敗類別；所以改寫時不可刪去上表所列的標記，潤飾與翻譯也要保留「條目數、序號、時間行不變」的 SRT 要求。`asrSystemPrompt` 非空而 run 走 `audio.transcriptions` 時不使用，log 說明，不失敗。ASR 預設保持空的理由是對 Qwen3-ASR 的實驗：頂層 `language` 參數沒有作用；文字與 system 提示會在無人聲的窗口原樣輸出提示文字，並把雜音窗口改成短日語，使跨語言過濾失效；真實日語窗口的辨識沒有改善。操作見 [runbook](runbook.md) 第 6.4 節，各階段的請求與紀錄見 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「系統提示詞」。
 
 ## 文件索引
 

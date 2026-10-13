@@ -13,7 +13,7 @@
    - 失敗的窗口在 `sweep_window` 記錄為失敗，且該窗口的模型呼叫在 `exchange` 記為失敗（含失敗類型）。
    - `sweep-filtered` view 與 `degradations` view 列出失敗的窗口（影片時間、失敗類型），不靜默消失。既有欄位名稱與值不變。
    - log 有一行 `SWEEP FAILED window N (起 s to 訖 s)` 與原因；轉錄階段結果與 RUN SUMMARY 新增 `sweepFailed` 計數（補掃關閉時 log 與 RUN SUMMARY 仍與以前相同，補掃開啟但無空隙時該計數為 0）。
-3. **全部失敗的邊界**：沒有任何 VAD 條目且所有窗口都失敗時，run 以 `TRANSCRIPTION_FAILED` 失敗並指出原因，不以 `NO_SPEECH` 結束；只要有任一條目（VAD 或補掃）存在，run 繼續。
+3. **全部失敗的邊界**：沒有任何 VAD 條目、補掃也沒有產生條目，且至少一個窗口失敗時（其餘窗口為無語音），run 以 `TRANSCRIPTION_FAILED` 失敗並指出失敗的窗口數與第一個原因，不以 `NO_SPEECH` 結束；只要有任一條目（VAD 或補掃）存在，run 繼續。
 4. **不降級的情況**：取消仍使 run 取消；設定性錯誤（找不到 ASR 模型、無可用端點等會讓所有轉錄都失敗的錯誤）仍使 run 以原本的失敗類型失敗，不被降級吞掉。
 5. **驗證**：以 Fake OpenAI 伺服器涵蓋：單一窗口截斷（run 成功、條目數正確、計數與 view 正確）、多個窗口失敗、全部窗口失敗且有／無 VAD 條目、VAD 條目失敗仍使 run 失敗、取消、設定性錯誤、`sweepEnabled=false` 不受影響。
 6. **紀錄／版本**：若需要資料庫結構調整，使用下一個可用的結構版本，舊 run 的資料視為無失敗窗口。

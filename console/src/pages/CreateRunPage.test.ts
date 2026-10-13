@@ -248,6 +248,119 @@ describe('the form of the parameters', () => {
   });
 });
 
+describe('a parameter whose default is a long text', () => {
+  const PROMPT = Array.from({ length: 40 }, (_, i) => `Rule ${i + 1}: keep "quotes" & <tags> as they are.`).join('\n');
+  const withDefault = (value: string) => ({
+    seed: (b: TestApp['engine']['backend']) => {
+      b.seedArtifact(
+        'ada',
+        [{ name: 'p', className: 'x.P', parameters: [{ name: 'prompt', required: false, default: value }] }],
+        { contentHash: HASH },
+      );
+    },
+    query: `?contentHash=${HASH}&pipeline=p`,
+  });
+  const area = (view: HTMLElement) =>
+    view.querySelector<HTMLTextAreaElement>('textarea[name="param.prompt"]');
+  const shown = (view: HTMLElement) => view.querySelector<HTMLElement>('.params .default-text');
+  const fill = (view: HTMLElement) =>
+    [...view.querySelectorAll<HTMLButtonElement>('.params button')].find((b) =>
+      b.textContent!.includes('Fill in the default'),
+    );
+  /** The parameters in the body of the request that made the run: what the page sent, not what the Engine settled. */
+  const sent = () =>
+    JSON.parse(
+      app.engine.received.find((r) => r.method === 'POST' && r.path === '/api/v1/runs')!.body,
+    ).parameters;
+
+  test('is shown in full with its line breaks, in a text area for the value', async () => {
+    const view = await page(withDefault(PROMPT));
+    await ready(view);
+
+    expect(PROMPT.length).toBeGreaterThan(1500);
+    expect(shown(view)!.textContent).toBe(PROMPT);
+    expect(shown(view)!.querySelector('.multiline')).not.toBeNull();
+    expect(area(view)).not.toBeNull();
+    expect(view.querySelector('input[name="param.prompt"]')).toBeNull();
+    expect(area(view)!.value).toBe('');
+    expect(view.querySelector('.params')!.textContent).toContain('Left empty, the default is used.');
+  });
+
+  test('is a long text when it has a line break, or is longer than 80 characters', async () => {
+    const lines = await page(withDefault('a\nb'));
+    await ready(lines);
+    expect(area(lines)).not.toBeNull();
+    await app.dispose();
+
+    const long = await page(withDefault('x'.repeat(81)));
+    await ready(long);
+    expect(area(long)).not.toBeNull();
+    await app.dispose();
+
+    const edge = await page(withDefault('x'.repeat(80)));
+    await ready(edge);
+    expect(area(edge)).toBeNull();
+    expect(field(edge, 'prompt').placeholder).toBe('x'.repeat(80));
+    expect(shown(edge)).toBeNull();
+    expect(fill(edge)).toBeUndefined();
+    expect(edge.querySelector('.params')!.textContent).toContain(`Default: ${'x'.repeat(80)}`);
+  });
+
+  test('is not sent when nothing is done with it', async () => {
+    const view = await page(withDefault(PROMPT));
+    await ready(view);
+
+    submit(view).click();
+
+    await vi.waitFor(() => expect(runsMade()).toHaveLength(1));
+    expect(sent()).toEqual({});
+  });
+
+  test('can be filled in as the value to start from, and is sent as it is once chosen', async () => {
+    const view = await page(withDefault(PROMPT));
+    await ready(view);
+
+    fill(view)!.click();
+    await vi.waitFor(() => expect(area(view)!.value).toBe(PROMPT));
+    submit(view).click();
+
+    await vi.waitFor(() => expect(runsMade()).toHaveLength(1));
+    expect(sent()).toEqual({ prompt: PROMPT });
+  });
+
+  test('is replaced by a multi-line value that is typed, which is sent with its line breaks', async () => {
+    const view = await page(withDefault(PROMPT));
+    await ready(view);
+
+    const mine = 'first "line"\n  second <b>line</b>\n';
+    type(area(view) as unknown as HTMLInputElement, mine);
+    submit(view).click();
+
+    await vi.waitFor(() => expect(runsMade()).toHaveLength(1));
+    expect(sent()).toEqual({ prompt: mine });
+  });
+
+  test('is shown as text, whatever markup and quotes it holds', async () => {
+    const hostile = '<img src=x onerror="document.title=1">\n"><script>1</script>\'';
+    const view = await page(withDefault(hostile));
+    await ready(view);
+
+    expect(shown(view)!.textContent).toBe(hostile);
+    expect(view.querySelector('.params img, .params script')).toBeNull();
+    expect(shown(view)!.children).toHaveLength(1);
+    fill(view)!.click();
+    await vi.waitFor(() => expect(area(view)!.value).toBe(hostile));
+  });
+
+  test('has its words in Traditional Chinese too', async () => {
+    const view = await page({ ...withDefault(PROMPT), languages: ['zh-TW'] });
+    await ready(view);
+
+    const button = view.querySelector<HTMLButtonElement>('.params button')!;
+    expect(button.textContent!.trim()).toBe('以預設值填入');
+  });
+});
+
 describe('creating the run', () => {
   test('sends the parameters that were filled in, leaves out the empty ones, and goes to the run', async () => {
     const view = await page();

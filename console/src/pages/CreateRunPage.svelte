@@ -10,6 +10,7 @@
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
   import Link from '../ui/Link.svelte';
   import Notice from '../ui/Notice.svelte';
+  import ParameterValue from '../ui/ParameterValue.svelte';
   import PlainText from '../ui/PlainText.svelte';
 
   // Makes a run (`POST /api/v1/runs`) of a pipeline the caller may use: the form is made from the
@@ -233,28 +234,19 @@
                 <PlainText value={parameter.name} mono />
                 <span class="kind" class:required={parameter.required}>{label(parameter)}</span>
               </label>
-              <input
+              <ParameterValue
                 id={`param-${parameter.name}`}
-                class="rl-input mono"
-                type="text"
-                name={`param.${parameter.name}`}
-                autocomplete="off"
-                spellcheck="false"
-                placeholder={parameter.default ?? ''}
-                aria-invalid={shownErrors[parameter.name] ? 'true' : undefined}
-                aria-describedby={`param-help-${parameter.name}`}
+                fieldName={`param.${parameter.name}`}
+                parameter={parameter.name}
+                defaultValue={parameter.default}
+                invalid={!!shownErrors[parameter.name]}
+                leaveEmptyHint
                 bind:value={values[parameter.name]}
                 oninput={() => {
                   delete fieldErrors[parameter.name];
                   if (split.onFields[parameter.name]) failure = null;
                 }}
               />
-              <span class="rl-help" id={`param-help-${parameter.name}`}>
-                {#if parameter.default !== null}
-                  {i18n.t('createRun.default', { value: parameter.default })}
-                  {i18n.t('createRun.leaveEmpty')}
-                {/if}
-              </span>
               {#if shownErrors[parameter.name]}
                 <span class="rl-field-error">{shownErrors[parameter.name]}</span>
               {/if}

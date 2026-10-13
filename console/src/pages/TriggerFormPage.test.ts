@@ -95,6 +95,66 @@ describe('making a trigger', () => {
     expect(view.querySelector('[for="param-steps"]')!.textContent).toContain('optional');
   });
 
+  describe('a parameter whose default is a long text', () => {
+    const PROMPT = Array.from({ length: 40 }, (_, i) => `Rule ${i + 1}: keep "quotes" & <tags>.`).join('\n');
+    const longPage = async () => {
+      const result = await page({
+        query: `?contentHash=${HASH}&pipeline=prompted`,
+        seed: async () => {
+          app.engine.backend.seedArtifact(
+            'ada',
+            [{ name: 'prompted', className: 'x.P', parameters: [{ name: 'prompt', required: false, default: PROMPT }] }],
+            { contentHash: HASH },
+          );
+        },
+      });
+      await ready(result.view);
+      await tick();
+      return result.view;
+    };
+
+    test('is shown in full with its line breaks, in a text area, and is not sent unless it is chosen', async () => {
+      const view = await longPage();
+
+      const shown = view.querySelector<HTMLElement>('.params .default-text')!;
+      expect(shown.textContent).toBe(PROMPT);
+      expect(field(view, 'param-prompt') instanceof HTMLTextAreaElement).toBe(true);
+      expect(field<HTMLTextAreaElement>(view, 'param-prompt').value).toBe('');
+
+      type(field(view, 'trigger-name'), 'plain');
+      type(field(view, 'trigger-cron'), '30 9 * * 1-5');
+      submit(view);
+      await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+      expect((await app.context.api.trigger('plain')).parameters).toEqual({});
+    });
+
+    test('can be filled in to start from, and is then fixed as it is', async () => {
+      const view = await longPage();
+
+      [...view.querySelectorAll<HTMLButtonElement>('.params button')]
+        .find((b) => b.textContent!.includes('Fill in the default'))!
+        .click();
+      await tick();
+      expect(field<HTMLTextAreaElement>(view, 'param-prompt').value).toBe(PROMPT);
+
+      type(field(view, 'trigger-name'), 'filled');
+      type(field(view, 'trigger-cron'), '30 9 * * 1-5');
+      submit(view);
+      await vi.waitFor(() => expect(app.context.router.path).toBe('/triggers/detail'));
+      expect((await app.context.api.trigger('filled')).parameters).toEqual({ prompt: PROMPT });
+    });
+
+    test('keeps the short ones as they were: a line, with the default as the hint', async () => {
+      const { view } = await page({ query: `?contentHash=${HASH}&pipeline=demo-slow` });
+      await ready(view);
+      await tick();
+
+      expect(field(view, 'param-steps') instanceof HTMLInputElement).toBe(true);
+      expect(view.querySelector('.params .default-text')).toBeNull();
+      expect(view.querySelector('.params')!.textContent).toContain('Default: 30');
+    });
+  });
+
   test('says what a cron expression means as it is typed, and that there is no preview for what it cannot read', async () => {
     const { view } = await page();
     await ready(view);

@@ -2,7 +2,7 @@
 
 本文回答：管理員如何把 transcribe pipeline 在 Engine 上線、第一次怎麼安全地執行、之後怎麼呼叫與查結果、降級與中斷怎麼處置、出了問題怎麼查，以及哪些事還要使用者在有 Lemonade 的環境驗證。狀態：已核可（2026-10-12）。
 
-驗證範圍：本文的上傳、analyzer 判定、允許 unsafe、資源、綁定、trigger、webhook、整條流程（階段 1 至 12，含字幕檔寫出）、查詢、負向案例、取消、Engine 停止與強制結束、資源等候與逾時、降級、各設定與工具缺漏的失敗訊息，都在**打包的真實 Engine**（`engineDistribution` 產物，JDK 25，PostgreSQL 17 容器）上，以真實的 ffmpeg、真實的 VAD 工具 jar 與 silero-vad 模型、真實的 SQLite（`jdbc-pool`）實際執行；Docker 覆蓋層（單獨與合用瀏覽器）也跑過完整流程。**模型服務是 `runline-transcribe` 的 `FakeOpenAiServer`（真的在 port 上監聽的 OpenAI 相容服務），不是 Lemonade**：它的轉錄文字是預先給定的、它的「核對」「摘要」「翻譯」是依格式回答的，所以本文對模型行為（遵守率、thinking、圖片理解、簡體字）與 LLM 階段耗時**沒有任何結論**，那些在第 17 節列為使用者要驗證的項目。錯誤訊息與 log 是實際輸出，不是推測。其中最後一格畫面、`TRANSCRIBE_WORK_DIR`、設定類錯誤與模型清單檢查、VAD 暫存目錄、媒體失敗的分類這五項（附錄 A 的 1、2、4、5、6）是以 devkit 的 JVM（真實 ffmpeg、真實 VAD 工具、真實 SQLite、`FakeOpenAiServer`）驗證，沒有在打包的 Engine 上重跑；參數值含 U+0000 的處理與 `jdbc-statement` 執行緒警告的修正（附錄 A 的 3、7）以真實 PostgreSQL 與真實 SQLite 檔的 Engine 測試驗證。已驗證與未驗證的完整清單見第 16 節。補掃、降噪、各項生成量上限與逾時、各組摘要與新增的 view 只對 `FakeOpenAiServer` 或固定資料驗證，沒有對真實 Lemonade 與 arr 的 run 驗證（第 16、17 節）。
+驗證範圍：本文的上傳、analyzer 判定、允許 unsafe、資源、綁定、trigger、webhook、整條流程（階段 1 至 12，含字幕檔寫出）、查詢、負向案例、取消、Engine 停止與強制結束、資源等候與逾時、降級、各設定與工具缺漏的失敗訊息，都在**打包的真實 Engine**（`engineDistribution` 產物，JDK 25，PostgreSQL 17 容器）上，以真實的 ffmpeg、真實的 VAD 工具 jar 與 silero-vad 模型、真實的 SQLite（`jdbc-pool`）實際執行；Docker 覆蓋層（單獨與合用瀏覽器）也跑過完整流程。**模型服務是 `runline-transcribe` 的 `FakeOpenAiServer`（真的在 port 上監聽的 OpenAI 相容服務），不是 Lemonade**：它的轉錄文字是預先給定的、它的「核對」「摘要」「翻譯」是依格式回答的，所以本文對模型行為（遵守率、thinking、圖片理解、簡體字）與 LLM 階段耗時**沒有任何結論**，那些在第 17 節列為使用者要驗證的項目。錯誤訊息與 log 是實際輸出，不是推測。其中最後一格畫面、`TRANSCRIBE_WORK_DIR`、設定類錯誤與模型清單檢查、VAD 暫存目錄、媒體失敗的分類這五項（附錄 A 的 1、2、4、5、6）是以 devkit 的 JVM（真實 ffmpeg、真實 VAD 工具、真實 SQLite、`FakeOpenAiServer`）驗證，沒有在打包的 Engine 上重跑；參數值含 U+0000 的處理與 `jdbc-statement` 執行緒警告的修正（附錄 A 的 3、7）以真實 PostgreSQL 與真實 SQLite 檔的 Engine 測試驗證。已驗證與未驗證的完整清單見第 16 節。補掃、降噪、各項生成量上限與逾時、各組摘要、新增的 view 與 system prompt 參數只對 `FakeOpenAiServer` 或固定資料驗證，沒有對真實 Lemonade 與 arr 的 run 驗證（第 16、17 節）。
 
 > **三件事先知道。**
 > 1. **一次 run 很長。** 一小時影片的 LLM 階段需要數小時（容量估算見第 12 節），上限 6 小時的影片可達數十小時，期間獨佔 Lemonade 資源。中斷不續跑，要重做就重送。第一次一律用約 1 分鐘的樣本。
@@ -30,7 +30,7 @@ pipeline 名稱 `transcribe`，一個薄 jar（`runline-transcribe.jar`，只用
 
 **降噪（[ADR-046](adr/ADR-046-denoise-before-vad.md)）。** `denoise=true`（預設）時，`audio` 與 `vad` 之間多一個 `denoise` 階段，共 13 個階段，其後的階段序號加 1（log 為 `STAGE 5/13 denoise`、`STAGE 6/13 vad`，依此類推）；`denoise=false` 時是 12 個階段，與沒有降噪功能時相同，不呼叫降噪工具。降噪階段再擷取一份 48 kHz 單聲道音訊，交給降噪工具（外部行程，契約見 [05](05-ipc.md)），結果轉回 16 kHz 並於尾端補零到與原始音訊同樣的取樣數。**降噪音訊只給 `vad` 階段**，切片與轉錄一律取自原始音訊，所以條目時間與原始影片對齊。降噪階段不寫 `stage` 紀錄；是否降噪與工具自述記在 `run`（第 9 節）。
 
-**補掃（[ADR-044](adr/ADR-044-asr-coverage-sweep.md)）。** 屬於 `transcription` 階段的最後一段，不是獨立階段：VAD 條目轉錄完之後，相鄰條目之間（含影片首尾）超過 `sweepMinGapSeconds` 的空隙被切成長 `sweepWindowSeconds` 的窗口，逐窗口以同一個模型與端點轉錄。無語音的窗口丟棄；語言與整部影片的主要語言不同且文字太短者視為雜音幻覺而過濾；其餘成為新的字幕條目（來源標記為補掃，時間是窗口內的估計值），各自成為一個 VAD-A 組，與 VAD 條目依時間排序並重新編號。窗口轉錄失敗時略過該窗口（第 10 節）。參數的語意與預設值見[入口文件](README.md)「參數」，規則的細節見 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「補掃」。
+**補掃（[ADR-044](adr/ADR-044-asr-coverage-sweep.md)）。** 屬於 `transcription` 階段的最後一段，不是獨立階段：VAD 條目轉錄完之後，相鄰條目之間（含影片首尾）超過 `sweepMinGapSeconds` 的空隙被切成長 `sweepWindowSeconds` 的窗口，逐窗口以同一個模型與端點轉錄。無語音的窗口丟棄；語言與整部影片的主要語言不同且文字太短者視為雜音幻覺而過濾；其餘成為新的字幕條目（來源標記為補掃，時間是窗口內的估計值），各自成為一個 VAD-A 組，與 VAD 條目依時間排序並重新編號。窗口轉錄失敗時略過該窗口並計入降級（第 10 節）。參數的語意與預設值見[入口文件](README.md)「參數」，規則的細節見 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「補掃」。
 
 Lemonade 的並行是 1，所有請求逐一送出；階段依模型分批（轉錄全部完成才開始 gemma4 階段），減少模型切換。各階段的細節（提示、回答格式、驗證與退回規則）見 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)；設計見 [入口文件](README.md)。
 
@@ -179,7 +179,7 @@ pipeline 宣告兩個角色（程式只認角色名稱）；管理員建立資�
 
 ### 6.1 參數
 
-只有 `file` 由呼叫端（webhook 本文）提供；其餘固定在 trigger，或手動 run 時填寫。值都是字串。完整的 45 個參數與預設值以 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「參數」為準；生成量上限（`summaryMaxTokens`、`polishTokenMargin`、`translateTokenMargin`）、單次呼叫的牆鐘上限（`modelCallTimeoutSeconds`）、補掃（`sweepEnabled`、`sweepMinGapSeconds`、`sweepWindowSeconds`、`sweepMinChars`）與降噪（`denoise`、`denoiseAttenLimitDb`）的語意與預設值見[入口文件](README.md)「參數」，本文不重複。日常要決定的是：
+只有 `file` 由呼叫端（webhook 本文）提供；其餘固定在 trigger，或手動 run 時填寫。值都是字串。完整的 51 個參數與預設值以 [`runline-transcribe` 的 README](../../../../runline-transcribe/README.md)「參數」為準；生成量上限（`summaryMaxTokens`、`polishTokenMargin`、`translateTokenMargin`）、單次呼叫的牆鐘上限（`modelCallTimeoutSeconds`）、補掃（`sweepEnabled`、`sweepMinGapSeconds`、`sweepWindowSeconds`、`sweepMinChars`）、降噪（`denoise`、`denoiseAttenLimitDb`）與六個 system prompt 參數（`asrSystemPrompt`、`polishSystemPrompt`、`verifySystemPrompt`、`summaryGroupSystemPrompt`、`summaryVideoSystemPrompt`、`translateSystemPrompt`）的語意與預設值見[入口文件](README.md)「參數」，本文不重複；覆寫 prompt 的操作見第 6.4 節。日常要決定的是：
 
 | 參數 | 預設 | 說明 |
 |---|---|---|
@@ -272,6 +272,20 @@ cron trigger 讓 pipeline 在每次觸發時自己在收件根目錄找一部尚
 | 暫時不要某部影片被掃描 | 改名為點開頭、移出收件根目錄，或改成不在 `scanExtensions` 內的副檔名 |
 
 刪除或搬走字幕檔會使影片再被處理；字幕檔不屬於本 pipeline 的保留規則，不會自動清除。
+
+### 6.4 覆寫 system prompt 與長文字參數
+
+六個 system prompt 參數的語意、預設值、上限與必須保留的標記見[入口文件](README.md)「參數」，本節只寫操作。
+
+**怎麼覆寫。** 手動 run：Console 的建立 run 頁面在該參數填入完整的新 prompt（或 `POST /api/v1/runs` 的 `parameters`）；固定於 trigger：Console 的 trigger 表單或 trigger 的 `parameters`。沒有填的參數不送出，run 使用預設值；填空白也是預設值。只要改一個階段，就只填那一個參數。
+
+**怎麼看預設值全文。** 建立 run 與 trigger 表單對含換行或超過 80 字元的預設值，輸入欄位是多行文字區，預設值全文顯示在欄位下方可捲動的區塊，保留換行，並提供「以預設值填入」把預設值放進欄位作為修改的起點；不操作就不送出該參數（留空即預設值）。短的預設值維持單行輸入框，預設值以占位文字與說明列顯示。預設值與輸入都只當純文字顯示。已跑過的 run 實際用的 prompt 在表 `run_parameter`（套用預設值後的全文，第 9 節）；對話階段的 `exchange.prompt` 以 `[system]` 開頭記著送出的 system 訊息。
+
+**`PROMPTS` log 行。** `intake` 階段寫一行（在 system prompt 的長度檢查之後），標示六個 prompt 各是預設或自訂，自訂者附字元數，不印全文：`PROMPTS asr=default polish=custom(312 chars) verify=default summaryGroup=default summaryVideo=default translate=default`。出現 `custom` 的階段，其降級與重試要和自訂的內容一起看（下面的「格式不符」）。
+
+**`transcriptions` 端點忽略 ASR prompt。** 轉錄走 `audio.transcriptions`（`asrModel` 的 labels 含 `transcription`，或清單取不到，第 5.4 節）而 `asrSystemPrompt` 非空時，轉錄階段寫一行 `TRANSCRIBE NOTE asrSystemPrompt is not used by audio.transcriptions; only a chat-type recognizer is told it`，請求不變，run 不失敗。處置：不需要它就清空參數；需要它就改用走 `chat.completions` 的轉錄模型（並先在 arr 驗證，入口文件列的實驗結果是預設保持空的理由）。
+
+**自訂 prompt 使輸出格式不符。** 模型的回答缺少程式解析所需的標記，或潤飾、翻譯的回答改變了條目數、序號或時間行，該次嘗試算失敗，依第 10 節重試，用盡後該單位降級（保留上一階段文字，摘要缺少），run 結果為 `success-degraded`，沒有新的失敗類別。現象：該階段降級數高，log 的 `… RETRY … failed:` 與 `… DEGRADED …` 附原因（`NOT_SRT`、`COUNT_CHANGED`、`TIME_CHANGED`、核對的格式錯誤、摘要缺標記）；`PROMPTS` 行顯示該階段為 `custom`。處置：把該參數清空（回到預設值）重跑確認降級消失，再補回被刪去的標記或 SRT 要求。超過 8000 字元者在 `intake` 以 `CONFIGURATION` 失敗，訊息 `<參數名稱> must be at most 8000 characters`（第 15.2 節）。
 
 
 ## 7. webhook 呼叫格式
@@ -375,7 +389,7 @@ SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 
 ## 10. 降級的意義與退回規則
 
-**降級**：某一個單位的 LLM 處理在重試用盡（或回答不符契約）後，該單位採用**上一階段的文字**，run 仍然完成，降級數加一。字幕的條目數與時間永遠不變（[ADR-038](adr/ADR-038-segment-model-and-stage-invariants.md)），降級只影響文字的品質。降級總數等於各階段降級數之和，寫在 log 的 `OUTCOME`、`RUN SUMMARY`、`run.degraded`，各階段的在 `stage.degraded_count`。**降級數不是 0 的 run 是可用的，但某些文字是未經該階段處理的**；降級的 run 照常寫出字幕檔。
+**降級**：某一個單位的 LLM 處理在重試用盡（或回答不符契約）後，該單位採用**上一階段的文字**，run 仍然完成，降級數加一。字幕的條目數與時間永遠不變（[ADR-038](adr/ADR-038-segment-model-and-stage-invariants.md)），降級只影響文字的品質。降級總數等於各階段降級數之和，加上被略過的補掃窗口數（下表「補掃」列），寫在 log 的 `OUTCOME`、`RUN SUMMARY`、`run.degraded`，各階段的在 `stage.degraded_count`（轉錄階段不報告降級，所以 `RUN SUMMARY` 括號內沒有轉錄的項目，窗口數看 `sweepFailed`）。**降級數不是 0 的 run 是可用的，但某些文字是未經該階段處理的**；降級的 run 照常寫出字幕檔。
 
 | 階段 | 降級的單位 | 退回到 | 例外（不降級，run 失敗） |
 |---|---|---|---|
@@ -384,9 +398,9 @@ SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 | 核對 | 一個條目 | 該條目的潤飾文字，沒有畫面觀察；畫面取不出來時不送請求直接降級 | 同上 |
 | 摘要 | 全片摘要缺少算 1；各組摘要缺少記在 `group_summary`（`degraded` 為 1） | `result.summary` 與 `source_language` 為 NULL；之後不再送任何摘要請求 | 同上 |
 | 翻譯 | 一個 VAD-A 組 | 該組各條目的核對後文字（也就是未翻譯的來源語言文字） | 同上 |
-| 補掃 | **無降級，窗口被略過**：補掃窗口用盡重試（含 `TRUNCATED`、`TOTAL_TIMEOUT`、上游錯誤）後，該窗口不產生條目，run 繼續 | — | VAD 條目的轉錄失敗仍使 run 以 `TRANSCRIPTION_FAILED` 失敗；取消；`CONFIGURATION` 與 `MODEL_IDENTITY` 照原本的類型使 run 失敗，不被略過 |
+| 補掃 | 一個窗口：用盡重試（含 `TRUNCATED`、`TOTAL_TIMEOUT`、上游錯誤）後，該窗口被略過、不產生條目，run 繼續 | — | VAD 條目的轉錄失敗仍使 run 以 `TRANSCRIPTION_FAILED` 失敗；取消；`CONFIGURATION` 與 `MODEL_IDENTITY` 照原本的類型使 run 失敗，不被略過 |
 
-**被略過的補掃窗口目前不計入降級數**：`RUN SUMMARY` 的 `degraded=`、`OUTCOME` 與 `run.degraded` 都不含它，只有 `sweepFailed` 計數、`sweep_window`（`outcome = 'failed'`）、log 的 `SWEEP FAILED` 與 `exchange` 的失敗呼叫看得到。所以 `OUTCOME success` 的 run 仍可能有失敗的窗口，要看 `sweepFailed`。失敗窗口是否計入降級待後續工作項（WI-1443）決定（第 16.2 節）。沒有任何 VAD 條目、補掃也沒有產生條目，且至少一個窗口失敗時（其餘窗口為無語音），run 以 `TRANSCRIPTION_FAILED` 失敗，不以 `NO_SPEECH` 結束：有窗口沒問成，不能斷定沒有語音。
+**被略過的補掃窗口計入降級數**：失敗的窗口可能漏掉了語音，所以每個失敗窗口使 `RUN SUMMARY` 的 `degraded=`、`OUTCOME` 與 `run.degraded` 加 1，run 的結果為 `success-degraded`；沒有失敗窗口、補掃關閉時，降級數與結果不受補掃影響。哪些窗口失敗、為什麼，看 `sweepFailed` 計數、`sweep_window`（`outcome = 'failed'`）、log 的 `SWEEP FAILED` 與 `exchange` 的失敗呼叫。取消與失敗的 run 的結果不變；cron 掃描把 `success-degraded` 視為處理完成，不重試。沒有任何 VAD 條目、補掃也沒有產生條目，且至少一個窗口失敗時（其餘窗口為無語音），run 以 `TRANSCRIPTION_FAILED` 失敗，不以 `NO_SPEECH` 結束：有窗口沒問成，不能斷定沒有語音。
 
 **什麼算「回答不符契約」而重試**：潤飾與翻譯的回答條目數、順序、序號、時間行與送出的不同、有條目為空、不是 SRT（`NOT_SRT`、`COUNT_CHANGED`、`NUMBER_CHANGED`、`TIME_CHANGED`、`EMPTY_TEXT`）；翻譯的回答含簡體字（`SIMPLIFIED_CHARACTERS`）；核對的回答不是恰好 `TEXT:`、`OBSERVATION:` 兩行；摘要缺標記、超過長度、語言代碼不合；回答被 token 上限截斷（`TRUNCATED`，見下）。連線錯誤、逾時、429、5xx、其他非 2xx 也一樣重試。原因的名稱出現在 log。**來源語言已是繁體中文**（代碼 `zh-TW`、`zh-HK`、`zh-MO`、`zh-Hant`）的組不送翻譯請求，直接採用核對後文字，**不算降級**。
 
@@ -429,7 +443,8 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | `STOPPED n/12 名稱` | 階段被取消或逾時打斷（不是失敗） |
 | `TRANSCRIBE\|POLISH\|VERIFY\|SUMMARY\|TRANSLATE RETRY …` | 單次嘗試失敗，附原因，稍後重試 |
 | `… DEGRADED … kept …` | 一個單位重試用盡而降級，附最後一次的原因 |
-| `… NOTE …` | 提示，例如 `temperature is locked by the resource`（管理員鎖定了 `temperature`，pipeline 改為不送，由資源的 `defaults` 決定）。轉錄的 `TRANSCRIBE ENDPOINT`、`TRANSCRIBE NOTE`（清單取不到；`asrLanguage` 無效）見第 5.4 節 |
+| `… NOTE …` | 提示，例如 `temperature is locked by the resource`（管理員鎖定了 `temperature`，pipeline 改為不送，由資源的 `defaults` 決定）。轉錄的 `TRANSCRIBE ENDPOINT`、`TRANSCRIBE NOTE`（清單取不到；`asrLanguage` 無效）見第 5.4 節；`asrSystemPrompt` 不被 `audio.transcriptions` 使用的提示見第 6.4 節 |
+| `PROMPTS asr=… polish=… verify=… summaryGroup=… summaryVideo=… translate=…` | `intake` 階段一行：六個 system prompt 各是 `default` 或 `custom(N chars)`，讀法見第 6.4 節 |
 | `VERIFY SHRINK …` | 請求過大，縮小縮圖邊長重送（不算模型嘗試） |
 | `SWEEP PLAN windows=… seconds=…` | 補掃開始：窗口數與總秒數。沒有空隙時窗口數為 0 |
 | `SWEEP PROGRESS n/總數` | 每完成 25 個窗口一行 |
@@ -442,7 +457,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | `RESULT 3/12 intake: no video to take; files=0; … ms` | 掃描找不到候選：run 立即成功結束，接著 `RUN SUMMARY` 與 `OUTCOME success: NO_PENDING`（第 9 節）。選到影片時是 `RESULT 3/12 intake: file accepted; files=1 bytes=…` |
 | `RESULT n/12 名稱: …; truncated=N; …`（`transcription`、`polish`、`verify`、`summary`、`translate`） | 本階段被 token 上限截斷（`finish_reason` 為 `length`）的嘗試次數，**計入每一次被截斷的嘗試，含之後重試成功者**；所以 `truncated` 可大於 `degraded`，不是 0 就表示 `max_tokens` 不足以應付至少一次呼叫（第 15.3 節）。與 `SCAN` 行的 `truncated=true|false`（掃描項目過多）無關 |
 | `STORE WARN …` | 結束的紀錄寫不進去；不改變 run 的結果 |
-| `RUN SUMMARY entries=… degraded=N (polish=… verify=… summary=… translate=…) [sweepWindows=… sweepKept=… sweepNoSpeech=… sweepFiltered=… sweepEntries=… sweepSeconds=… sweepFailed=…] [denoise=on denoiseAttenLimitDb=… denoiseSeconds=…] modelCalls=… elapsed=… ms` | 所有階段完成後一行（失敗與停止的 run 沒有）。方括號的部分只在對應功能開啟時出現：補掃開啟的 run 有七個 `sweep*` 計數（`entries` 含補掃新增的條目；`sweepFailed` 是被略過的窗口數，補掃開啟但沒有空隙時為 0），降噪的 run 有三個 `denoise*` 詞；關閉時兩處與沒有該功能時相同。`degraded=` 與 `OUTCOME` 不含失敗的窗口（第 10 節）。`modelCalls` 是對 `llm` 資源送出的請求總數，含每次重試與補掃窗口的請求 |
+| `RUN SUMMARY entries=… degraded=N (polish=… verify=… summary=… translate=…) [sweepWindows=… sweepKept=… sweepNoSpeech=… sweepFiltered=… sweepEntries=… sweepSeconds=… sweepFailed=…] [denoise=on denoiseAttenLimitDb=… denoiseSeconds=…] modelCalls=… elapsed=… ms` | 所有階段完成後一行（失敗與停止的 run 沒有）。方括號的部分只在對應功能開啟時出現：補掃開啟的 run 有七個 `sweep*` 計數（`entries` 含補掃新增的條目；`sweepFailed` 是被略過的窗口數，補掃開啟但沒有空隙時為 0），降噪的 run 有三個 `denoise*` 詞；關閉時兩處與沒有該功能時相同。`degraded=` 與 `OUTCOME` 含失敗的窗口，括號內的各階段項目不含轉錄（第 10 節）。`modelCalls` 是對 `llm` 資源送出的請求總數，含每次重試與補掃窗口的請求 |
 | `OUTCOME …` | 最後一行（第 9 節的表）；掃描模式沒有待處理時是 `OUTCOME success: NO_PENDING` |
 
 `OUTCOME failed:` 後的分類：`CONFIGURATION`（設定或參數）、`INVALID_NAME`、`NOT_FOUND`、`UNREADABLE`（檔名）、`NO_SPEECH`、`TRANSCRIPTION_FAILED`、`MODEL_IDENTITY`、`VAD_TOOL_MISSING`、`VAD_TOOL_FAILED`、`VAD_TIMEOUT`、`VAD_BAD_OUTPUT`；字幕檔失敗的分類 `EXPORT_OUTSIDE_ROOT`、`EXPORT_DIRECTORY_NOT_WRITABLE`、`EXPORT_TARGET_NOT_REGULAR_FILE`、`EXPORT_WRITE_FAILED`（第 15.2 節）；媒體失敗的分類帶原因：`MEDIA_NO_AUDIO`（無音訊串流）、`MEDIA_CORRUPT`（損毀）、`MEDIA_TOO_LONG`（超過 `maxMediaSeconds`）、`MEDIA_TOOL_MISSING`（ffmpeg 或 ffprobe 不在 `PATH`）、`MEDIA_TOOL_FAILED`（工具失敗）、`MEDIA_TIMEOUT`（逾時），訊息在前一行 `FAILED` 裡。Engine 的 run 的 `failure.type` 是例外類別、`failure.message` 是同一句訊息。
@@ -478,7 +493,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 **與 [07](07-nfr-risks.md) 容量估算的對照：**
 
 - 07 假設一小時影片、語音佔 60%、VAD-B 平均 3 至 5 秒，約 400 至 700 段。本樣本每小時約 725 個條目，平均 3.85 秒（1.1 至 5.4 秒），落在同一個量級。
-- 07 的呼叫次數公式是 2N＋3A＋1，A 與 N 的比例取決於停頓長短。**本樣本 A／N ＝ 0.88**：語句之間的停頓都長於 A 的最小靜音（500 ms）時，每一組只有一個條目，組數接近 N；連續說話、組內有許多條目時 A 遠小於 N。N ＝ 600 時約 1,400 至 3,000 次。需要依實際素材的停頓長度判斷。
+- 07 的呼叫次數公式是 2N＋3A＋1（補掃開啟時另加窗口數 W），A 與 N 的比例取決於停頓長短。**本樣本 A／N ＝ 0.88**：語句之間的停頓都長於 A 的最小靜音（500 ms）時，每一組只有一個條目，組數接近 N；連續說話、組內有許多條目時 A 遠小於 N。N ＝ 600 時約 1,400 至 3,000 次。需要依實際素材的停頓長度判斷。
 - 每次呼叫 5 至 20 秒的假設**待量測**（需要真實 Lemonade，第 17 節）；因此「一小時影片需約 3 至 12 小時」「接近上限的影片約 18 至 72 小時」維持待量測。
 - 磁碟：WAV 約 115 MB／小時與 07 相符。
 
@@ -544,7 +559,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | `INVALID_NAME` | `file rejected: the name must not contain a parent segment (..)`；`… must be relative to the intake root`；`… resolves outside the intake root`；`… is not a regular file`；`… is empty`（`file` 只含空白字元也是這個訊息；`file` 完全為空是掃描模式，不是失敗） | 檔名不合法：含 `..`、絕對路徑、解析符號連結後在根目錄外、是目錄或根目錄本身、空。訊息**不含**根目錄或解析後的路徑，也不回顯呼叫端給的名稱。呼叫端修正檔名 |
 | `NOT_FOUND` | `file rejected: no such file in the intake root` | 檔案不存在（含指向不存在目標的符號連結）。確認影片已放進收件目錄、檔名大小寫與子目錄；Docker 確認宿主目錄已掛載 |
 | `UNREADABLE` | `file rejected: the file cannot be read` | Engine 帳號讀不到：宿主上檔案要對 other 可讀（`o+r`，目錄 `o+rx`） |
-| `CONFIGURATION` | `TRANSCRIBE_INTAKE_ROOT is not set`／`… is not an existing, readable directory`；`RUNLINE_VAD_MODEL is not set`／`… is not an existing, readable file`；`<參數名稱> must be …`；`TRANSCRIBE_WORK_DIR is not an existing, writable directory`（在 `cleanup`）；`llmModel names a model that the llm resource does not list`（`polishModel`、`verifyModel`、`translateModel` 同，在 `polish`）；`the llm resource cannot be used: ENDPOINT_NOT_ENABLED`／`MODEL_NOT_ALLOWED`／`DENIED`／`REQUEST_REJECTED (HTTP 404)`／`REQUEST_TOO_LARGE`／`PARAMETER_LOCKED`／`SECRET_UNAVAILABLE`／`REQUEST_REJECTED (HTTP 400): unsupported_operation: <服務的說明>`… | 第 3 節（環境變數）、第 6.1 節（參數）、第 5.1 節（資源）。資源本身的問題與服務回的 401、403、404（金鑰被拒、模型或端點不存在）不重試也不降級，run 立即失敗，轉錄與各對話階段一致；失敗發生的階段是第一次用到該能力的階段（`ENDPOINT_NOT_ENABLED` 在 `transcription`，`MODEL_NOT_ALLOWED` 與 404 在使用該模型的第一個階段）。模型不在服務的清單內由潤飾開始前的檢查發現，訊息只有參數名稱：對照 `GET <baseUrl>/models`，修正該參數。**轉錄階段的 `asrModel` 問題**（端點選擇見第 5.4 節）：(1) `asrModel <名稱> is not listed by the llm resource (labels seen: none)`＝模型清單可取得但沒有這個模型，或 `asrModel <名稱> has no labels in the model list of the llm resource (labels seen: …): the endpoint for it cannot be chosen`＝清單項目沒有 labels；訊息含模型名稱與看到的 labels，沒有送出任何音訊。對照 `GET <baseUrl>/models` 修正 `asrModel`；服務不提供 labels 時此 pipeline 無法使用該服務；(2) chat 路徑的請求過大：`the llm resource cannot be used: the audio of entry N (…) is larger than the resource or the service takes`＝該段音訊（WAV 的 base64）超過資源的 `maxRequestBytes` 或服務的上限，調高 `maxRequestBytes`（第 5.1 節）或縮短 VAD-B 段落（`maxSegmentSeconds`）；(3) **轉錄回 400 且訊息指出端點不支援該模型**（WI-1428；`the llm resource cannot be used: REQUEST_REJECTED (HTTP 400): unsupported_operation: …`，說明是服務自己的 `error.message`，經過遮蔽並限制長度）：chat 型模型現在依 labels 自動走 `chat.completions`，所以出現這個訊息代表 `asrModel` 誤指向不支援該端點的模型（例如清單取不到而沿用 `audio.transcriptions`，或模型的 labels 與服務實際支援的端點不符）。服務對該端點一律拒絕，重試不會改變結果，所以不重試、run 立即失敗。處置：啟用 `models.list` 並確認 `asrModel` 是轉錄用的模型，然後重送；(4) **`asrModel` 誤指向不吃音訊的 chat 模型**（例如純文字的 Gemma）：labels 不含 `transcription`，走 `chat.completions`，第一個請求以 4xx 失敗，說明在 run 的失敗訊息與 `exchange.error`（見 [ADR-042](adr/ADR-042-asr-by-model-labels.md) 的後果）；以 `exchange.endpoint`、`run.asr_endpoint`、`run.asr_labels` 查實際走哪條路，把 `asrModel` 改為轉錄用的模型。服務對 4xx 的說明也記在該次呼叫的 `exchange.error`（`<error.type>: <error.message>`；服務沒有說明、不是 OpenAI 錯誤格式、或不是 4xx 時為空；結構版本 5 之前的呼叫為空）。所有對話階段的 4xx 一樣處理：`unsupported_operation` 的 400 立即失敗，其他 4xx 的說明併入重試與降級的訊息 |
+| `CONFIGURATION` | `TRANSCRIBE_INTAKE_ROOT is not set`／`… is not an existing, readable directory`；`RUNLINE_VAD_MODEL is not set`／`… is not an existing, readable file`；`<參數名稱> must be …`（例如 `polishSystemPrompt must be at most 8000 characters`，第 6.4 節）；`TRANSCRIBE_WORK_DIR is not an existing, writable directory`（在 `cleanup`）；`llmModel names a model that the llm resource does not list`（`polishModel`、`verifyModel`、`translateModel` 同，在 `polish`）；`the llm resource cannot be used: ENDPOINT_NOT_ENABLED`／`MODEL_NOT_ALLOWED`／`DENIED`／`REQUEST_REJECTED (HTTP 404)`／`REQUEST_TOO_LARGE`／`PARAMETER_LOCKED`／`SECRET_UNAVAILABLE`／`REQUEST_REJECTED (HTTP 400): unsupported_operation: <服務的說明>`… | 第 3 節（環境變數）、第 6.1 節（參數）、第 5.1 節（資源）。資源本身的問題與服務回的 401、403、404（金鑰被拒、模型或端點不存在）不重試也不降級，run 立即失敗，轉錄與各對話階段一致；失敗發生的階段是第一次用到該能力的階段（`ENDPOINT_NOT_ENABLED` 在 `transcription`，`MODEL_NOT_ALLOWED` 與 404 在使用該模型的第一個階段）。模型不在服務的清單內由潤飾開始前的檢查發現，訊息只有參數名稱：對照 `GET <baseUrl>/models`，修正該參數。**轉錄階段的 `asrModel` 問題**（端點選擇見第 5.4 節）：(1) `asrModel <名稱> is not listed by the llm resource (labels seen: none)`＝模型清單可取得但沒有這個模型，或 `asrModel <名稱> has no labels in the model list of the llm resource (labels seen: …): the endpoint for it cannot be chosen`＝清單項目沒有 labels；訊息含模型名稱與看到的 labels，沒有送出任何音訊。對照 `GET <baseUrl>/models` 修正 `asrModel`；服務不提供 labels 時此 pipeline 無法使用該服務；(2) chat 路徑的請求過大：`the llm resource cannot be used: the audio of entry N (…) is larger than the resource or the service takes`＝該段音訊（WAV 的 base64）超過資源的 `maxRequestBytes` 或服務的上限，調高 `maxRequestBytes`（第 5.1 節）或縮短 VAD-B 段落（`maxSegmentSeconds`）；(3) **轉錄回 400 且訊息指出端點不支援該模型**（WI-1428；`the llm resource cannot be used: REQUEST_REJECTED (HTTP 400): unsupported_operation: …`，說明是服務自己的 `error.message`，經過遮蔽並限制長度）：chat 型模型現在依 labels 自動走 `chat.completions`，所以出現這個訊息代表 `asrModel` 誤指向不支援該端點的模型（例如清單取不到而沿用 `audio.transcriptions`，或模型的 labels 與服務實際支援的端點不符）。服務對該端點一律拒絕，重試不會改變結果，所以不重試、run 立即失敗。處置：啟用 `models.list` 並確認 `asrModel` 是轉錄用的模型，然後重送；(4) **`asrModel` 誤指向不吃音訊的 chat 模型**（例如純文字的 Gemma）：labels 不含 `transcription`，走 `chat.completions`，第一個請求以 4xx 失敗，說明在 run 的失敗訊息與 `exchange.error`（見 [ADR-042](adr/ADR-042-asr-by-model-labels.md) 的後果）；以 `exchange.endpoint`、`run.asr_endpoint`、`run.asr_labels` 查實際走哪條路，把 `asrModel` 改為轉錄用的模型。服務對 4xx 的說明也記在該次呼叫的 `exchange.error`（`<error.type>: <error.message>`；服務沒有說明、不是 OpenAI 錯誤格式、或不是 4xx 時為空；結構版本 5 之前的呼叫為空）。所有對話階段的 4xx 一樣處理：`unsupported_operation` 的 400 立即失敗，其他 4xx 的說明併入重試與降級的訊息 |
 | `CONFIGURATION`（`PARAMETER_LOCKED`、`VALUE_ABOVE_LIMIT`） | `the llm resource cannot be used: PARAMETER_LOCKED`；`… VALUE_ABOVE_LIMIT` | **資源鎖定了 pipeline 必須送的欄位，或限制的上限低於 pipeline 要送的值**。摘要、潤飾、翻譯三個階段送自己決定的 `max_tokens`（第 5.1 節）：資源的 `lockedParameters` 含 `max_tokens`，或 `maxValues.max_tokens` 低於 pipeline 算出的上限（潤飾與翻譯的上限隨該組輸入而定），請求即被拒，run 立即失敗，不重試也不降級。處置：從資源移除 `max_tokens` 的鎖定，或調高 `maxValues.max_tokens`（資源設定見 [pipeline-engine 的 API 文件](../pipeline-engine/08-api.md)）；或降低 `summaryMaxTokens`、`polishTokenMargin`、`translateTokenMargin`（[入口文件](README.md)「參數」）。**`temperature` 被鎖定不是失敗**：被拒的請求去掉該欄位重送，之後整個 run 都不送，log 一行 `… NOTE temperature is locked by the resource; the resource's value applies`，取樣由資源的 `defaults` 決定 |
 | `CONFIGURATION`（`denoise`；降噪工具缺少或失敗） | `<命令> could not be started; the denoising tool must be installed (denoise=false runs without it)`；`<runline-denoise> exited with exit code 1: RUNLINE_DENOISE_BINARY is not set`／`… is not an executable file`／`the sha256 of RUNLINE_DENOISE_BINARY is not the pinned … of deep-filter 0.5.6`／`there is no pinned deep-filter for <系統> <架構>`／`deep-filter failed: …`；`the denoising tool did not finish within 1800 s and was stopped`；`the denoising tool wrote <N> Hz, not 48 kHz mono`；`the audio of the denoising tool is shorter than its input by N samples, more than the lookahead of the model`；`denoiseAttenLimitDb must be a number from 0 to 100`（在 `intake`） | 降噪工具未安裝、`TRANSCRIBE_DENOISE_COMMAND` 或 `RUNLINE_DENOISE_BINARY` 不對、預編譯檔不是固定的那一個（雜湊不符）、平台沒有固定的預編譯檔、deep-filter 執行失敗、逾時（30 分鐘），或輸出不合契約。run 在 `denoise` 階段失敗，**不靜默略過**。處置：依第 2.4 節安裝並確認；不要降噪時在 trigger 固定 `denoise=false`（run 與沒有降噪功能時相同） |
 | `EXPORT_DIRECTORY_NOT_WRITABLE`（`intake`；`export` 前的再檢查也可能出現） | `subtitle files: the directory of the video cannot be written to` | Engine 帳號對**影片所在目錄**沒有寫入權限。Docker：宿主目錄要讓 Engine 的 uid 可寫（規則見 04-deployment），掛載不可是唯讀；systemd：目錄要讓 `runline` 可寫。run 在 `intake` 就失敗，不做轉錄。以 root 執行時這項檢查可能不成立（不要以 root 執行 Engine） |
@@ -567,14 +582,14 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 
 | 現象 | 原因與處置 |
 |---|---|
-| `success-degraded`，降級數高 | 第 10 節的表；先看 log 的 `… DEGRADED` 行的原因是否一致 |
+| `success-degraded`，降級數高 | 第 10 節的表；先看 log 的 `… DEGRADED` 行的原因是否一致；`PROMPTS` 行有 `custom` 的階段，先排除自訂 prompt 使格式不符（第 6.4 節） |
 | 摘要與來源語言為 NULL | 摘要階段降級（`SUMMARY DEGRADED`）；字幕與翻譯不受影響（翻譯的摘要處寫 `(none)`） |
 | 兩份 SRT 的條目比影片的句子少 | 無語音的條目（轉錄為空）不輸出；VAD 參數決定切分，`segmentation` 的 `a`／`b` 與 `transcription` 的 `noSpeech` 說明 |
 | 翻譯文字與來源文字相同 | 來源語言已是繁體中文（不送翻譯，不降級），或該組降級（`translate` 的 `exchange.outcome` 為 `fallback`） |
 | 時間不準 | 字幕條目的時間是 VAD 判定的語音區間，不是模型給的；VAD 參數見 README。補掃條目（`entries` view 的來源為 `sweep`）的時間是窗口內的估計，粒度最長 `sweepWindowSeconds`，長文字依句子與字元數比例分配，精度低於 VAD 條目；窗口邊界可能把一句話切成兩個條目 |
 | 大量 `TRUNCATED`（log 的 `… failed: TRUNCATED`、`… DEGRADED … TRUNCATED`，或階段結果行的 `truncated=N` 不是 0；意義見第 10、11 節） | **原因**：(a) 摘要、潤飾、翻譯：pipeline 送出的生成量上限太小（thinking 開時推理與答案共用此額度），調高 `summaryMaxTokens`、`polishTokenMargin` 或 `translateTokenMargin`（[入口文件](README.md)「參數」）；(b) 轉錄與核對：`llm` 資源 `settings.defaults` 的 `max_tokens` 太小。以下為 (b) 的說明。thinking 模型把額度用在推理上，答案尚未開始就用完，回空字串並帶 `finish_reason=length`（不是錯誤，也不是格式錯誤）。**處置**：(a) 調高上述參數；(b) 調高該資源 `defaults` 的 `max_tokens`（第 5.1 節）；兩者都可把 `llmThinking` 設為 `off`（及 `polishThinking`、`verifyThinking`、`translateThinking`；對真實 Lemonade 是否生效未驗證，第 17 節第 5 項），然後重送。截斷的呼叫若是失控的生成（答案寫完後模型繼續輸出），上限的作用是讓它在數十秒內結束並重試，而不是調到容得下失控的長度。**查詢**：被截斷的呼叫是表 `exchange` 中 `finish_reason = 'length'` 者，依 `run_id` 對 `stage`、`outcome` 分組計數可知哪個階段、有多少次最後降級（`fallback`）；`stage`、`target`、`target_seq` 指出是哪一個單位。結構版本 4 之前的呼叫 `finish_reason` 為空 |
 | 大量 `TOTAL_TIMEOUT`（log 的 `… failed: TOTAL_TIMEOUT`；`exchange.error` 為 `TOTAL_TIMEOUT`） | 單次呼叫超過 `modelCallTimeoutSeconds`（預設 180 秒）。可能是模型失控生成、服務過慢，或該階段的單次呼叫本來就需要更久（thinking 開、大組）。查 `exchange` 的 `duration_ms` 與 `stage` 分布；服務過慢或需要更久時調高 `modelCallTimeoutSeconds`，但它只能縮短資源自己的逾時，不能放寬。轉錄的條目逾時用盡會使 run 失敗（`TRANSCRIPTION_FAILED`），補掃窗口被略過，其他階段降級 |
-| `RUN SUMMARY` 的 `sweepFailed` 不是 0 | 有補掃窗口用盡重試而被略過；run 仍是 `success`（失敗窗口目前不計入降級，第 10 節）。`SWEEP FAILED` 行或 `sweep-filtered`、`degradations` view 列出窗口時間與失敗類型。原因多為雜音窗口讓模型失控而 `TRUNCATED` 或 `TOTAL_TIMEOUT`，這些窗口原本就很可能沒有可用語音；失敗窗口很多或失敗類型是服務錯誤時，先查服務 |
+| `RUN SUMMARY` 的 `sweepFailed` 不是 0 | 有補掃窗口用盡重試而被略過；每個失敗窗口計入降級，所以 run 是 `success-degraded`，`degraded=` 至少等於 `sweepFailed`（第 10 節）。`SWEEP FAILED` 行或 `sweep-filtered`、`degradations` view 列出窗口時間與失敗類型。原因多為雜音窗口讓模型失控而 `TRUNCATED` 或 `TOTAL_TIMEOUT`，這些窗口原本就很可能沒有可用語音；失敗窗口很多或失敗類型是服務錯誤時，先查服務 |
 | 字幕裡有雜音造成的短句，或仍有明顯的人聲沒有字幕 | 看 `sweep-filtered` view 與 `sweep_window`：被過濾的窗口（`filtered`）是否誤丟真實的短句（主要語言不同的短句會被丟，可調小 `sweepMinChars`）；`no_speech` 太多可能是空隙內確實沒有語音；人聲仍沒字幕時，檢查是否落在不超過 `sweepMinGapSeconds` 的空隙內（調小它），以及降噪是否開啟。預設值是推導值，未在 arr 驗證 |
 | 懷疑降噪造成條目變多或變少 | 降噪只影響 VAD 的判定，不影響切片與轉錄的音訊。在 trigger 固定 `denoise=false` 重跑同一支影片比較 `segmentation` 的 `a`、`b` 與涵蓋範圍；`run.denoise_tool` 與 `run_parameter` 的 `denoiseAttenLimitDb` 說明該 run 用的工具與衰減上限 |
 | 同一支影片重跑，個別段落的轉錄文字不同 | ASR 在 `asrTemperature=0` 下跨批次仍有少量不穩定（ADR-046 實測 1 到 4 段文字不同）。比較或驗收看總量（條目數、涵蓋範圍、文字總量），不看單段文字 |
@@ -632,8 +647,10 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 部署檔：檢查腳本的工作目錄判定與收件根目錄可寫判定、`runline-vad` 包裝腳本傳遞 `JDK_JAVA_OPTIONS` | 腳本層測試通過（含突變驗證）；未在真實映像與 systemd 下實跑 |
 | 生成量上限與牆鐘上限（WI-1432、WI-1434、WI-1437）：`summaryMaxTokens`、`polishTokenMargin`、`translateTokenMargin` 的請求值、重試與備援沿用同一上限、`TRUNCATED` 的重試與降級；`modelCallTimeoutSeconds` 的 `TOTAL_TIMEOUT`、`exchange.endpoint` 與 `exchange.error` 的記錄 | 以 `FakeOpenAiServer` 驗證（含失控的生成與逾時情境）。不是打包的 Engine，也不是真實 Lemonade |
 | 各組摘要與新增的 view（WI-1433、WI-1435）：`group_summary` 的成功、降級、舊版本 run 升級；`summary`、`frames` | 以真實 SQLite 與有代表性的資料驗證；`summary`、`frames` 在既有的 `engine.jar` 上讀取過（WI-1433）；各組摘要的列沒有上傳到真實 Engine 讀取。Console 畫面未驗證 |
-| 補掃（WI-1436、WI-1441）：空隙窗口的規劃、`language None` 丟棄、跨語言短回答的過濾、長文字拆分與時間比例、不與 VAD 條目重疊、`sweepEnabled=false`、影片首尾空隙、沒有 VAD 段；窗口失敗被略過、`sweepFailed`、全部失敗與無語音的邊界、取消與設定性錯誤不被吞掉；`entries`、`degradations`、`sweep-filtered` 的欄位 | 以 `FakeOpenAiServer` 驗證，另以 arr 的 NTRH-002-C.mp4 的空隙清單（ADR-044 背景）為固定輸入驗證窗口規劃（依預設值得 28 個窗口）。**預設值是推導值，補掃對真實 Lemonade 的成效未驗證** |
+| 補掃（WI-1436、WI-1441、WI-1443）：空隙窗口的規劃、`language None` 丟棄、跨語言短回答的過濾、長文字拆分與時間比例、不與 VAD 條目重疊、`sweepEnabled=false`、影片首尾空隙、沒有 VAD 段；窗口失敗被略過並計入降級、`sweepFailed`、全部失敗與無語音的邊界、取消與設定性錯誤不被吞掉；`entries`、`degradations`、`sweep-filtered` 的欄位 | 以 `FakeOpenAiServer` 驗證，另以 arr 的 NTRH-002-C.mp4 的空隙清單（ADR-044 背景）為固定輸入驗證窗口規劃（依預設值得 28 個窗口）。**預設值是推導值，補掃對真實 Lemonade 的成效未驗證** |
 | 降噪（WI-1440）：包裝腳本與固定雜湊、不位移（互相關延遲為 0）、衰減上限 0 原樣輸出、輸出不比輸入長且最多短 100 毫秒、pipeline 尾端補零、`denoise=false` 與工具缺少的行為、`run.denoise_enabled`／`denoise_tool` | 以真實的 deep-filter（macOS arm64 預編譯檔）、真實 ffmpeg 與真實 VAD 工具驗證。**驗收 7 以固定資料驗證**：arr 影片 NTRH-002-C.mp4 的 `orig48.wav` 與離線實驗的降噪輸出、silero 區間（37 段、涵蓋 20.46%、邊界差 0.0 秒）；固定資料在儲存庫之外（`~/fixtures/dfn/`），測試需設環境變數 `TRANSCRIBE_DFN_FIXTURES`，未設則依賴它的 4 個測試失敗。Linux x86_64 預編譯檔另在 arr 的 Engine 容器內執行過（[ADR-046](adr/ADR-046-denoise-before-vad.md)） |
+| system prompt 參數（WI-1445）：全部留空時各階段的請求與沒有這些參數時逐位元相同；各參數分別自訂時只有對應階段的請求改變；ASR 的 VAD 條目與補掃窗口都帶 system 訊息；`audio.transcriptions` 不送並有 log；超過上限、僅空白、多行與非 ASCII；自訂 prompt 使格式不符走既有的降級；`PROMPTS` 行與 `run_parameter`、`exchange.prompt` 的紀錄；參數宣告的預設值等於實際發送的 prompt | 以 `FakeOpenAiServer` 驗證，相關 292 個測試通過，未跑完整測試。不是打包的 Engine，也不是真實 Lemonade |
+| Console 長文字預設值（WI-1446）：建立 run 與 trigger 表單的多行輸入、預設值全文、「以預設值填入」、留空不送出、特殊字元當作文字 | Console 單元與元件測試 1380 個通過、型別檢查 0 錯誤；e2e 與瀏覽器的實際外觀未驗證 |
 
 ### 16.2 未驗證
 
@@ -655,10 +672,10 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 字幕檔輸出在真實 Lemonade、真實素材與播放器上的行為；以 root 執行時目錄不可寫的檢查 | WI-1420 與 WI-1421 只用 `FakeOpenAiServer` 與合成素材；沒有以 root 執行 Engine 的驗證 |
 | 上列 devkit 驗證的修復在打包 Engine 與真實 Lemonade 上的行為（尤其是真實 Lemonade 的 `models.list` 回報格式、404 與 401 的實際狀態碼、`JDK_JAVA_OPTIONS` 在 Docker 與 systemd 的 `runline-vad` 包裝腳本下對 VAD 工具 JVM 的生效） | 沒有重跑打包的 Engine 與 Lemonade；見第 17 節的第 1 項 |
 | **補掃對真實 Lemonade 的成效**：`sweepMinGapSeconds`（3）能否漏掉 3 至 3.9 秒空隙內的人聲、`sweepMinChars`（5）誤丟與誤留的比例、補掃與降噪合併後的實際成效 | 預設值由 arr 的一支影片推導；沒有真實 run（第 17 節第 12 項） |
-| **降噪在 Linux 容器內的完整行為**：包裝腳本與固定雜湊檢查在 Linux 容器內、打包 Engine 內的完整 run、工作目錄容量（04 的 0.9 GB／小時由格式推算，未量測） | 只有 Linux 預編譯檔本身在 arr 的 Engine 容器內執行過；映像與覆蓋層不含降噪工具，檢查腳本不檢查它（第 17 節第 13 項） |
+| **降噪在 Linux 容器內的完整行為**：包裝腳本與固定雜湊檢查在 Linux 容器內、打包 Engine 內的完整 run、工作目錄容量（04 的 0.9 GB／小時由格式推算，未量測） | 映像與檢查腳本已涵蓋降噪工具（WI-1444，[deploy/transcribe.md](../../../deploy/transcribe.md)「降噪工具」），包裝腳本與 `runline-transcribe-check` 在 Engine 基底映像（amd64）內驗證過；打包 Engine 內的完整 run 沒有跑，新映像待部署新 tag（第 17 節第 13 項） |
 | **生成量上限與牆鐘上限的預設值**：`summaryMaxTokens`（4096）、兩個餘裕（1024）、翻譯的倍數 1.5、`modelCallTimeoutSeconds`（180）；真實 Lemonade 是否遵守請求的 `max_tokens` | 預設值是依 arr 兩次 run 推導的值；正常翻譯的 token 數與輸入字元數的比例、大組是否被誤截斷、核對是否需要固定上限都待量測（第 17 節第 14 項） |
 | 各組摘要的列、`sweep-filtered` 與新增欄位在打包 Engine 上的讀取；Console 畫面 | 只用測試資料庫驗證（`summary`、`frames` 在既有 `engine.jar` 上讀取過）（第 17 節第 15 項） |
-| **失敗的補掃窗口是否計入降級** | 目前不計入 `degraded=` 與 `OUTCOME`（第 10 節）；是否計入待 WI-1443 |
+| **system prompt 參數對真實 Lemonade 的效果**：自訂 prompt 對 gemma4 輸出格式的遵守率、`asrSystemPrompt` 對 Qwen3-ASR 的影響；Console 的長文字欄位在瀏覽器的實際外觀與 e2e | 請求與紀錄只對 `FakeOpenAiServer` 驗證；Console 只有單元與元件測試（第 17 節第 16 項） |
 | analyzer 判定（第 4 節的 31 項）對含降噪與補掃的新版 jar | 清單取自較早的版本，沒有對新版 jar 重新核對 |
 
 ## 17. 使用者在有 Lemonade 的環境要驗證的項目
@@ -682,6 +699,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 13 | **降噪** | 用含降噪工具的映像（第 2.4 節）部署後，同一支影片以 `denoise=true`（預設）跑一次 | `RESULT … denoise: audio denoised` 與 `SEGMENTATION denoise=on …`；`run.denoise_tool` 的雜湊是 [04](04-deployment.md) 的 Linux 值；VAD 區間與涵蓋範圍與 ADR-046 的離線結果（37 段、涵蓋 20.5%）相近；降噪耗時（ADR-046 為 234 秒音訊約 38 秒）；工作目錄的實際容量 |
 | 14 | **生成量上限與逾時** | 第 9 項的完整 run 之後，看 `exchange` 與 log | 正常的組 `truncated=0`；失控的呼叫（如有）在上限內結束；記錄正常翻譯的 `completion_tokens` 與輸入 SRT 字元數的比例、核對的 `completion_tokens` 最大值（決定核對是否需要固定上限）；有無 `TOTAL_TIMEOUT`；真實 Lemonade 是否遵守 `max_tokens` |
 | 15 | **新增的 view 與各組摘要** | 在 Console 開 `summary`、`frames`、`sweep-filtered`、`entries`、`degradations` | 表格可讀、各組摘要與整部影片摘要都在、畫面時間點對得上影片、補掃條目標示為估計時間、失敗的窗口列出失敗類型 |
+| 16 | **system prompt 參數** | 在 arr 的 run 以 `polishSystemPrompt` 或 `translateSystemPrompt` 自訂一個保留格式要求的 prompt 跑一次；`asrSystemPrompt` 另在 homelab-deployer 的實驗環境驗證（預設保持空） | log 的 `PROMPTS` 行標示自訂的階段；該階段降級數與預設值的 run 相近；`exchange.prompt` 以 `[system]` 開頭且是自訂的全文；Console 建立 run 頁面在瀏覽器顯示預設值全文、「以預設值填入」可用 |
 
 ## 附錄 A：端到端驗證發現的小落差與狀態
 

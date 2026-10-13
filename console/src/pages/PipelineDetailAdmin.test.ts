@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { tick } from 'svelte';
 import { createTestApp, type TestApp } from '../../test-support/app';
+import type { FakeRun } from '../../test-support/fake-backend';
 import PipelineDetailPage from './PipelineDetailPage.svelte';
 
 // What an admin can do on the page of a pipeline, besides reading it: allow it to run although it is
@@ -162,12 +163,29 @@ describe('unsafe execution', () => {
 });
 
 describe('deleting the version', () => {
-  test('asks first, and says what goes: the version and each pipeline in it, and that it cannot be undone', async () => {
-    const view = await page();
+  const open = async (view: HTMLElement) => {
     await ready(view);
-
     button(admin(view), 'Delete this version').click();
     await tick();
+  };
+  /** The dialog has what the preview said. */
+  const shown = (view: HTMLElement) =>
+    vi.waitFor(() => expect(dialog(view).querySelector('.impact, .blocked')).not.toBeNull());
+  const confirm = (view: HTMLElement) => button(dialog(view), 'Delete the version');
+  const seedRuns = (b: TestApp['engine']['backend'], ...states: FakeRun['state'][]) =>
+    states.forEach((state, i) =>
+      b.seedRun('ada', {
+        contentHash: HASH,
+        pipeline: 'order-sync',
+        state,
+        createdAt: `2026-0${i + 1}-05T10:00:00Z`,
+      }),
+    );
+
+  test('asks first, and says what goes: the version and each pipeline in it, and that it cannot be undone', async () => {
+    const view = await page();
+    await open(view);
+    await shown(view);
 
     const ask = dialog(view);
     expect(ask.querySelector('h2')!.textContent).toBe('Delete version c0ffee1?');
@@ -177,60 +195,207 @@ describe('deleting the version', () => {
     expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
   });
 
-  test('deletes it when confirmed, and shows the list of pipelines', async () => {
+  test('cannot be confirmed while the impact is being read', async () => {
     const view = await page();
-    await ready(view);
-    button(admin(view), 'Delete this version').click();
-    await tick();
+    await open(view);
 
-    button(dialog(view), 'Delete the version').click();
+    expect(dialog(view).textContent).toContain('Loading');
+    expect(confirm(view).disabled).toBe(true);
+    await shown(view);
+    expect(confirm(view).disabled).toBe(false);
+  });
+
+  test('says when the impact could not be read, and cannot be confirmed; Cancel still closes it', async () => {
+    const view = await page();
+    app.engine.faults.push({ match: /deletion-impact/, status: 500, body: { error: 'internal_error', message: 'x', errorId: 'e-1' }, times: 1 });
+    await open(view);
+
+    await vi.waitFor(() => expect(dialog(view).querySelector('[role="alert"]')).not.toBeNull());
+    expect(confirm(view).disabled).toBe(true);
+    expect(button(dialog(view), 'Cancel').disabled).toBe(false);
+    button(dialog(view), 'Cancel').click();
+    await tick();
+    expect(dialog(view)).toBeNull();
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('shows what the preview counted: the runs by state, when they were made, the log lines, and that the jar goes', async () => {
+    const view = await page({
+      seed: (b) => {
+        seedRuns(b, 'SUCCEEDED', 'SUCCEEDED', 'FAILED');
+        b.write(b.runs.find((r) => r.contentHash === HASH)!.runId, 'one', 'two');
+      },
+    });
+    await open(view);
+    await shown(view);
+
+    const impact = dialog(view).querySelector('.impact')!;
+    expect(impact.textContent).toContain('3 runs');
+    expect(impact.textContent).toContain('SUCCEEDED');
+    expect(impact.textContent).toContain('2 log entries');
+    expect(impact.querySelector('.states')!.textContent).toMatch(/SUCCEEDED\D*2/);
+    expect(impact.querySelector('.states')!.textContent).toMatch(/FAILED\D*1/);
+    expect(impact.querySelectorAll('time')).toHaveLength(2);
+    expect(impact.querySelectorAll('time')[0].getAttribute('datetime')).toBe('2026-01-05T10:00:00Z');
+    expect(impact.querySelectorAll('time')[1].getAttribute('datetime')).toBe('2026-03-05T10:00:00Z');
+    expect(dialog(view).textContent).toContain('and their log entries will be deleted with the version');
+    expect(dialog(view).textContent).toContain('jar is removed');
+  });
+
+  test('says that the jar stays when another uploader has the same content', async () => {
+    const view = await page({
+      seed: (b) =>
+        void b.seedArtifact('bob', [{ name: 'order-sync', className: 'com.acme.OrderSync' }], { contentHash: HASH }),
+      query: '/pipelines/x?pipeline=order-sync&uploader=ada',
+    });
+    await open(view);
+    await shown(view);
+    expect(dialog(view).textContent).toContain('jar stays');
+  });
+
+  test('deletes the ended runs with the version, sending the number it showed', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'SUCCEEDED', 'FAILED') });
+    await open(view);
+    await shown(view);
+
+    confirm(view).click();
+
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
+    expect(app.engine.backend.version(HASH, 'ada')).toBeUndefined();
+    expect(app.engine.backend.runs.filter((r) => r.contentHash === HASH)).toEqual([]);
+  });
+
+  test('says that only the version is deleted when it has no runs, and deletes it', async () => {
+    const view = await page();
+    await open(view);
+    await shown(view);
+
+    expect(dialog(view).textContent).toContain('no runs');
+    expect(dialog(view).textContent).toContain('Only the version');
+    confirm(view).click();
 
     await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
     expect(app.engine.backend.version(HASH, 'ada')).toBeUndefined();
   });
 
-  test('does not delete when it is not confirmed', async () => {
-    const view = await page();
-    await ready(view);
-    button(admin(view), 'Delete this version').click();
+  test('cannot be confirmed twice while it is being done', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'SUCCEEDED') });
+    await open(view);
+    await shown(view);
+
+    confirm(view).click();
     await tick();
+
+    expect(confirm(view).disabled).toBe(true);
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
+  });
+
+  test('does not delete when it is not confirmed', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'SUCCEEDED') });
+    await open(view);
+    await shown(view);
     button(dialog(view), 'Cancel').click();
     await tick();
     expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+    expect(app.engine.backend.runs.filter((r) => r.contentHash === HASH)).toHaveLength(1);
     expect(dialog(view)).toBeNull();
   });
 
-  test('says why it cannot be deleted while a run refers to it, with the runs, and leaves it', async () => {
-    const view = await page({ seed: (b) => b.seedRun('ada', { contentHash: HASH, pipeline: 'order-sync' }) });
-    await ready(view);
-    button(admin(view), 'Delete this version').click();
-    await tick();
+  test('says why it cannot be deleted while a run has not ended, with how many, and cannot be confirmed', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'RUNNING', 'QUEUED', 'SUCCEEDED') });
+    await open(view);
+    await shown(view);
 
-    button(dialog(view), 'Delete the version').click();
-
-    await vi.waitFor(() => expect(dialog(view).querySelector('[role="alert"]')!.textContent).toContain('in use'));
-    await vi.waitFor(() => expect(dialog(view).querySelector('.in-use')).not.toBeNull());
-    expect(dialog(view).querySelector('.in-use')!.textContent).toContain('1 run');
-    expect(dialog(view).querySelector('.in-use')!.textContent).toContain('retention');
+    const blocked = dialog(view).querySelector('.blocked')!;
+    expect(blocked.textContent).toContain('2 runs have not ended');
+    expect(confirm(view).disabled).toBe(true);
     expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
-    expect(app.context.router.path).not.toBe('/pipelines');
   });
 
-  test('says why it cannot be deleted while a trigger refers to it, naming the trigger with a link', async () => {
+  test('says why it cannot be deleted while a trigger refers to it, naming the trigger with a link, and cannot be confirmed', async () => {
     const view = await page({
       seed: (b) => void b.triggers.seed({ name: 'nightly', contentHash: HASH, pipeline: 'order-other' }),
     });
-    await ready(view);
-    button(admin(view), 'Delete this version').click();
-    await tick();
+    await open(view);
+    await shown(view);
 
-    button(dialog(view), 'Delete the version').click();
-
-    await vi.waitFor(() => expect(dialog(view).querySelector('.in-use')).not.toBeNull());
-    const link = dialog(view).querySelector('.in-use a')!;
+    const link = dialog(view).querySelector('.blocked a')!;
     expect(link.textContent).toBe('nightly');
     expect(link.getAttribute('href')).toBe('/triggers/detail?name=nightly');
-    expect(dialog(view).querySelector('.in-use')!.textContent).toContain('Delete the trigger');
+    expect(dialog(view).querySelector('.blocked')!.textContent).toContain('Delete the trigger');
+    expect(confirm(view).disabled).toBe(true);
+  });
+
+  test('shows the new impact and does not delete when the runs changed after it was shown', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'SUCCEEDED') });
+    await open(view);
+    await shown(view);
+    expect(dialog(view).querySelector('.impact')!.textContent).toContain('1 run');
+
+    seedRuns(app.engine.backend, 'FAILED', 'FAILED');
+    confirm(view).click();
+
+    await vi.waitFor(() => expect(dialog(view).querySelector('.impact')!.textContent).toContain('3 runs'));
+    expect(dialog(view).querySelector('[role="alert"]')!.textContent).toContain('changed');
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+    expect(app.engine.backend.runs.filter((r) => r.contentHash === HASH)).toHaveLength(3);
+    expect(app.context.router.path).not.toBe('/pipelines');
+
+    confirm(view).click();
+    await vi.waitFor(() => expect(app.context.router.path).toBe('/pipelines'));
+    expect(app.engine.backend.version(HASH, 'ada')).toBeUndefined();
+  });
+
+  test('shows why when a run began after the impact was shown, and does not delete', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'SUCCEEDED') });
+    await open(view);
+    await shown(view);
+
+    seedRuns(app.engine.backend, 'RUNNING');
+    confirm(view).click();
+
+    await vi.waitFor(() => expect(dialog(view).querySelector('.blocked')!.textContent).toContain('1 run has not ended'));
+    expect(dialog(view).querySelector('[role="alert"]')!.textContent).toContain('not ended');
+    expect(confirm(view).disabled).toBe(true);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('shows the trigger when one was bound after the impact was shown, and does not delete', async () => {
+    const view = await page();
+    await open(view);
+    await shown(view);
+
+    app.engine.backend.triggers.seed({ name: 'late', contentHash: HASH, pipeline: 'order-other' });
+    confirm(view).click();
+
+    await vi.waitFor(() => expect(dialog(view).querySelector('.blocked a')!.textContent).toBe('late'));
+    expect(dialog(view).querySelector('[role="alert"]')!.textContent).toContain('trigger');
+    expect(confirm(view).disabled).toBe(true);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('says any other refusal in the dialog, which stays open and can be confirmed again', async () => {
+    const view = await page({ seed: (b) => seedRuns(b, 'SUCCEEDED') });
+    await open(view);
+    await shown(view);
+    app.engine.faults.push({ match: /DELETE .*artifacts/, status: 500, body: { error: 'internal_error', message: 'x', errorId: 'e-2' }, times: 1 });
+
+    confirm(view).click();
+
+    await vi.waitFor(() => expect(dialog(view).querySelector('[role="alert"]')).not.toBeNull());
+    expect(dialog(view).querySelector('.impact')).not.toBeNull();
+    expect(confirm(view).disabled).toBe(false);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('shows a name that the server sent as text, never as markup', async () => {
+    const view = await page({
+      seed: (b) => void b.triggers.seed({ name: 'x<img src=x>', contentHash: HASH, pipeline: 'order-other' }),
+    });
+    await open(view);
+    await shown(view);
+    expect(dialog(view).querySelector('.blocked img')).toBeNull();
+    expect(dialog(view).querySelector('.blocked')!.textContent).toContain('x<img src=x>');
   });
 });
 
@@ -293,7 +458,7 @@ describe('the same content uploaded by two people', () => {
     const view = await page({ seed: sharedWithBob, query: '/pipelines/x?pipeline=order-sync&uploader=bob' });
     await ready(view);
     button(admin(view), 'Delete this version').click();
-    await tick();
+    await vi.waitFor(() => expect(button(dialog(view), 'Delete the version').disabled).toBe(false));
 
     button(dialog(view), 'Delete the version').click();
 
@@ -321,7 +486,7 @@ describe('the same content uploaded by two people', () => {
     });
     await ready(view);
     button(admin(view), 'Delete this version').click();
-    await tick();
+    await vi.waitFor(() => expect(button(dialog(view), 'Delete the version').disabled).toBe(false));
 
     button(dialog(view), 'Delete the version').click();
 
@@ -336,5 +501,17 @@ describe('in zh-TW', () => {
     await ready(view);
     expect(admin(view).querySelector('.state')!.textContent).toBe('不允許');
     expect(button(admin(view), '刪除此版本')).toBeDefined();
+  });
+
+  test('says what deleting the version takes along, in the language of the screen', async () => {
+    const view = await page({
+      languages: ['zh-TW'],
+      seed: (b) => b.seedRun('ada', { contentHash: HASH, pipeline: 'order-sync', state: 'SUCCEEDED' }),
+    });
+    await ready(view);
+    button(admin(view), '刪除此版本').click();
+    await vi.waitFor(() => expect(dialog(view).querySelector('.impact')).not.toBeNull());
+    expect(dialog(view).querySelector('.impact')!.textContent).toContain('1 個 run');
+    expect(button(dialog(view), '刪除版本')).toBeDefined();
   });
 });

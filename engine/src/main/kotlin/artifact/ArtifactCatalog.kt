@@ -24,15 +24,59 @@ class ArtifactCatalog(private val store: ArtifactStore, private val resolver: Ve
             ?: VersionOutcome.NotFound
       }
 
+  /** What deleting the version [caller] means would take along or be stopped by. */
+  fun deletionImpact(
+      contentHash: String,
+      uploader: String?,
+      caller: ApiIdentity,
+  ): VersionOutcome<DeletionImpact> =
+      resolver.resolve(contentHash, uploader, caller.visibility).flatten { owner ->
+        store.deletionImpact(contentHash, owner)?.let { VersionOutcome.Resolved(it) }
+            ?: VersionOutcome.NotFound
+      }
+
+  /** Deletes the version; [confirmedRuns] is the number of runs the caller agreed to delete too. */
   fun delete(
       contentHash: String,
       uploader: String?,
       caller: ApiIdentity,
+      confirmedRuns: Long? = null,
   ): VersionOutcome<DeleteResult> =
       resolver.resolve(contentHash, uploader, caller.visibility).map { owner ->
-        store.delete(contentHash, owner).also {
-          if (it == DeleteResult.Deleted)
-              log.info("Version {} of {} deleted by {}", owner, contentHash, caller.name)
+        store.delete(contentHash, owner, confirmedRuns).also {
+          audit(it, contentHash, owner, caller)
         }
+      }
+
+  private fun audit(result: DeleteResult, contentHash: String, owner: String, caller: ApiIdentity) {
+    when (result) {
+      is DeleteResult.Deleted ->
+          log.info(
+              "Version deleted by {}: contentHash={} uploader={} runs={} logEntries={}",
+              caller.name,
+              contentHash,
+              owner,
+              result.runs,
+              result.logEntries,
+          )
+      DeleteResult.NotFound -> {}
+      else ->
+          log.info(
+              "Deletion of a version refused for {}: contentHash={} uploader={} reason={}",
+              caller.name,
+              contentHash,
+              owner,
+              result.reason(),
+          )
+    }
+  }
+
+  private fun DeleteResult.reason() =
+      when (this) {
+        is DeleteResult.InUse -> "in_use"
+        is DeleteResult.RunsActive -> "runs_active"
+        is DeleteResult.RunsExist -> "runs_exist"
+        is DeleteResult.ImpactChanged -> "impact_changed"
+        else -> error("not a refusal: $this")
       }
 }

@@ -3,10 +3,12 @@ package dev.lawlan.runline.engine.artifact
 import dev.lawlan.runline.analyzer.Verdict
 import dev.lawlan.runline.engine.db.AllowListLock
 import dev.lawlan.runline.engine.db.ArtifactContentLock
+import dev.lawlan.runline.engine.run.RunState
 import java.nio.file.Files
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.SQLException
+import java.time.Instant
 import java.time.OffsetDateTime
 import javax.sql.DataSource
 import kotlinx.serialization.encodeToString
@@ -71,36 +73,175 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
             .map { it.toRecord(definitionsOf(connection, it.id)) }
       }
 
-  override fun delete(contentHash: String, uploader: String): DeleteResult =
-      transaction { connection ->
-        ArtifactContentLock.lock(connection, contentHash)
+  override fun deletionImpact(contentHash: String, uploader: String): DeletionImpact? =
+      dataSource.connection.use { connection ->
+        connection.autoCommit = false
+        // One snapshot for all the counts; nothing is written.
+        connection.transactionIsolation = Connection.TRANSACTION_REPEATABLE_READ
+        connection.isReadOnly = true
         try {
-          val deleted =
-              connection
-                  .prepareStatement(
-                      "DELETE FROM pipeline_artifact WHERE content_hash = ? AND uploaded_by = ?"
-                  )
-                  .use {
-                    it.setString(1, contentHash)
-                    it.setString(2, uploader)
-                    it.executeUpdate()
-                  }
-          if (deleted == 0) return@transaction DeleteResult.NotFound
-          connection
-              .prepareStatement(
-                  "DELETE FROM artifact_content WHERE content_hash = ? AND NOT EXISTS " +
-                      "(SELECT 1 FROM pipeline_artifact WHERE content_hash = ?)"
-              )
-              .use {
-                it.setString(1, contentHash)
-                it.setString(2, contentHash)
-                it.executeUpdate()
-              }
-          DeleteResult.Deleted
-        } catch (e: SQLException) {
-          if (e.sqlState == FOREIGN_KEY_VIOLATION) DeleteResult.InUse else throw e
+          artifactId(connection, contentHash, uploader)?.let { impactOf(connection, it) }
+        } finally {
+          connection.rollback()
         }
       }
+
+  override fun delete(
+      contentHash: String,
+      uploader: String,
+      confirmedRuns: Long?,
+  ): DeleteResult = transaction { connection ->
+    ArtifactContentLock.lock(connection, contentHash)
+    val id =
+        artifactId(connection, contentHash, uploader) ?: return@transaction DeleteResult.NotFound
+    // Locking the definitions keeps a run from being created for them while this goes on (creating
+    // a run takes a share of the definition's row): a creation that came first is counted below,
+    // one
+    // that comes later waits for this transaction and then finds no definition (ADR-047).
+    lockDefinitions(connection, id)
+    val impact = impactOf(connection, id)
+    when {
+      impact.triggers.isNotEmpty() -> return@transaction DeleteResult.InUse(impact.triggers)
+      impact.runs.active > 0 -> return@transaction DeleteResult.RunsActive(impact.runs.active)
+      impact.runs.total > 0 && confirmedRuns == null ->
+          return@transaction DeleteResult.RunsExist(impact.runs.total)
+      confirmedRuns != null && confirmedRuns != impact.runs.total ->
+          return@transaction DeleteResult.ImpactChanged(impact.runs.total)
+    }
+    try {
+      // The foreign keys stay "restrict": the log, the runs and then the version are removed here,
+      // in this transaction. Records of firings that point at a run lose that reference.
+      val logEntries =
+          execute(connection, "DELETE FROM run_log_entry WHERE run_id IN ($RUNS_OF_VERSION)", id)
+      val runs =
+          execute(
+              connection,
+              "DELETE FROM run WHERE definition_id IN ($DEFINITIONS_OF_VERSION)",
+              id,
+          )
+      execute(connection, "DELETE FROM pipeline_artifact WHERE id = ?", id)
+      connection
+          .prepareStatement(
+              "DELETE FROM artifact_content WHERE content_hash = ? AND NOT EXISTS " +
+                  "(SELECT 1 FROM pipeline_artifact WHERE content_hash = ?)"
+          )
+          .use {
+            it.setString(1, contentHash)
+            it.setString(2, contentHash)
+            it.executeUpdate()
+          }
+      DeleteResult.Deleted(runs.toLong(), logEntries.toLong())
+    } catch (e: SQLException) {
+      // Something this does not know of still refers to the version; the transaction is undone.
+      if (e.sqlState == FOREIGN_KEY_VIOLATION) {
+        connection.rollback()
+        DeleteResult.InUse(emptyList())
+      } else throw e
+    }
+  }
+
+  private fun artifactId(connection: Connection, contentHash: String, uploader: String): Long? =
+      connection
+          .prepareStatement(
+              "SELECT id FROM pipeline_artifact WHERE content_hash = ? AND uploaded_by = ?"
+          )
+          .use {
+            it.setString(1, contentHash)
+            it.setString(2, uploader)
+            it.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else null }
+          }
+
+  private fun lockDefinitions(connection: Connection, artifactId: Long) {
+    connection
+        .prepareStatement("SELECT id FROM pipeline_definition WHERE artifact_id = ? FOR UPDATE")
+        .use {
+          it.setLong(1, artifactId)
+          it.executeQuery().use { rs -> while (rs.next()) {} }
+        }
+  }
+
+  private fun execute(connection: Connection, sql: String, artifactId: Long): Int =
+      connection.prepareStatement(sql).use {
+        it.setLong(1, artifactId)
+        it.executeUpdate()
+      }
+
+  private fun impactOf(connection: Connection, artifactId: Long): DeletionImpact {
+    val byState = linkedMapOf<String, Long>()
+    var earliest: Instant? = null
+    var latest: Instant? = null
+    connection
+        .prepareStatement(
+            "SELECT state, count(*), min(created_at), max(created_at) FROM run " +
+                "WHERE definition_id IN ($DEFINITIONS_OF_VERSION) GROUP BY state ORDER BY state"
+        )
+        .use {
+          it.setLong(1, artifactId)
+          it.executeQuery().use { rs ->
+            while (rs.next()) {
+              byState[rs.getString(1)] = rs.getLong(2)
+              val first = rs.getObject(3, OffsetDateTime::class.java).toInstant()
+              val last = rs.getObject(4, OffsetDateTime::class.java).toInstant()
+              if (earliest == null || first < earliest) earliest = first
+              if (latest == null || last > latest) latest = last
+            }
+          }
+        }
+    val ended = RunState.entries.filter { it.terminal }.map { it.name }.toSet()
+    val logEntries =
+        connection
+            .prepareStatement(
+                "SELECT count(*) FROM run_log_entry WHERE run_id IN ($RUNS_OF_VERSION)"
+            )
+            .use {
+              it.setLong(1, artifactId)
+              it.executeQuery().use { rs ->
+                rs.next()
+                rs.getLong(1)
+              }
+            }
+    val triggers =
+        connection
+            .prepareStatement(
+                "SELECT name, kind FROM pipeline_trigger " +
+                    "WHERE definition_id IN ($DEFINITIONS_OF_VERSION) ORDER BY name"
+            )
+            .use {
+              it.setLong(1, artifactId)
+              it.executeQuery().use { rs ->
+                generateSequence {
+                  if (rs.next()) TriggerReference(rs.getString(1), rs.getString(2).lowercase())
+                  else null
+                }
+                    .toList()
+              }
+            }
+    val contentRemoved =
+        connection
+            .prepareStatement(
+                "SELECT NOT EXISTS (SELECT 1 FROM pipeline_artifact o JOIN pipeline_artifact a " +
+                    "ON a.content_hash = o.content_hash WHERE a.id = ? AND o.id <> a.id)"
+            )
+            .use {
+              it.setLong(1, artifactId)
+              it.executeQuery().use { rs ->
+                rs.next()
+                rs.getBoolean(1)
+              }
+            }
+    return DeletionImpact(
+        RunImpact(
+            total = byState.values.sum(),
+            byState = byState,
+            active = byState.filterKeys { it !in ended }.values.sum(),
+            earliestAt = earliest,
+            latestAt = latest,
+        ),
+        logEntries,
+        triggers,
+        contentRemoved,
+    )
+  }
 
   /** Runs [block] in one transaction; rolls back on any failure. */
   private fun <T> transaction(block: (Connection) -> T): T =
@@ -239,5 +380,8 @@ class PostgresArtifactStore(private val dataSource: DataSource) : ArtifactStore 
 
   private companion object {
     const val FOREIGN_KEY_VIOLATION = "23503"
+    const val DEFINITIONS_OF_VERSION = "SELECT id FROM pipeline_definition WHERE artifact_id = ?"
+    const val RUNS_OF_VERSION =
+        "SELECT id FROM run WHERE definition_id IN ($DEFINITIONS_OF_VERSION)"
   }
 }

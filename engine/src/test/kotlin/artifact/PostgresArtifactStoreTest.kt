@@ -283,7 +283,7 @@ class PostgresArtifactStoreTest {
     val new = artifact("del")
     store.saveIfAbsent(new)
 
-    assertEquals(DeleteResult.Deleted, store.delete(new.contentHash, "alice"))
+    assertIs<DeleteResult.Deleted>(store.delete(new.contentHash, "alice"))
 
     assertNull(store.find(new.contentHash, "alice"))
     assertEquals(0, scalar("SELECT count(*) FROM pipeline_definition"))
@@ -305,7 +305,7 @@ class PostgresArtifactStoreTest {
       }
     }
 
-    assertEquals(DeleteResult.InUse, store.delete(new.contentHash, "alice"))
+    assertIs<DeleteResult.InUse>(store.delete(new.contentHash, "alice"))
 
     assertNotNull(store.find(new.contentHash, "alice"))
     assertEquals(1, scalar("SELECT count(*) FROM pipeline_definition"))
@@ -317,7 +317,7 @@ class PostgresArtifactStoreTest {
     store.saveIfAbsent(alice)
     store.saveIfAbsent(artifact("shared", uploader = "bob"))
 
-    assertEquals(DeleteResult.Deleted, store.delete(alice.contentHash, "alice"))
+    assertIs<DeleteResult.Deleted>(store.delete(alice.contentHash, "alice"))
 
     assertNull(store.find(alice.contentHash, "alice"))
     assertNotNull(store.find(alice.contentHash, "bob"))
@@ -334,7 +334,7 @@ class PostgresArtifactStoreTest {
         }
     assertContentEquals("jar-shared".toByteArray(), bytes)
 
-    assertEquals(DeleteResult.Deleted, store.delete(alice.contentHash, "bob"))
+    assertIs<DeleteResult.Deleted>(store.delete(alice.contentHash, "bob"))
     assertEquals(0, scalar("SELECT count(*) FROM artifact_content"))
   }
 
@@ -356,8 +356,8 @@ class PostgresArtifactStoreTest {
       }
     }
 
-    assertEquals(DeleteResult.InUse, store.delete(alice.contentHash, "alice"))
-    assertEquals(DeleteResult.Deleted, store.delete(alice.contentHash, "bob"))
+    assertIs<DeleteResult.InUse>(store.delete(alice.contentHash, "alice"))
+    assertIs<DeleteResult.Deleted>(store.delete(alice.contentHash, "bob"))
 
     assertNotNull(store.find(alice.contentHash, "alice"))
     assertNull(store.find(alice.contentHash, "bob"))

@@ -2,6 +2,8 @@ package dev.lawlan.runline.engine.artifact
 
 import dev.lawlan.runline.analyzer.SafetyReport
 import dev.lawlan.runline.engine.resource.WarningDoc
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /** Body of every error response of the upload and query API. */
@@ -115,3 +117,59 @@ fun List<ArtifactRecord>.toDefinitionList(warnings: (DefinitionRecord) -> List<W
           }
         }
     )
+
+/** The runs in a [DeletionImpactResponse]; the range is left out when there are no runs. */
+@Serializable
+data class RunImpactResponse(
+    val total: Long,
+    val byState: Map<String, Long>,
+    val active: Long,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val earliestAt: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val latestAt: String? = null,
+)
+
+@Serializable data class TriggerReferenceDoc(val name: String, val kind: String)
+
+/** What deleting a version would take along or be stopped by (05-ipc, ADR-047). */
+@Serializable
+data class DeletionImpactResponse(
+    val runs: RunImpactResponse,
+    val logEntries: Long,
+    val triggers: List<TriggerReferenceDoc>,
+    val contentRemoved: Boolean,
+    val deletable: Boolean,
+)
+
+fun DeletionImpact.toResponse() =
+    DeletionImpactResponse(
+        RunImpactResponse(
+            runs.total,
+            runs.byState,
+            runs.active,
+            runs.earliestAt?.toString(),
+            runs.latestAt?.toString(),
+        ),
+        logEntries,
+        triggers.map { TriggerReferenceDoc(it.name, it.kind) },
+        contentRemoved,
+        deletable,
+    )
+
+/** 409 `in_use`: the triggers that still point at the version. */
+@Serializable
+data class InUseResponse(
+    val error: String,
+    val message: String,
+    val triggers: List<TriggerReferenceDoc>,
+)
+
+/** 409 `runs_active`: how many runs have not ended. */
+@Serializable
+data class RunsActiveResponse(val error: String, val message: String, val active: Long)
+
+/** 409 `runs_exist` and `impact_changed`: how many runs the version has now. */
+@Serializable data class RunsTotalResponse(val error: String, val message: String, val total: Long)

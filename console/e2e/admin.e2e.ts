@@ -2,7 +2,7 @@
 // PostgreSQL and the real sample jars (E2E_JARS): triggers (a cron one that really fires, a webhook
 // whose secret is shown once), the allow-list (preview, apply, the verdicts that really change, the
 // history), shared resources (a holder and a waiter of real runs, forced to let go), unsafe
-// execution and deleting a version (409 in_use). What a test changes it puts back.
+// execution and deleting a version (previewed, then confirmed with the number of runs). What a test changes it puts back.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -538,7 +538,7 @@ describe('shared resources', () => {
 });
 
 describe('unsafe execution and deleting a version', () => {
-  test('an admin allows an UNSAFE pipeline after a question, a developer then makes a run of it in the page and it ends; the version is then in use and cannot be deleted, and the page says by what', async () => {
+  test('an admin allows an UNSAFE pipeline after a question, a developer then makes a run of it in the page and it ends; deleting the version shows the run it takes along and deletes them with the version', async () => {
     const { contentHash } = await putVariant('demo-unsafe');
     const refused = await api(ada, '/api/v1/runs', { method: 'POST', body: JSON.stringify({ contentHash, pipeline: 'demo-unsafe' }) });
     expect(refused.status).toBe(409);
@@ -563,16 +563,12 @@ describe('unsafe execution and deleting a version', () => {
     await shot(dev.page, 'admin-unsafe-run-en');
 
     await page.getByRole('button', { name: 'Delete this version' }).click();
-    await dialog(page).getByText('cannot be undone').waitFor();
+    await dialog(page).locator('.impact').getByText('1 run').waitFor();
+    await dialog(page).getByText('cannot be recovered').waitFor();
+    await shot(page, 'admin-delete-with-runs-en');
     await dialog(page).getByRole('button', { name: 'Delete the version' }).click();
-    await dialog(page).locator('[role="alert"]').getByText('in use').waitFor();
-    await dialog(page).locator('.in-use').getByText('1 run').waitFor();
-    await shot(page, 'admin-delete-in-use-en');
-    await dialog(page).getByRole('button', { name: 'Cancel' }).click();
-    expect((await api(root, `/api/v1/artifacts/${contentHash}`)).status).toBe(200);
-
-    await toggle.click();
-    await page.locator('section.admin .state').getByText('Not allowed').waitFor();
+    await page.waitForURL(`${engineUrl}/pipelines`);
+    expect((await api(root, `/api/v1/artifacts/${contentHash}`)).status).toBe(404);
     expect(problems.csp).toEqual([]);
     expect(await violations(page)).toEqual([]);
     await admin.close();
@@ -584,24 +580,28 @@ describe('unsafe execution and deleting a version', () => {
     const context = await newContext(browser, 'en-US');
     const { page } = await signedIn(context, root, `/pipelines/${contentHash}?pipeline=demo-failing`);
     await page.getByRole('button', { name: 'Delete this version' }).click();
+    await dialog(page).getByText('no runs').waitFor();
     await dialog(page).getByRole('button', { name: 'Delete the version' }).click();
     await page.waitForURL(`${engineUrl}/pipelines`);
     expect((await api(root, `/api/v1/artifacts/${contentHash}`)).status).toBe(404);
     await context.close();
   });
 
-  test('a version that a trigger is bound to names the trigger, with a link, until the trigger is deleted', async () => {
+  test('a version that a trigger is bound to names the trigger, with a link, until the trigger is deleted, and the button is off meanwhile', async () => {
     const { contentHash } = await putVariant('demo-failing');
     const name = `e2e-bound-${stamp()}`;
     await api(root, '/api/v1/triggers', { method: 'POST', body: JSON.stringify({ name, kind: 'webhook', contentHash, pipeline: 'demo-failing' }) });
     const context = await newContext(browser, 'en-US');
     const { page } = await signedIn(context, root, `/pipelines/${contentHash}?pipeline=demo-failing`);
     await page.getByRole('button', { name: 'Delete this version' }).click();
-    await dialog(page).getByRole('button', { name: 'Delete the version' }).click();
-    const link = dialog(page).locator('.in-use a');
+    const link = dialog(page).locator('.blocked a');
     await link.waitFor();
     expect(await link.innerText()).toBe(name);
+    expect(await dialog(page).getByRole('button', { name: 'Delete the version' }).isDisabled()).toBe(true);
+    await dialog(page).getByRole('button', { name: 'Cancel' }).click();
     await api(root, `/api/v1/triggers/${name}`, { method: 'DELETE' });
+    await page.getByRole('button', { name: 'Delete this version' }).click();
+    await dialog(page).locator('.impact').waitFor();
     await dialog(page).getByRole('button', { name: 'Delete the version' }).click();
     await page.waitForURL(`${engineUrl}/pipelines`);
     await context.close();

@@ -180,6 +180,12 @@ export class FakeBackend {
     ...this.views.routes,
     ...this.secrets.routes,
     {
+      method: 'GET',
+      pattern: /^\/api\/v1\/artifacts\/([^/]+)\/deletion-impact$/,
+      admin: true,
+      handle: (request, match) => this.deletionImpact(request, decodeURIComponent(match[1])),
+    },
+    {
       method: 'DELETE',
       pattern: /^\/api\/v1\/artifacts\/([^/]+)$/,
       admin: true,
@@ -388,20 +394,77 @@ export class FakeBackend {
     return answer(200, { definitions, limitations: LIMITATIONS });
   }
 
-  /** `DELETE /api/v1/artifacts/{contentHash}`: a version that no trigger and no run refers to. */
-  private deleteArtifact({ query }: ApiRequest, contentHash: string): ApiAnswer {
+  /** `GET /api/v1/artifacts/{contentHash}/deletion-impact` (05-ipc): what deleting the version takes along. */
+  private deletionImpact({ query }: ApiRequest, contentHash: string): ApiAnswer {
     const found = this.resolve(contentHash, query.get('uploader'), () => true);
     if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
     if ('none' in found) return failure(404, 'not_found', 'No such version.');
     const { uploadedBy } = found.version;
-    if (
-      this.triggers.references(contentHash, uploadedBy) ||
-      this.runs.some((r) => r.contentHash === contentHash && r.uploader === uploadedBy)
-    ) {
-      return failure(409, 'in_use', 'A trigger or a run still refers to the version.');
+    const runs = this.runsOfVersion(contentHash, uploadedBy);
+    const triggers = this.triggersOfVersion(contentHash, uploadedBy);
+    const active = runs.filter((r) => !TERMINAL.includes(r.state)).length;
+    const byState: Record<string, number> = {};
+    for (const run of runs) byState[run.state] = (byState[run.state] ?? 0) + 1;
+    const times = runs.map((r) => r.createdAt).sort();
+    return answer(200, {
+      runs: {
+        total: runs.length,
+        byState,
+        active,
+        ...(times.length > 0 ? { earliestAt: times[0], latestAt: times[times.length - 1] } : {}),
+      },
+      logEntries: runs.reduce((sum, r) => sum + r.log.length, 0),
+      triggers,
+      contentRemoved: this.versionsOf(contentHash).length === 1,
+      deletable: triggers.length === 0 && active === 0,
+    });
+  }
+
+  /** `DELETE /api/v1/artifacts/{contentHash}` (05-ipc): the ended runs go with it once their number is confirmed. */
+  private deleteArtifact({ query }: ApiRequest, contentHash: string): ApiAnswer {
+    const asked = query.get('runs');
+    if (asked !== null && !/^\d+$/.test(asked)) {
+      return failure(400, 'bad_request', 'runs must be a whole number, not less than 0.');
+    }
+    const confirmed = asked === null ? null : Number(asked);
+    const found = this.resolve(contentHash, query.get('uploader'), () => true);
+    if ('ambiguous' in found) return ambiguousVersion(found.ambiguous);
+    if ('none' in found) return failure(404, 'not_found', 'No such version.');
+    const { uploadedBy } = found.version;
+    const triggers = this.triggersOfVersion(contentHash, uploadedBy);
+    if (triggers.length > 0) {
+      return failure(409, 'in_use', 'A trigger still refers to the version.', { triggers });
+    }
+    const runs = this.runsOfVersion(contentHash, uploadedBy);
+    const active = runs.filter((r) => !TERMINAL.includes(r.state)).length;
+    if (active > 0) return failure(409, 'runs_active', 'Runs have not ended.', { active });
+    if (confirmed === null && runs.length > 0) {
+      return failure(409, 'runs_exist', 'The version has runs.', { total: runs.length });
+    }
+    if (confirmed !== null && confirmed !== runs.length) {
+      return failure(409, 'impact_changed', 'The runs changed since the preview.', {
+        total: runs.length,
+      });
+    }
+    const gone = new Set(runs.map((r) => r.runId));
+    for (const firing of this.triggers.firings) {
+      if (firing.runId !== null && gone.has(firing.runId)) firing.runId = null;
+    }
+    for (let at = this.runs.length - 1; at >= 0; at -= 1) {
+      if (gone.has(this.runs[at].runId)) this.runs.splice(at, 1);
     }
     this.artifacts.delete(versionKey(contentHash, uploadedBy));
     return answer(204);
+  }
+
+  private runsOfVersion(contentHash: string, uploader: string): FakeRun[] {
+    return this.runs.filter((r) => r.contentHash === contentHash && r.uploader === uploader);
+  }
+
+  private triggersOfVersion(contentHash: string, uploader: string) {
+    return [...this.triggers.triggers.values()]
+      .filter((t) => t.contentHash === contentHash && t.uploader === uploader)
+      .map((t) => ({ name: t.name, kind: t.kind }));
   }
 
   /** `PUT .../unsafe-execution`: whether this pipeline of this version may run although UNSAFE. */

@@ -169,13 +169,6 @@ export class FakeTriggers {
     return made;
   }
 
-  /** Whether a version is bound by a trigger (it cannot be deleted then). */
-  references(contentHash: string, uploader: string): boolean {
-    return [...this.triggers.values()].some(
-      (t) => t.contentHash === contentHash && t.uploader === uploader,
-    );
-  }
-
   // ---- the documents ---------------------------------------------------------------------------
 
   private effective(trigger: FakeTrigger): Record<string, string> {

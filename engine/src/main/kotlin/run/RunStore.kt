@@ -4,9 +4,18 @@ import dev.lawlan.runline.engine.artifact.Visibility
 import java.time.Instant
 import java.util.UUID
 
+/** The definition a run was to be created for no longer exists. */
+class DefinitionDeletedException(val definitionId: Long) :
+    RuntimeException("The definition $definitionId was deleted")
+
 /** Persistence of runs. State changes only move forward (see [RunState]). */
 interface RunStore {
-  /** Records [run] as queued and returns it as stored. */
+  /**
+   * Records [run] as queued and returns it as stored.
+   *
+   * @throws DefinitionDeletedException when the definition was deleted since it was read (deleting
+   *   a version and creating a run of it exclude each other, ADR-047).
+   */
   fun insert(run: NewRun): RunRecord
 
   /** The run, or null when it does not exist or [visibility] does not permit seeing it. */

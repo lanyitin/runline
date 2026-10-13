@@ -18,6 +18,7 @@ import {
   parseResourceTypes,
   parseSecretReload,
   parseSecrets,
+  parseDeletionImpact,
   parseTrigger,
   parseTriggers,
   parseTriggerWithSecret,
@@ -27,6 +28,7 @@ import {
   type AllowListChange,
   type AllowListVersion,
   type CheckResult,
+  type DeletionImpact,
   type Firing,
   type Release,
   type RemovalPreview,
@@ -252,9 +254,22 @@ export function createAdminApi(transport: Transport) {
         ),
       );
     },
-    async deleteVersion(contentHash: string, uploader?: string): Promise<void> {
+    /** What deleting the version would take along or be stopped by (ADR-047); changes nothing. */
+    async deletionImpact(contentHash: string, uploader?: string): Promise<DeletionImpact> {
+      return parseDeletionImpact(
+        await succeed(
+          await json(`/api/v1/artifacts/${q(contentHash)}/deletion-impact${uploaderQuery(uploader)}`),
+        ),
+      );
+    },
+    /** [runs] is the number of runs the admin saw in the preview: they are deleted with the version. */
+    async deleteVersion(contentHash: string, uploader?: string, runs?: number): Promise<void> {
+      const query = new URLSearchParams();
+      if (uploader !== undefined) query.set('uploader', uploader);
+      if (runs !== undefined) query.set('runs', String(runs));
+      const text = query.toString();
       await succeed(
-        await json(`/api/v1/artifacts/${q(contentHash)}${uploaderQuery(uploader)}`, {
+        await json(`/api/v1/artifacts/${q(contentHash)}${text === '' ? '' : `?${text}`}`, {
           method: 'DELETE',
         }),
       );

@@ -23,7 +23,7 @@
 5. **判定一律以目前白名單重新分析，不複製他人版本的判定**。第二位上傳走完整的解壓檢查與分析路徑，與全新上傳相同；這使判定永遠依目前白名單、回應時間不暴露「已有人上傳過」。
 6. **白名單變更的重判**逐版本處理（沿用「同一交易、持白名單鎖」的現行規則，[06](../06-data-model.md)）。Engine 可對同一內容雜湊只分析一次、結果套用到該雜湊的每個版本（效能最佳化，不改變結果）。影響摘要（`examinedArtifacts`、`examinedDefinitions`、`becameUnsafe`、`becameSafe`）以版本與其 definition 計；`changes[]` 每個受影響的版本各列一筆，並含 `uploader`；「收回允許 unsafe 執行」逐版本判斷。
 7. **位元組去重儲存**：jar 位元組以內容雜湊為鍵只存一份，各版本以內容雜湊參照；版本是只含上傳者、時間與其 definition 的輕量紀錄。位元組（含大小）屬於內容，不屬於版本。最後一個參照某內容的版本被刪除時，該內容在同一交易內移除；並行上傳與刪除下不得出現版本指向已不存在的內容。
-8. **刪除與保留**：刪除以版本為單位，仍只有管理員；`in_use` 以該版本的 definition 是否被 trigger 或 run 引用判斷，甲的版本被引用不阻擋乙的版本被刪除。Artifact 沒有保留期限清理（只有 run、log、觸發紀錄有），本決策不新增。
+8. **刪除與保留**：刪除以版本為單位，仍只有管理員；`in_use` 以該版本的 definition 是否被 trigger 引用判斷（run 不再單獨阻擋刪除，進行中的 run 與終態 run 的處理見 [ADR-047](../../version-deletion/adr/ADR-047-delete-version-with-runs.md)，其修訂本決策此處原先「或 run」的部分），甲的版本被引用不阻擋乙的版本被刪除。Artifact 沒有保留期限清理（只有 run、log、觸發紀錄有），本決策不新增。
 9. **Trigger 綁定**維持綁到特定版本內的 definition，永不隨新版本移動（[ADR-005](ADR-005-trigger-binding.md)）；管理員綁定時以 `contentHash` 加 `uploader` 指到某位上傳者的版本。cron 與 webhook 觸發建立 run 的來源與權限語意不變。
 10. **不洩漏存在性**（開發人員的視角）：
     - 回應只含呼叫者自己的版本；`uploadedBy`、`uploadedAt` 是呼叫者自己的。

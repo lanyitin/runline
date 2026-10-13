@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import { createTestApp, type TestApp } from '../../test-support/app';
+import { createTestApp, TEST_TOKEN, type TestApp } from '../../test-support/app';
 import { demoJars } from '../../test-support/fake-jars';
 import { ApiFailure } from './failure';
 
@@ -172,5 +172,137 @@ describe('an upload', () => {
 
     expect(result.created).toBe(true);
     expect(result.artifact.uploader).toBe('ada');
+  });
+});
+
+describe('what deleting a version would do (ADR-047)', () => {
+  test('the preview counts the runs by state, their range, their log lines, the triggers and whether the jar goes', async () => {
+    const api = await start(root);
+    sharedBy('ada');
+    const backend = app.engine.backend;
+    const done = backend.seedRun('ada', {
+      contentHash: HASH,
+      pipeline: 'tool',
+      state: 'SUCCEEDED',
+      createdAt: '2026-01-02T03:04:05Z',
+    });
+    backend.write(done.runId, 'a', 'b');
+    backend.seedRun('ada', {
+      contentHash: HASH,
+      pipeline: 'tool',
+      state: 'RUNNING',
+      createdAt: '2026-02-02T03:04:05Z',
+    });
+    backend.triggers.seed({ name: 'nightly', contentHash: HASH, uploader: 'ada', pipeline: 'tool' });
+
+    const impact = await api.deletionImpact(HASH, 'ada');
+
+    expect(impact).toEqual({
+      runs: {
+        total: 2,
+        byState: { SUCCEEDED: 1, RUNNING: 1 },
+        active: 1,
+        earliestAt: '2026-01-02T03:04:05Z',
+        latestAt: '2026-02-02T03:04:05Z',
+      },
+      logEntries: 2,
+      triggers: [{ name: 'nightly', kind: 'cron' }],
+      contentRemoved: true,
+      deletable: false,
+    });
+    expect(backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('a version without runs has no range and is deletable; its jar stays while another uploader has it', async () => {
+    const api = await start(root);
+    sharedBy('ada', 'bob');
+
+    const impact = await api.deletionImpact(HASH, 'ada');
+
+    expect(impact.runs).toEqual({ total: 0, byState: {}, active: 0, earliestAt: null, latestAt: null });
+    expect(impact).toMatchObject({ logEntries: 0, triggers: [], contentRemoved: false, deletable: true });
+  });
+
+  test('a version that is not named when several uploaders have it is ambiguous; a missing one is a 404', async () => {
+    const api = await start(root);
+    sharedBy('ada', 'bob');
+
+    await expect(api.deletionImpact(HASH)).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'ambiguous_version' },
+    });
+    await expect(api.deletionImpact('f'.repeat(64))).rejects.toMatchObject({ status: 404 });
+  });
+
+  test('ended runs are deleted with the version when their number is confirmed; the firings keep, without the run', async () => {
+    const api = await start(root);
+    sharedBy('ada');
+    const backend = app.engine.backend;
+    const run = backend.seedRun('ada', { contentHash: HASH, pipeline: 'tool', state: 'FAILED' });
+    backend.seedRun('ada', { contentHash: HASH, pipeline: 'tool', state: 'SUCCEEDED' });
+    backend.triggers.firings.push({
+      triggerName: 'gone',
+      firedAt: '2026-01-01T00:00:00Z',
+      scheduledFor: null,
+      deliveryId: null,
+      outcome: 'run_created',
+      reason: null,
+      detail: null,
+      runId: run.runId,
+    });
+
+    await expect(api.deleteVersion(HASH, 'ada')).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'runs_exist', total: 2 },
+    });
+    await expect(api.deleteVersion(HASH, 'ada', 1)).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'impact_changed', total: 2 },
+    });
+    expect(backend.version(HASH, 'ada')).toBeDefined();
+    await api.deleteVersion(HASH, 'ada', 2);
+
+    expect(backend.version(HASH, 'ada')).toBeUndefined();
+    expect(backend.runs.filter((r) => r.contentHash === HASH)).toEqual([]);
+    expect(backend.triggers.firings.map((f) => f.runId)).toEqual([null]);
+  });
+
+  test('a trigger is in_use with the triggers; an active run is runs_active with the count; the trigger is judged first', async () => {
+    const api = await start(root);
+    sharedBy('ada');
+    const backend = app.engine.backend;
+    backend.seedRun('ada', { contentHash: HASH, pipeline: 'tool', state: 'QUEUED' });
+    backend.seedRun('ada', { contentHash: HASH, pipeline: 'tool', state: 'TIMED_OUT_UNFINISHED' });
+
+    await expect(api.deleteVersion(HASH, 'ada', 2)).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'runs_active', active: 2 },
+    });
+    backend.triggers.seed({ name: 'nightly', contentHash: HASH, uploader: 'ada', pipeline: 'tool' });
+    await expect(api.deleteVersion(HASH, 'ada', 2)).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'in_use', triggers: [{ name: 'nightly', kind: 'cron' }] },
+    });
+    expect(backend.version(HASH, 'ada')).toBeDefined();
+  });
+
+  test('a version without runs is deleted without a count, and with a count of 0', async () => {
+    const api = await start(root);
+    sharedBy('ada');
+    await api.deleteVersion(HASH, 'ada', 0);
+    expect(app.engine.backend.version(HASH, 'ada')).toBeUndefined();
+  });
+
+  test('a count that is not a whole number is a 400 and deletes nothing', async () => {
+    await start(root);
+    sharedBy('ada');
+    for (const runs of ['x', '-1', '1.5']) {
+      const answer = await fetch(`${app.engine.url}/api/v1/artifacts/${HASH}?uploader=ada&runs=${runs}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      expect(answer.status).toBe(400);
+    }
+    expect(app.engine.backend.version(HASH, 'ada')).toBeDefined();
   });
 });

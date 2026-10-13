@@ -58,7 +58,7 @@ Pipeline 定義與共享資源之間以名稱鬆散關聯（虛線）：定義�
 - Run 與 log 依保留期限清理，期限由組態決定（[WI-20](work-items/WI-20-run-retention.md)）；run 被清理時其 log 一併移除。
 - 觸發紀錄依保留期限清理（[WI-20](work-items/WI-20-run-retention.md)）。webhook 的觸發紀錄同時是去重視窗，其保留期限不得短於去重視窗；刪除 trigger 時其觸發紀錄一併刪除。
 - 過期的工作階段與逾時的登入暫存由同一個保留清理移除（批次、間隔與不重疊的原則相同，見 README 的保留清理）；它們在清理之前就已無效。登入過的使用者不自動刪除。
-- 被任何 trigger 或進行中 run 引用的版本不得刪除（他人的同內容版本被引用不阻擋這個版本被刪除）。實作上，版本刪除會連帶刪除其 definition；因此所有參照 definition 的資料表（trigger、run 等）必須以「拒絕刪除」的方式參照，被引用的 artifact 才無法刪除。共享資源以名稱參照，不屬於此類。
+- 被任何 trigger 或進行中 run 引用的版本不得刪除（他人的同內容版本被引用不阻擋這個版本被刪除）。終態的 run 不阻擋：管理員確認其數量後，刪除在單一交易內依序移除該版本 definition 的 run 與 log、清除觸發紀錄對這些 run 的參照，再刪除版本與（最後一個參照者的）內容；同一版本的建立 run 與刪除互斥（對 definition 列的鎖）。契約見 [08-api](08-api.md)，決策見 [ADR-047](../version-deletion/adr/ADR-047-delete-version-with-runs.md)。所有參照 definition 的資料表（trigger、run 等）仍必須以「拒絕刪除」的方式參照，作為第二道保證：連帶刪除由刪除流程明確完成，不由資料庫連鎖。共享資源以名稱參照，不屬於此類。
 - 既有 artifact 於遷移時各自成為其內容雜湊的唯一版本，jar 位元組移到以內容雜湊為鍵的單一儲存（版本的代理鍵不變，definition、trigger、run 的參照不變）。
 - 既有資源於遷移時全部成為 `counter` 型別；金鑰庫檔案不在資料庫，是部署的組態產物，備份與資料庫分開（[ADR-019](adr/ADR-019-typed-shared-resources.md)）。
 - Artifact 儲存先放資料庫，以交易一致性與 12-Factor 無狀態為優先；體積成為問題時再評估改放物件儲存。

@@ -519,7 +519,7 @@ sqlite3 "$RUNLINE_RESOURCE_ROOT/digest.db" ".backup '/backup/digest-$(date +%F).
 3. 允許新版本以 unsafe 執行（第 3.4 節）：**新版本不繼承允許**；沒有允許前建立 run 回 `409 unsafe_not_allowed`（端到端測試驗證）。
 4. 綁定**自動沿用**（綁定以上傳者加 pipeline 名稱為單位）；用第 4.4 節的檢視確認每個角色 `problem` 為 `null`（端到端測試驗證新版本的三個角色已綁定到原來的資源）。
 5. 用手動 run 試跑（`markRead=off`），再把 trigger 移到新版本：`PATCH /api/v1/triggers/{name}` 帶 `{"contentHash": "<新>"}`。**trigger 不會自己移動**，也不會因此被啟用或停用（端到端測試驗證）。
-6. 舊版本：沒有 trigger 與 run 引用它時才可 `DELETE /api/v1/artifacts/{hash}`（否則 409 `in_use`）。
+6. 舊版本：沒有 trigger 引用、也沒有進行中的 run 時才可 `DELETE /api/v1/artifacts/{hash}`（否則 409 `in_use` 或 `runs_active`）；它的終態 run 與 log 會一併刪除，須先以 `GET /api/v1/artifacts/{hash}/deletion-impact` 預覽，並以 `?runs=<run 總數>` 確認（細節見 08-api）。
 7. 資料庫結構由新版 pipeline 在第一個 run 開始時前向升級；升級後舊版 pipeline 不能再寫這個資料庫。結構版本 8 新增一個索引（`run_post_by_post`），也在這時套用：在第一個 run 開始之前，Console 的 view（第 8.3 節）仍可讀取，只是 `not-downloaded` 較慢，資料量大時可能逾時；第一個 run 之後恢復。
 
 ### 9.5 停止與重啟

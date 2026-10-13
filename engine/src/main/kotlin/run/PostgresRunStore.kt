@@ -19,24 +19,30 @@ class PostgresRunStore(private val dataSource: DataSource) : RunStore, RunLogSto
 
   override fun insert(run: NewRun): RunRecord =
       dataSource.connection.use { connection ->
-        connection
-            .prepareStatement(
-                "INSERT INTO run (id, definition_id, state, source_kind, source_name, " +
-                    "parameters, created_at, unsafe_execution, unsafe_setting_set_by, " +
-                    "unsafe_setting_set_at) VALUES (?, ?, 'QUEUED', ?, ?, ?::jsonb, ?, ?, ?, ?)"
-            )
-            .use {
-              it.setObject(1, run.id)
-              it.setLong(2, run.definitionId)
-              it.setString(3, run.source.kind)
-              it.setString(4, run.source.name)
-              it.setString(5, json.encodeToString(parametersSerializer, run.parameters))
-              it.setObject(6, run.createdAt.atOffset(ZoneOffset.UTC))
-              it.setBoolean(7, run.unsafeExecution != null)
-              it.setString(8, run.unsafeExecution?.setBy)
-              it.setObject(9, run.unsafeExecution?.setAt?.atOffset(ZoneOffset.UTC))
-              it.executeUpdate()
-            }
+        try {
+          connection
+              .prepareStatement(
+                  "INSERT INTO run (id, definition_id, state, source_kind, source_name, " +
+                      "parameters, created_at, unsafe_execution, unsafe_setting_set_by, " +
+                      "unsafe_setting_set_at) VALUES (?, ?, 'QUEUED', ?, ?, ?::jsonb, ?, ?, ?, ?)"
+              )
+              .use {
+                it.setObject(1, run.id)
+                it.setLong(2, run.definitionId)
+                it.setString(3, run.source.kind)
+                it.setString(4, run.source.name)
+                it.setString(5, json.encodeToString(parametersSerializer, run.parameters))
+                it.setObject(6, run.createdAt.atOffset(ZoneOffset.UTC))
+                it.setBoolean(7, run.unsafeExecution != null)
+                it.setString(8, run.unsafeExecution?.setBy)
+                it.setObject(9, run.unsafeExecution?.setAt?.atOffset(ZoneOffset.UTC))
+                it.executeUpdate()
+              }
+        } catch (e: SQLException) {
+          if (e.sqlState == FOREIGN_KEY_VIOLATION)
+              throw DefinitionDeletedException(run.definitionId)
+          throw e
+        }
         checkNotNull(find(connection, run.id, Visibility.All))
       }
 
@@ -205,6 +211,8 @@ class PostgresRunStore(private val dataSource: DataSource) : RunStore, RunLogSto
       getObject(column, OffsetDateTime::class.java)?.toInstant()
 
   private companion object {
+    const val FOREIGN_KEY_VIOLATION = "23503"
+
     const val SELECT =
         "SELECT r.id, a.content_hash, a.uploaded_by, d.class_name, d.name, r.state, r.source_kind, " +
             "r.source_name, r.parameters, r.created_at, r.started_at, r.finished_at, " +

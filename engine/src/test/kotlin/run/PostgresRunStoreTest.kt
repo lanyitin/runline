@@ -99,7 +99,7 @@ class PostgresRunStoreTest {
 
   @Test
   fun `a run needs an existing definition`() {
-    assertFailsWith<SQLException> { store.insert(newRun(definitionId = 987_654)) }
+    assertFailsWith<DefinitionDeletedException> { store.insert(newRun(definitionId = 987_654)) }
   }
 
   @Test
@@ -237,11 +237,11 @@ class PostgresRunStoreTest {
   // ---- deletion is refused while runs refer to a definition ----
 
   @Test
-  fun `an artifact that a run refers to cannot be deleted`() {
+  fun `an artifact that a run that has not ended refers to cannot be deleted`() {
     val hash = pipelines.save("v1", "nightly")
     val run = store.insert(newRun(definitionId(hash, "nightly")))
 
-    assertEquals(DeleteResult.InUse, artifacts.delete(hash, "alice"))
+    assertEquals(DeleteResult.RunsActive(1), artifacts.delete(hash, "alice"))
 
     assertNotNull(artifacts.find(hash, "alice"))
     assertNotNull(store.find(run.id, Visibility.All))
@@ -273,7 +273,7 @@ class PostgresRunStoreTest {
       }
     }
 
-    assertEquals(DeleteResult.Deleted, artifacts.delete(hash, "alice"))
+    assertIs<DeleteResult.Deleted>(artifacts.delete(hash, "alice"))
   }
 
   @Test

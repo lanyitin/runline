@@ -2,6 +2,7 @@ package dev.lawlan.runline.engine.artifact
 
 import dev.lawlan.runline.engine.auth.ApiIdentity
 import dev.lawlan.runline.engine.auth.Role
+import java.time.Instant
 
 /** Whose artifacts a query may see (ADR-012: developers see their own, administrators all). */
 sealed interface Visibility {
@@ -38,13 +39,47 @@ sealed interface SaveResult {
   data object AllowListChanged : SaveResult
 }
 
+/** A trigger that still points at a version (name and kind, as the API shows the kind). */
+data class TriggerReference(val name: String, val kind: String)
+
+/** The runs of a version's definitions; [byState] has only the states that occur. */
+data class RunImpact(
+    val total: Long,
+    val byState: Map<String, Long>,
+    val active: Long,
+    val earliestAt: Instant?,
+    val latestAt: Instant?,
+)
+
+/** What deleting a version would take with it or be stopped by (ADR-047). */
+data class DeletionImpact(
+    val runs: RunImpact,
+    val logEntries: Long,
+    val triggers: List<TriggerReference>,
+    /** Whether the jar goes too, that is no other uploader's version of the content remains. */
+    val contentRemoved: Boolean,
+) {
+  val deletable: Boolean
+    get() = triggers.isEmpty() && runs.active == 0L
+}
+
 sealed interface DeleteResult {
-  data object Deleted : DeleteResult
+  /** The version went, with [runs] runs and [logEntries] log entries. */
+  data class Deleted(val runs: Long, val logEntries: Long) : DeleteResult
 
   data object NotFound : DeleteResult
 
-  /** Something still references the version's definitions; nothing was deleted. */
-  data object InUse : DeleteResult
+  /** Triggers still point at the version, or (none named) something else still references it. */
+  data class InUse(val triggers: List<TriggerReference>) : DeleteResult
+
+  /** [active] runs have not ended. */
+  data class RunsActive(val active: Long) : DeleteResult
+
+  /** The version has [total] ended runs and the caller did not confirm deleting them. */
+  data class RunsExist(val total: Long) : DeleteResult
+
+  /** The caller confirmed another number of runs than the [total] there are now. */
+  data class ImpactChanged(val total: Long) : DeleteResult
 }
 
 /**
@@ -66,9 +101,14 @@ interface ArtifactStore {
 
   fun list(visibility: Visibility): List<ArtifactRecord>
 
+  /** What deleting the version would take along or be stopped by, or null when there is none. */
+  fun deletionImpact(contentHash: String, uploader: String): DeletionImpact?
+
   /**
-   * Deletes the version with its definitions unless something references them. The jar goes with
-   * the last version of its content, in the same transaction.
+   * Deletes the version with its definitions, in one transaction. Triggers or runs that have not
+   * ended stop it; ended runs and their log go with it only when [confirmedRuns] equals their
+   * number (ADR-047). The jar goes with the last version of its content. Deleting a version and
+   * creating a run of it exclude each other.
    */
-  fun delete(contentHash: String, uploader: String): DeleteResult
+  fun delete(contentHash: String, uploader: String, confirmedRuns: Long? = null): DeleteResult
 }

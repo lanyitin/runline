@@ -260,11 +260,36 @@ Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engin
 
 列出 pipeline 定義。開發人員只看到自己上傳的，管理員看到全部。本文 `{"definitions": [...], "limitations": "..."}`，同一內容有多個版本時（管理員）各列一筆。每筆含所屬版本的 `contentHash`、`uploader`、`uploadedBy`、`uploadedAt`，以及與上傳回傳相同的 pipeline 欄位。
 
+### `GET /api/v1/artifacts/{contentHash}/deletion-impact`
+
+認證：Bearer（admin）
+
+預覽刪除一個版本的影響（[ADR-047](../version-deletion/adr/ADR-047-delete-version-with-runs.md)）。唯讀，不改變任何東西，沒有狀態。選填的查詢參數 `uploader` 與版本的解析同 `GET /api/v1/artifacts/{contentHash}`：409 `ambiguous_version`（本文 `{error, message, uploaders[]}`）、404 `not_found`。200，本文：
+
+| 欄位 | 語意 |
+|---|---|
+| `runs.total` | 該版本所有 definition 的 run 總數 |
+| `runs.byState` | 依 run 狀態（`QUEUED`、`WAITING_FOR_RESOURCES`、`INITIALIZING`、`RUNNING`、`TIMED_OUT_UNFINISHED`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`INTERRUPTED`、`TIMED_OUT`）的筆數；只列有 run 的狀態 |
+| `runs.active` | 非終態（排隊、等待資源、初始化、執行中、逾時未結束）的筆數 |
+| `runs.earliestAt`、`runs.latestAt` | run 建立時間的範圍；沒有 run 時省略 |
+| `logEntries` | 這些 run 的 log 總筆數 |
+| `triggers[]` | 仍指向該版本的 trigger：`{name, kind}`（`kind` 為 `cron` 或 `webhook`），依名稱排序 |
+| `contentRemoved` | 刪除後 jar 內容是否一併移除（沒有其他上傳者的版本參照時為真） |
+| `deletable` | 現在是否可刪（沒有 trigger 且沒有進行中的 run） |
+
+各計數取自同一個資料庫快照。run 與 log 很多時，預覽的成本隨筆數增加（範圍受保留期限清理約束）。
+
 ### `DELETE /api/v1/artifacts/{contentHash}`
 
 認證：Bearer（admin）
 
-刪除一個版本（只刪這位上傳者的版本；同一內容其他上傳者的版本與其 definition、trigger、run 不受影響）。選填的查詢參數 `uploader` 同 `GET /api/v1/artifacts/{contentHash}`。jar 位元組在最後一個參照它的版本被刪除時，於同一交易移除。204 成功；404 `not_found`；409 `in_use`：這個版本的 definition 仍被 trigger 或 run 引用，不能刪除（別人的版本被引用不阻擋這個版本被刪除）；409 `ambiguous_version`：同一內容有多位上傳者的版本而未給 `uploader`，什麼都沒有刪除。
+刪除一個版本（只刪這位上傳者的版本；同一內容其他上傳者的版本與其 definition、trigger、run 不受影響）。選填的查詢參數 `uploader` 同 `GET /api/v1/artifacts/{contentHash}`；選填的查詢參數 `runs`（不小於 0 的整數）是呼叫者在預覽中看到的 `runs.total`，表示確認連同這些 run 一併刪除；不是整數或為負值回 400 `bad_request`，什麼都沒有刪除。jar 位元組在最後一個參照它的版本被刪除時，於同一交易移除。
+
+204 成功：版本、其 definition、所有終態 run 與其 log 在同一交易內移除（任何一步失敗則全部不變）；觸發紀錄保留並清除對這些 run 的參照；不連帶刪除 trigger，也不取消 run。刪除與同一版本的建立 run 互斥：刪除成立後建立 run 的結果與版本不存在相同（404 `definition_not_found`）。
+
+判定順序與錯誤（先到先回，什麼都沒有刪除）：404 `not_found`；409 `ambiguous_version`：同一內容有多位上傳者的版本而未給 `uploader`；409 `in_use`：仍有 trigger 指向該版本，本文 `{error, message, triggers[]}`（run 不再是原因；別人的版本被引用不阻擋這個版本被刪除）；409 `runs_active`：有進行中的 run，本文 `{error, message, active}`；409 `runs_exist`：有終態 run 而未帶 `runs`，本文 `{error, message, total}`（沒有 run 時不帶 `runs` 也能刪）；409 `impact_changed`：帶的 `runs` 與當下的 run 總數不符，本文 `{error, message, total}`，須重新預覽（帶 `runs=0` 而當下沒有 run 視為相符）。重複刪除已不存在的版本得到 404。
+
+刪除成功時記錄管理員名稱、版本（內容雜湊與上傳者）、刪除的 run 數與 log 筆數；被拒絕的刪除記錄原因類別（`in_use`、`runs_active`、`runs_exist`、`impact_changed`）。
 
 ## Run
 

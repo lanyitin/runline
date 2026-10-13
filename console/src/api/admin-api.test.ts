@@ -601,11 +601,11 @@ describe('unsafe execution and deleting a version', () => {
     expect((await api.setUnsafeExecution(hash, 'a.b', true)).pipeline).toBe('a.b');
   });
 
-  test('a version is deleted; one that is in use is a 409 in_use', async () => {
+  test('a version is deleted; one that a trigger refers to is a 409 in_use', async () => {
     const api = await start();
     const free = await slow(api);
     const used = app.engine.backend.seedArtifact('ada', [{ name: 'u', className: 'x.U' }]);
-    app.engine.backend.seedRun('ada', { contentHash: used, pipeline: 'u' });
+    app.engine.backend.triggers.seed({ name: 'bound', contentHash: used, uploader: 'ada', pipeline: 'u' });
 
     await api.deleteVersion(free);
     await expect(api.artifact(free)).rejects.toMatchObject({ status: 404 });

@@ -306,7 +306,7 @@ class VersionUseApiTest {
       }
 
   @Test
-  fun `a version used by a run is not deleted, and that does not hold back another's`() =
+  fun `a version with a run is not deleted without a confirmation, and that does not hold back another's`() =
       testApplication {
         engine()
         val hash = sharedBy(jar("hello"))
@@ -318,7 +318,7 @@ class VersionUseApiTest {
             client.delete("/api/v1/artifacts/$hash?uploader=bob") { bearer(TestTokens.ROOT)() }
 
         assertEquals(HttpStatusCode.Conflict, inUse.status)
-        assertEquals("in_use", inUse.json().text("error"))
+        assertEquals("runs_exist", inUse.json().text("error"))
         assertEquals(HttpStatusCode.NoContent, other.status)
         assertEquals(1, count("SELECT count(*) FROM pipeline_artifact"))
         assertEquals(1, count("SELECT count(*) FROM artifact_content"))

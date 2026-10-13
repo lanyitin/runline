@@ -16,6 +16,8 @@
     /** The act is destructive or reaches far: its button looks like it. */
     danger?: boolean;
     busy?: boolean;
+    /** The answer cannot be given yet (the question is still being read): Cancel still works. */
+    confirmDisabled?: boolean;
     failure?: ApiFailure | null;
     onconfirm: () => void;
     oncancel: () => void;
@@ -26,6 +28,7 @@
     confirmLabel,
     danger = false,
     busy = false,
+    confirmDisabled = false,
     failure = null,
     onconfirm,
     oncancel,
@@ -47,7 +50,7 @@
     <button
       class="rl-btn confirm {danger ? 'danger solid' : 'primary'}"
       type="button"
-      disabled={busy}
+      disabled={busy || confirmDisabled}
       onclick={onconfirm}
     >
       {confirmLabel}

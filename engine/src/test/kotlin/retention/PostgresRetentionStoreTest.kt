@@ -400,21 +400,21 @@ class PostgresRetentionStoreTest {
   }
 
   @Test
-  fun `an artifact a run refers to cannot be deleted until the run is cleaned up`() {
+  fun `an artifact a run refers to is not deleted without confirmation, but is once the run is cleaned up`() {
     run(RunState.SUCCEEDED, endedAt = now - Duration.ofDays(60), logLines = 2)
-    assertEquals(DeleteResult.InUse, artifacts.delete(hash, "alice"))
+    assertEquals(DeleteResult.RunsExist(1), artifacts.delete(hash, "alice"))
 
     cleanRuns(runEnded = now - Duration.ofDays(30))
 
-    assertEquals(DeleteResult.Deleted, artifacts.delete(hash, "alice"))
+    assertIs<DeleteResult.Deleted>(artifacts.delete(hash, "alice"))
   }
 
   @Test
-  fun `an artifact a run has not finished with stays protected whatever the clean-up does`() {
+  fun `an artifact a run has not finished with stays protected whatever the clean-up does and is confirmed`() {
     run(RunState.RUNNING, endedAt = now - Duration.ofDays(400))
     cleanRuns(runEnded = now, logEnded = now)
 
-    assertEquals(DeleteResult.InUse, artifacts.delete(hash, "alice"))
+    assertEquals(DeleteResult.RunsActive(1), artifacts.delete(hash, "alice", confirmedRuns = 1))
   }
 
   @Test
@@ -428,7 +428,7 @@ class PostgresRetentionStoreTest {
 
     assertEquals(0, count("run"))
     assertEquals(0, count("trigger_firing"))
-    assertEquals(DeleteResult.InUse, artifacts.delete(hash, "alice"))
+    assertIs<DeleteResult.InUse>(artifacts.delete(hash, "alice"))
     assertNotNull(triggers.find("hook"), "the trigger itself is never removed")
   }
 }

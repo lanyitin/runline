@@ -242,6 +242,26 @@ export interface UnsafeSetting {
   setAt: string;
 }
 
+/** What deleting a version would take along or be stopped by (05-ipc of the version deletion). */
+export interface DeletionImpact {
+  runs: {
+    total: number;
+    /** Only the states that have runs; a state that is missing has none. */
+    byState: Record<string, number>;
+    /** The runs that have not ended. */
+    active: number;
+    /** The range of the creation times of the runs; none when there are no runs. */
+    earliestAt: string | null;
+    latestAt: string | null;
+  };
+  logEntries: number;
+  /** The triggers that still point at the version. */
+  triggers: Array<{ name: string; kind: string }>;
+  /** Whether the jar goes with the version. */
+  contentRemoved: boolean;
+  deletable: boolean;
+}
+
 const stringMap = (value: unknown, what: string): Record<string, string> =>
   Object.fromEntries(
     Object.entries(obj(value ?? {}, what)).map(([key, v]) => [key, str(v, what)]),
@@ -634,5 +654,31 @@ export function parseResourceTypes(json: unknown): ResourceTypeCatalog {
               };
             }),
           },
+  };
+}
+
+export function parseDeletionImpact(json: unknown): DeletionImpact {
+  const r = obj(json, 'the impact of deleting a version');
+  const runs = obj(r.runs, 'runs');
+  return {
+    runs: {
+      total: num(runs.total, 'runs.total'),
+      byState: Object.fromEntries(
+        Object.entries(obj(runs.byState ?? {}, 'runs.byState')).map(([state, count]) => [
+          state,
+          num(count, 'runs.byState'),
+        ]),
+      ),
+      active: num(runs.active, 'runs.active'),
+      earliestAt: strOrNull(runs.earliestAt, 'runs.earliestAt'),
+      latestAt: strOrNull(runs.latestAt, 'runs.latestAt'),
+    },
+    logEntries: num(r.logEntries, 'logEntries'),
+    triggers: list(r.triggers, 'triggers', (t) => {
+      const trigger = obj(t, 'a trigger');
+      return { name: str(trigger.name, 'trigger name'), kind: str(trigger.kind, 'trigger kind') };
+    }),
+    contentRemoved: bool(r.contentRemoved, 'contentRemoved'),
+    deletable: bool(r.deletable, 'deletable'),
   };
 }

@@ -6,7 +6,7 @@ import { ApiFailure } from '../api/failure';
 let app: TestApp;
 afterEach(() => app.dispose());
 
-const show = async (props: { danger?: boolean; busy?: boolean; failure?: ApiFailure | null } = {}) => {
+const show = async (props: { danger?: boolean; busy?: boolean; confirmDisabled?: boolean; failure?: ApiFailure | null } = {}) => {
   const onconfirm = vi.fn();
   const oncancel = vi.fn();
   app = await createTestApp({ languages: ['en'] });
@@ -57,6 +57,17 @@ describe('a confirmation', () => {
     view.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(onconfirm).not.toHaveBeenCalled();
     expect(oncancel).not.toHaveBeenCalled();
+  });
+
+  test('can be refused to be confirmed while it can still be left', async () => {
+    const { button, onconfirm, oncancel } = await show({ confirmDisabled: true });
+
+    expect(button('Delete it').disabled).toBe(true);
+    expect(button('Cancel').disabled).toBe(false);
+    button('Delete it').click();
+    button('Cancel').click();
+    expect(onconfirm).not.toHaveBeenCalled();
+    expect(oncancel).toHaveBeenCalledOnce();
   });
 
   test('says what the Engine refused, in words, and stays open', async () => {

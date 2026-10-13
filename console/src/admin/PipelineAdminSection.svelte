@@ -1,21 +1,20 @@
 <script lang="ts">
   import { ApiFailure } from '../api/failure';
-  import type { Trigger } from '../api/admin-model';
   import type { Artifact, Pipeline } from '../api/model';
   import { useApp } from '../app/context';
-  import { newTriggerHref, triggerHref } from '../app/links';
+  import { newTriggerHref } from '../app/links';
   import { shortHash } from '../engine/info';
   import { enumLabel } from '../i18n/enums';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
+  import VersionDeleteDialog from './VersionDeleteDialog.svelte';
   import Link from '../ui/Link.svelte';
   import PlainText from '../ui/PlainText.svelte';
   import Timestamp from '../ui/Timestamp.svelte';
 
   // What an admin does with one pipeline of one version, on its page: allow it to run although it is
   // UNSAFE (this version only; turning it on is confirmed, turning it off is not), bind a trigger to
-  // it, and delete the version (confirmed; a version that a trigger or a run refers to is a 409
-  // `in_use`, and the dialog says what refers to it).
+  // it, and delete the version (VersionDeleteDialog: previewed, then confirmed).
   interface Props {
     artifact: Artifact;
     pipeline: Pipeline;
@@ -59,43 +58,6 @@
 
   // ---- deleting the version --------------------------------------------------------------------
   let deleting = $state(false);
-  let deleteBusy = $state(false);
-  let deleteFailure = $state.raw<ApiFailure | null>(null);
-  let referrers = $state.raw<{ triggers: Trigger[]; runs: number } | null>(null);
-
-  async function confirmDelete() {
-    if (deleteBusy) return;
-    deleteBusy = true;
-    deleteFailure = null;
-    referrers = null;
-    try {
-      await api.deleteVersion(artifact.contentHash, artifact.uploader);
-      deleting = false;
-      ondeleted();
-    } catch (error) {
-      deleteFailure = asFailure(error);
-      if ((deleteFailure.body as { error?: string } | null)?.error === 'in_use') void explain();
-    } finally {
-      deleteBusy = false;
-    }
-  }
-
-  /** What refers to the version, as far as an admin can see: the triggers, and the newest runs. */
-  async function explain() {
-    try {
-      const [triggers, runs] = await Promise.all([api.triggers(), api.runs({ limit: 200 })]);
-      referrers = {
-        triggers: triggers.filter(
-          (t) => t.contentHash === artifact.contentHash && t.uploader === artifact.uploader,
-        ),
-        runs: runs.filter(
-          (r) => r.contentHash === artifact.contentHash && r.uploader === artifact.uploader,
-        ).length,
-      };
-    } catch {
-      // The refusal is already said; what refers to the version is a help, not a need.
-    }
-  }
 
   const allowed = $derived(pipeline.allowUnsafeExecution);
 </script>
@@ -141,7 +103,7 @@
       <h3>{i18n.t('admin.version.title')}</h3>
       <p class="rl-help">{i18n.t('admin.version.help')}</p>
       <div>
-        <button class="rl-btn danger" type="button" onclick={() => { deleting = true; deleteFailure = null; referrers = null; }}>
+        <button class="rl-btn danger" type="button" onclick={() => (deleting = true)}>
           {i18n.t('admin.version.delete')}
         </button>
       </div>
@@ -175,39 +137,7 @@
 {/if}
 
 {#if deleting}
-  <ConfirmDialog
-    title={i18n.t('admin.version.confirm.title', { hash: shortHash(artifact.contentHash) })}
-    confirmLabel={i18n.t('admin.version.confirm.yes')}
-    danger
-    busy={deleteBusy}
-    failure={deleteFailure}
-    onconfirm={confirmDelete}
-    oncancel={() => (deleting = false)}
-  >
-    <p>{i18n.t('admin.version.confirm.body', { count: artifact.pipelines.length })}</p>
-    <ul class="reasons">
-      {#each artifact.pipelines as other (other.name)}
-        <li><PlainText value={other.name} mono /></li>
-      {/each}
-    </ul>
-    {#if referrers}
-      <div class="in-use rl-notice warning">
-        <strong>{i18n.t('admin.version.inUse')}</strong>
-        {#if referrers.triggers.length > 0}
-          <p>
-            {i18n.t('admin.version.inUse.triggers')}
-            {#each referrers.triggers as trigger, index (trigger.name)}
-              {#if index > 0},{/if}
-              <Link href={triggerHref(trigger.name)}>{trigger.name}</Link>
-            {/each}
-          </p>
-        {/if}
-        {#if referrers.runs > 0}
-          <p>{i18n.t('admin.version.inUse.runs', { count: referrers.runs })}</p>
-        {/if}
-      </div>
-    {/if}
-  </ConfirmDialog>
+  <VersionDeleteDialog {artifact} ondeleted={() => { deleting = false; ondeleted(); }} oncancel={() => (deleting = false)} />
 {/if}
 
 <style>
@@ -236,8 +166,5 @@
     gap: var(--space-1);
     margin: 0;
     padding-left: var(--space-5);
-  }
-  .in-use p {
-    margin: var(--space-2) 0 0;
   }
 </style>

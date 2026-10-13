@@ -6,11 +6,12 @@
   interface Props {
     danger?: boolean;
     busy?: boolean;
+    confirmDisabled?: boolean;
     failure?: ApiFailure | null;
     onconfirm: () => void;
     oncancel: () => void;
   }
-  let { danger = false, busy = false, failure = null, onconfirm, oncancel }: Props = $props();
+  let { danger = false, busy = false, confirmDisabled = false, failure = null, onconfirm, oncancel }: Props = $props();
 </script>
 
 <ConfirmDialog
@@ -18,6 +19,7 @@
   confirmLabel="Delete it"
   {danger}
   {busy}
+  {confirmDisabled}
   {failure}
   {onconfirm}
   {oncancel}

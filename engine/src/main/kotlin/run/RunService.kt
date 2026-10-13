@@ -149,9 +149,13 @@ class RunService(
         } else null
 
     val run =
-        runs.insert(
-            NewRun(newId(), definition.id, request.source, parameters, clock.instant(), snapshot)
-        )
+        try {
+          runs.insert(
+              NewRun(newId(), definition.id, request.source, parameters, clock.instant(), snapshot)
+          )
+        } catch (e: DefinitionDeletedException) {
+          return refused("definition_not_found", request, CreateRunResult.DefinitionNotFound)
+        }
     telemetry.accepted(run, definition.verdict)
     scheduler.submit(
         RunPlan(

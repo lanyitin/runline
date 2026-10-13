@@ -921,18 +921,109 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       expect([again.status, again.body.error]).toEqual([404, 'not_found']);
     });
 
-    test('a version that a run refers to is a 409 in_use and stays', async () => {
-      const { contentHash } = await variant(setup.jars().slow);
+    const impactPath = (contentHash: string) => `${versionPath(contentHash)}/deletion-impact`;
+    const makeRun = async (contentHash: string, delayMillis: string) => {
       const made = await call(ada(), 'POST', '/api/v1/runs', {
         contentHash,
         pipeline: 'demo-slow',
-        parameters: { steps: '1', delayMillis: '10' },
+        parameters: { steps: '1', delayMillis },
       });
       expect(made.status).toBe(201);
-      await untilTerminal(made.body.runId);
-      const refused = await call(root(), 'DELETE', versionPath(contentHash));
-      expect([refused.status, refused.body.error]).toEqual([409, 'in_use']);
+      return made.body.runId as string;
+    };
+
+    test('the preview of a version with an ended run counts it, changes nothing, and says the version can be deleted', async () => {
+      const { contentHash } = await variant(setup.jars().slow);
+      const runId = await makeRun(contentHash, '10');
+      const ended = await untilTerminal(runId);
+
+      const preview = await call(root(), 'GET', impactPath(contentHash));
+
+      expect(preview.status).toBe(200);
+      expect(preview.body).toMatchObject({
+        runs: { total: 1, byState: { [ended.state]: 1 }, active: 0 },
+        triggers: [],
+        contentRemoved: true,
+        deletable: true,
+      });
+      expect(preview.body.runs.earliestAt).toMatch(ISO);
+      expect(preview.body.runs.latestAt).toMatch(ISO);
+      expect(preview.body.logEntries).toBeGreaterThanOrEqual(0);
       expect((await call(ada(), 'GET', versionPath(contentHash))).status).toBe(200);
+      expect((await runOf(ada(), runId)).status).toBe(200);
+      await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=1`);
+    });
+
+    test('a version without runs is previewed without a range, and the preview is for an admin only', async () => {
+      const { contentHash } = await variant(setup.jars().slow);
+
+      const preview = await call(root(), 'GET', impactPath(contentHash));
+
+      expect(preview.body.runs).toMatchObject({ total: 0, active: 0 });
+      expect(preview.body.runs.earliestAt ?? null).toBeNull();
+      expect(preview.body.runs.latestAt ?? null).toBeNull();
+      expect(preview.body.deletable).toBe(true);
+      const asDeveloper = await call(ada(), 'GET', impactPath(contentHash));
+      expect([asDeveloper.status, asDeveloper.body.error]).toEqual([403, 'forbidden']);
+      expect((await call(null, 'GET', impactPath(contentHash))).status).toBe(401);
+      const missing = await call(root(), 'GET', impactPath('0'.repeat(64)));
+      expect([missing.status, missing.body.error]).toEqual([404, 'not_found']);
+      await call(root(), 'DELETE', versionPath(contentHash));
+    });
+
+    test('a version with ended runs is deleted with them once their number is confirmed: without it a 409 runs_exist, and the runs are gone with the version', async () => {
+      const { contentHash } = await variant(setup.jars().slow);
+      const runId = await makeRun(contentHash, '10');
+      await untilTerminal(runId);
+
+      const unconfirmed = await call(root(), 'DELETE', versionPath(contentHash));
+      expect([unconfirmed.status, unconfirmed.body.error, unconfirmed.body.total]).toEqual([409, 'runs_exist', 1]);
+      expect((await call(ada(), 'GET', versionPath(contentHash))).status).toBe(200);
+
+      const gone = await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=1`);
+      expect(gone.status).toBe(204);
+      expect((await call(ada(), 'GET', versionPath(contentHash))).status).toBe(404);
+      const run = await runOf(ada(), runId);
+      expect([run.status, run.body.error]).toEqual([404, 'run_not_found']);
+    });
+
+    test('a run that has not ended is a 409 runs_active with its count, and the preview says it cannot be deleted; once it has ended the version is deleted', async () => {
+      const { contentHash } = await variant(setup.jars().slow);
+      const runId = await makeRun(contentHash, '30000');
+
+      const preview = await call(root(), 'GET', impactPath(contentHash));
+      expect(preview.body).toMatchObject({ runs: { total: 1, active: 1 }, deletable: false });
+      const refused = await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=1`);
+      expect([refused.status, refused.body.error, refused.body.active]).toEqual([409, 'runs_active', 1]);
+      expect((await call(ada(), 'GET', versionPath(contentHash))).status).toBe(200);
+
+      expect([200, 202]).toContain((await call(ada(), 'POST', `/api/v1/runs/${runId}/cancel`)).status);
+      await untilTerminal(runId);
+      expect((await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=1`)).status).toBe(204);
+    });
+
+    test('runs that changed after the preview are a 409 impact_changed with the number now, and nothing is deleted; confirming the new number deletes', async () => {
+      const { contentHash } = await variant(setup.jars().slow);
+      await untilTerminal(await makeRun(contentHash, '10'));
+      const preview = await call(root(), 'GET', impactPath(contentHash));
+      expect(preview.body.runs.total).toBe(1);
+
+      await untilTerminal(await makeRun(contentHash, '10'));
+      const refused = await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=1`);
+
+      expect([refused.status, refused.body.error, refused.body.total]).toEqual([409, 'impact_changed', 2]);
+      expect((await call(ada(), 'GET', versionPath(contentHash))).status).toBe(200);
+      expect((await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=2`)).status).toBe(204);
+    });
+
+    test('a count that is not a whole number, or is negative, is a 400 bad_request and deletes nothing', async () => {
+      const { contentHash } = await variant(setup.jars().slow);
+      for (const runs of ['abc', '-1', '1.5', '']) {
+        const refused = await call(root(), 'DELETE', `${versionPath(contentHash)}?runs=${runs}`);
+        expect([refused.status, refused.body.error]).toEqual([400, 'bad_request']);
+      }
+      expect((await call(ada(), 'GET', versionPath(contentHash))).status).toBe(200);
+      await call(root(), 'DELETE', versionPath(contentHash));
     });
 
     test('a version that a trigger refers to is a 409 in_use until the trigger is deleted', async () => {
@@ -945,8 +1036,11 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
         pipeline: 'demo-slow',
       });
       expect(made.status).toBe(201);
+      const preview = await call(root(), 'GET', impactPath(contentHash));
+      expect(preview.body).toMatchObject({ triggers: [{ name: triggerName, kind: 'webhook' }], deletable: false });
       const refused = await call(root(), 'DELETE', versionPath(contentHash));
       expect([refused.status, refused.body.error]).toEqual([409, 'in_use']);
+      expect(refused.body.triggers).toEqual([{ name: triggerName, kind: 'webhook' }]);
       expect((await call(root(), 'DELETE', `/api/v1/triggers/${triggerName}`)).status).toBe(204);
       expect((await call(root(), 'DELETE', versionPath(contentHash))).status).toBe(204);
     });

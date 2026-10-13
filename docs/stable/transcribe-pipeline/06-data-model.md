@@ -21,11 +21,11 @@ erDiagram
 
 | 實體 | 內容 |
 |---|---|
-| RUN | 資料庫指派的識別、相對檔名（掃描模式在選定影片前為空字串，「無待處理」的 run 一直為空）、影片檔的大小與修改時間（檔案指紋，選定影片後即寫入；掃描以相對檔名加指紋判定「同一個檔案」的失敗次數，[ADR-040](adr/ADR-040-cron-scan-mode.md)）、開始與結束、結果狀態（含「無待處理」的說明名稱）、降級計數、參數快照（不含機密） |
+| RUN | 資料庫指派的識別、轉錄實際使用的端點 `asr_endpoint` 與依據的模型 labels `asr_labels`（run 層級，每個 run 決定一次，[ADR-042](adr/ADR-042-asr-by-model-labels.md)；版本 6 之前的 run 與 labels 不明者為空）、相對檔名（掃描模式在選定影片前為空字串，「無待處理」的 run 一直為空）、影片檔的大小與修改時間（檔案指紋，選定影片後即寫入；掃描以相對檔名加指紋判定「同一個檔案」的失敗次數，[ADR-040](adr/ADR-040-cron-scan-mode.md)）、開始與結束、結果狀態（含「無待處理」的說明名稱）、降級計數、參數快照（不含機密） |
 | STAGE | 階段名稱、狀態、起訖時間、計數（輸入與輸出筆數、失敗、降級）、失敗原因 |
 | SEGMENT_A / SEGMENT_B | 起訖秒、序號；B 指向所屬 A；B 另記是否由 A 原樣沿用 |
 | ENTRY_TEXT | 每個 B 條目在各階段的文字：轉錄、潤飾、核對、翻譯；核對另記畫面時間點（秒，每張一筆）與一句畫面觀察，不存圖片 |
-| EXCHANGE | 每次模型呼叫：階段、對象（A 組、B 條目或整個 run）、模型 id（實際回報）、提示與回答文字、耗時、token 用量、結果（成功、重試、失敗、退回；失敗指終局失敗的最後一次嘗試，重試指之後還會再試的失敗嘗試）、`finish_reason`（回答的結束原因，如 `stop`、`length`；沒有回報者與版本 4 之前的呼叫為空）。結果仍是封閉的四個值：回答因 token 上限被截斷（`finish_reason` 為 `length`）時，原因 `TRUNCATED` 記在 `finish_reason` 與 log，不是結果的值（[runbook](runbook.md) 第 10 節）；轉錄呼叫沒有 `finish_reason` |
+| EXCHANGE | 每次模型呼叫：階段、對象（A 組、B 條目或整個 run）、模型 id（實際回報）、提示與回答文字、耗時、token 用量、結果（成功、重試、失敗、退回；失敗指終局失敗的最後一次嘗試，重試指之後還會再試的失敗嘗試）、`finish_reason`（回答的結束原因，如 `stop`、`length`；沒有回報者與版本 4 之前的呼叫為空）、`endpoint`（該次呼叫實際的端點，如 `audio.transcriptions`、`chat.completions`；版本 6 之前的呼叫為空）、`error`（服務以 4xx 拒絕時的 `<error.type>: <error.message>`；其他呼叫與版本 5 之前的呼叫為空，[ADR-043](../pipeline-engine/adr/ADR-043-upstream-error-detail.md)）。結果仍是封閉的四個值：回答因 token 上限被截斷（`finish_reason` 為 `length`）時，原因 `TRUNCATED` 記在 `finish_reason` 與 log，不是結果的值（[runbook](runbook.md) 第 10 節）；轉錄型模型的轉錄端點沒有 `finish_reason`，chat 路徑有 |
 | SUBTITLE_FILE | `export` 階段寫出（或嘗試寫出）的字幕檔，以 RUN 與語系為鍵：語系（檔名中的語系）、收件根目錄下的相對路徑、是否寫出。記錄的是 run 實際做了什麼，Console 的 view 依此回答，不由檔案系統推測；版本 3 之前的 run 沒有 |
 | RESULT | 來源語言標示、來源語言 SRT、繁體中文 SRT、影片摘要。影片旁的兩個字幕檔是這兩份 SRT 的副本（逐位元組相同，[ADR-039](adr/ADR-039-subtitle-files-beside-video.md)），不是新資料；「寫出了哪個檔」的紀錄是 SUBTITLE_FILE，不是 RESULT 的欄位 |
 
@@ -50,7 +50,7 @@ pipeline 的執行環境不提供 Engine 的 run 識別，所以 RUN 不記它�
 
 ## 遷移
 
-只增不改；版本記在資料庫；啟動時由 pipeline 建立或升級，作法沿用 digest-rss（WI-1405 定義）。檔案指紋以追加的遷移加入 RUN，舊的 run 兩欄為空。版本 3 加入表 SUBTITLE_FILE（WI-1422），舊的 run 沒有紀錄。版本 4 為 EXCHANGE 加入 `finish_reason` 欄（WI-1426），舊的呼叫為空。
+只增不改；版本記在資料庫；啟動時由 pipeline 建立或升級，作法沿用 digest-rss（WI-1405 定義）。檔案指紋以追加的遷移加入 RUN，舊的 run 兩欄為空。版本 3 加入表 SUBTITLE_FILE（WI-1422），舊的 run 沒有紀錄。版本 4 為 EXCHANGE 加入 `finish_reason` 欄（WI-1426），舊的呼叫為空。版本 5 為 EXCHANGE 加入 `error` 欄（WI-1428），舊的呼叫為空。版本 6 為 RUN 加入 `asr_endpoint`、`asr_labels`，為 EXCHANGE 加入 `endpoint`（WI-1429），舊的 run 與呼叫為空。
 
 ## 多租戶
 

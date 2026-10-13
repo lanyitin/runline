@@ -380,6 +380,9 @@ private fun callHost(
       answer["errorId"] as String?,
       answer["status"] as Int?,
       answer["sqlState"] as? String,
+      // A host that predates ADR-043 does not send them: empty, as when a service said nothing.
+      answer["upstreamType"] as? String ?: "",
+      answer["upstreamMessage"] as? String ?: "",
   )
 }
 

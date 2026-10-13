@@ -37,4 +37,8 @@ class ResourceOperationFailure(
     val status: Int? = null,
     val sqlState: String? = null,
     val withErrorId: Boolean = false,
+    /** The service's `error.type` of a 4xx, already bounded and masked (ADR-043); empty if none. */
+    val upstreamType: String = "",
+    /** The service's `error.message` of a 4xx, already bounded and masked (ADR-043). */
+    val upstreamMessage: String = "",
 ) : RuntimeException(failure.name, cause)

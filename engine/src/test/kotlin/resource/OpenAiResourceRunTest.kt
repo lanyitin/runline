@@ -38,7 +38,9 @@ class OpenAiResourceRunTest {
   private val extras = mutableListOf<AutoCloseable>(server)
   private val admin = ApiIdentity("root", Role.ADMIN)
 
-  private val keystore: Path = keystores.pkcs12("run.p12", mapOf("lemon-key" to key))
+  private val otherSecret = "other-secret-value-77"
+  private val keystore: Path =
+      keystores.pkcs12("run.p12", mapOf("lemon-key" to key, "other-key" to otherSecret))
   private val secrets: KeystoreSecretStore =
       KeystoreSecretStore.open(
           keystore,
@@ -182,6 +184,41 @@ class OpenAiResourceRunTest {
     assertEquals("PARAMETER_LOCKED|null", h.result("locked-p", "locked"))
     assertEquals("ENDPOINT_NOT_ENABLED|null", h.result("unknown-p", "unknown"))
     assertEquals("RATE_LIMITED|429", h.result("limited-p", "limited"))
+  }
+
+  @Test
+  fun `a 4xx hands the pipeline the error type and message of the service, masked by what the Engine knows`() {
+    val h = harness()
+    h.defineOpenAi("lemon", settings())
+    val body =
+        """
+        OpenAiAccessor lemon = context.getAccessors().openAiCompatible("lemon");
+        String result;
+        try {
+          lemon.call(new OpenAiRequest("chat.completions", "{}"));
+          result = "ok";
+        } catch (ResourceAccessException e) {
+          result = e.getFailure().name() + "|" + e.getStatus() + "|" + e.getUpstreamType() + "|" + e.getUpstreamMessage() + "|" + e.getMessage();
+        }
+        context.getFiles().writeText(FileScope.PIPELINE_SHARED, "detail", result);
+        """
+            .trimIndent()
+    val hash = h.upload("detail-p", body, declaration = declaration)
+    server.script = { _, response ->
+      response.json(
+          400,
+          """{"error":{"type":"invalid_request_error","message":"model rejects it, see $otherSecret"}}""",
+      )
+      true
+    }
+
+    assertEquals(RunState.SUCCEEDED, h.awaitEnd(h.start(hash, "detail-p")).state)
+
+    assertEquals(
+        "REQUEST_REJECTED|400|invalid_request_error|model rejects it, see ***|" +
+            "Shared resource 'lemon': REQUEST_REJECTED (HTTP 400)",
+        h.result("detail-p", "detail"),
+    )
   }
 
   @Test

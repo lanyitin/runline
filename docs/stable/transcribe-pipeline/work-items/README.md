@@ -15,7 +15,7 @@
 | [WI-1406](WI-1406-audio-extraction.md) | T | ffprobe 檢查與擷取單聲道 16 kHz WAV；畫面擷取能力 | WI-1403 | 已完成（2026-10-12） |
 | [WI-1407](WI-1407-vad-tool.md) | T | VAD 命令列工具（語音機率）與其契約 | WI-1403 | 已完成（2026-10-12；與官方 Python 基準最大差 5e-8） |
 | [WI-1408](WI-1408-vad-a-b-segmentation.md) | T | VAD-A／VAD-B 分段與最低能量切開 | WI-1405、WI-1406、WI-1407 | 已完成（2026-10-12；與官方區間 0 取樣誤差） |
-| [WI-1409](WI-1409-transcription.md) | T | qwen-asr 轉錄 | WI-1404、WI-1405、WI-1408 | 已完成（2026-10-12；對真實 Lemonade 未驗證） |
+| [WI-1409](WI-1409-transcription.md) | T | 轉錄模型轉錄（端點依 labels 選擇，[ADR-042](../adr/ADR-042-asr-by-model-labels.md)） | WI-1404、WI-1405、WI-1408 | 已完成（2026-10-12；對真實 Lemonade 未驗證） |
 | [WI-1410](WI-1410-polish.md) | T | 依 VAD-A 分組潤飾 | WI-1409 | 已完成（2026-10-12；對真實 Lemonade 未驗證） |
 | [WI-1411](WI-1411-visual-check-and-summary.md) | T | 畫面核對與影片摘要 | WI-1404、WI-1406、WI-1410 | 已完成（2026-10-12；對真實 Lemonade 未驗證） |
 | [WI-1412](WI-1412-translation.md) | T | 繁體中文翻譯與 SRT 結果 | WI-1411 | 已完成（2026-10-12；對真實 Lemonade 未驗證） |
@@ -36,6 +36,30 @@
 | [WI-1426](WI-1426-finish-reason-length.md) | T | 模型因 token 上限被截斷（`finish_reason=length`）時，明確辨識、記錄並以專用原因重試與降級 | 無 | 已完成（2026-10-12；結構版本 4；runbook 與資料模型見 WI-1427） |
 
 | [WI-1427](WI-1427-runbook-truncated.md) | R | runbook 與資料模型補上 `TRUNCATED`、`truncated=N` 與 `exchange.finish_reason`（結構版本 4） | WI-1426 | 已完成（2026-10-12；真實 Lemonade 的 `length` 情境未驗證） |
+
+| [WI-1428](WI-1428-upstream-error-message.md) | T | 模型服務以 4xx 拒絕請求時，失敗訊息帶出對方的錯誤說明，明確的「不支援」不重試 | WI-1430（[pipeline-engine](../../pipeline-engine/work-items/WI-1430-upstream-error-detail-channel.md)） | 已完成（2026-10-13；結構版本 5，新欄位 `exchange.error`；修正三個寫死版本號的舊測試後未重跑全套；對真實 Lemonade 與打包 Engine 未驗證；文件見 WI-1431） |
+| [WI-1429](WI-1429-asr-endpoint-by-labels.md) | T | 轉錄依 `asrModel` 的 `labels` 選擇 `audio.transcriptions` 或 `chat.completions`（[ADR-042](../adr/ADR-042-asr-by-model-labels.md)） | WI-1428 | 已完成（2026-10-13；結構版本 6，新欄位 `run.asr_endpoint`、`run.asr_labels`、`exchange.endpoint`；全套 853 個測試通過，Lemonade 契約測試略過；對真實 Lemonade 與打包 Engine 未驗證；文件見 WI-1431） |
+
+| [WI-1431](WI-1431-docs-asr-endpoint.md) | R | runbook、入口文件與資料模型對齊 ASR 端點選擇、錯誤說明、結構版本 5、6 與分析器判定清單 | WI-1429 | 已完成（2026-10-13；31 項分析器清單以 jar 常數核對，未對 arr 上傳結果核對） |
+
+| [WI-1432](WI-1432-arr-run-findings.md) | T | 每次模型呼叫都記錄端點（含潤飾）；摘要等短答階段有生成量與單次時間上限 | WI-1429、WI-1431 | 已完成（2026-10-13；全套 868 個測試通過，16 個略過；新參數 `summaryMaxTokens`、`modelCallTimeoutSeconds`；真實 Lemonade 是否遵守 `max_tokens` 未驗證；文件待補） |
+
+| [WI-1433](WI-1433-console-summary-and-frames.md) | T | Console 新增 `summary`（摘要分段）與 `frames`（畫面時間點、觀察）view | WI-1422、WI-1432 | 已完成（2026-10-13；`runs` 的影片檔欄改為鑽取到 `summary`，`run` 欄鑽取到 `run-stages`；各 VAD-A 組的摘要沒有記錄在資料庫，`summary` 只有整部影片；在既有 engine.jar 上驗證，未用新建的 Engine；完整重跑兩次皆為 841 個測試、16 個略過（皆為需真實 Lemonade 的契約測試）、0 失敗；WI-1432 當時回報的 868 無法重現，原因不明；文件待補） |
+
+| [WI-1435](WI-1435-group-summaries.md) | T | 記錄各 VAD-A 組的摘要（結構版本 7）並在 `summary` view 顯示 | WI-1433、WI-1432 | 已完成（2026-10-13；結構版本 7，新表 `group_summary`；`summary` view 的排序改為（範圍、段序），缺少的組顯示為一列空文字；主模組 858 個測試（比 WI-1433 的 841 多 17 個）加 vad 模組，共 894 個、16 個略過、0 失敗，由架構師唯讀加總結果檔；未上傳到真實 Engine 讀 view；文件待補） |
+
+| [WI-1434](WI-1434-polish-generation-limit.md) | T | 潤飾請求依輸入規模加生成量上限，超過走 `TRUNCATED` 處理 | WI-1432 | 已完成（2026-10-13；新參數 `polishTokenMargin`，預設 1024，上限＝該組送出的 SRT 字元數加餘裕；規則與預設值為推導值，未在 arr 驗證；主模組 864＋vad 36＝900 個測試、16 個略過、0 失敗，由架構師加總結果檔；文件待補） |
+
+| [WI-1437](WI-1437-translate-generation-limit.md) | T | 翻譯請求依輸入規模加生成量上限，超過走 `TRUNCATED` 處理 | WI-1434 | 已完成（2026-10-13；新參數 `translateTokenMargin`，預設 1024，上限＝該組 SRT 字元數 × 1.5 加餘裕，倍數為內部常數；規則與預設值為推導值，未在 arr 驗證；主模組 869＋vad 36＝905 個測試、16 個略過、0 失敗，由架構師加總結果檔；文件待補） |
+
+| [WI-1436](WI-1436-asr-coverage-sweep.md) | T | 以 ASR 補掃 VAD 空隙（[ADR-044](../adr/ADR-044-asr-coverage-sweep.md)） | WI-1429、WI-1432、WI-1435 | 已完成（2026-10-13；新參數 `sweepEnabled`、`sweepMinGapSeconds`=3、`sweepWindowSeconds`=8、`sweepMinChars`=5，預設值為推導值，未在 arr 驗證；結構版本 8；主模組 938＋vad 36＝974 個測試、16 個略過、0 失敗，由架構師加總結果檔；窗口轉錄失敗目前使整個 run 失敗，待決定是否改為降級；文件待補） |
+
+| [WI-1438](WI-1438-ten-vad-tool.md) | T | TEN VAD 命令列工具（Java＋ONNX，退路為官方原生函式庫）與可行性關卡（[ADR-045](../adr/ADR-045-dual-vad.md)） | WI-1407 | 已取代，不派工（[ADR-046](../adr/ADR-046-denoise-before-vad.md)、[WI-1440](WI-1440-denoise-before-vad.md)；保留供日後參考） |
+
+| [WI-1439](WI-1439-dual-vad-combination.md) | T | 兩個 VAD 機率以 0.1 秒格子加權（0.3／0.7）合併並分段 | WI-1438、WI-1434、WI-1435 | 已取代，不派工（同 WI-1438） |
+| [WI-1440](WI-1440-denoise-before-vad.md) | T | VAD 前以 DeepFilterNet3 降噪（[ADR-046](../adr/ADR-046-denoise-before-vad.md)） | WI-1434、WI-1435 | 已完成（2026-10-13；結構版本 9；新參數 `denoise`、`denoiseAttenLimitDb`；驗收 7 以 `~/fixtures/dfn/` 的固定資料驗證：37 段、涵蓋 20.46%、邊界差 0.0 秒；測試需設環境變數 `TRANSCRIBE_DFN_FIXTURES`，未設則該 4 個測試失敗；主模組 979＋vad 36＝1015 個測試、16 個略過、0 失敗，由架構師加總結果檔；Linux 容器內的 wrapper、雜湊檢查與 arr run 未驗證；文件待補） |
+| [WI-1441](WI-1441-sweep-window-failure-degrades.md) | T | 補掃窗口轉錄失敗時降級（略過、計數、可查），不讓 run 失敗 | WI-1436 | 待派工（在 WI-1440 之後） |
+| [WI-1442](WI-1442-docs-alignment-wi1432-1440.md) | R、T | 文件對齊：WI-1432 至 WI-1441 的行為寫進入口、runbook、資料模型、IPC、部署與相關 ADR | WI-1440、WI-1441 | 待派工（在 WI-1441 之後） |
 
 派工順序：WI-1420 → WI-1421 → WI-1423 → WI-1424 → WI-1422，一次派一項。WI-1422 放最後，使 `runs` view 涵蓋「無待處理」的 run 與檔案指紋。
 

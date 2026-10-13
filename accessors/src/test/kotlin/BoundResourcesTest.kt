@@ -190,6 +190,40 @@ class BoundResourcesTest {
     }
   }
 
+  /** A binding whose service said why it refused (ADR-043). */
+  private class DetailBinding(val type_: String, val message: String) : ResourceBinding {
+    override val type = "openai-compatible"
+
+    override fun execute(operation: String, arguments: Map<String, Any?>): Any? =
+        throw ResourceOperationFailure(
+            ResourceFailure.REQUEST_REJECTED,
+            status = 400,
+            upstreamType = type_,
+            upstreamMessage = message,
+        )
+  }
+
+  @Test
+  fun `what the service said of a refusal goes back beside the status`() {
+    val host = BoundResources(mapOf("a" to DetailBinding("invalid_request_error", "no such model")))
+
+    val answer = write(host, "a", "x")
+
+    assertEquals(400, answer["status"])
+    assertEquals("invalid_request_error", answer["upstreamType"])
+    assertEquals("no such model", answer["upstreamMessage"])
+  }
+
+  @Test
+  fun `a failure without detail has no detail keys in its answer`() {
+    val host = BoundResources(mapOf("a" to StatusBinding()))
+
+    val answer = write(host, "a", "x")
+
+    assertEquals(false, answer.containsKey("upstreamType"))
+    assertEquals(false, answer.containsKey("upstreamMessage"))
+  }
+
   @Test
   fun `the status of a failure goes back with its category`() {
     val host = BoundResources(mapOf("a" to StatusBinding()))

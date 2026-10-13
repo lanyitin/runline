@@ -102,7 +102,18 @@ class BoundResources(
           }
       )
     } catch (e: ResourceOperationFailure) {
-      failed(resource, binding, operation, e.failure, e.cause, e.status, e.sqlState, e.withErrorId)
+      failed(
+          resource,
+          binding,
+          operation,
+          e.failure,
+          e.cause,
+          e.status,
+          e.sqlState,
+          e.withErrorId,
+          e.upstreamType,
+          e.upstreamMessage,
+      )
     } catch (e: Exception) {
       failed(resource, binding, operation, ResourceFailure.FAILED, e)
     }
@@ -118,6 +129,8 @@ class BoundResources(
       status: Int? = null,
       sqlState: String? = null,
       withErrorId: Boolean = false,
+      upstreamType: String = "",
+      upstreamMessage: String = "",
   ): Map<String, Any?> {
     val errorId =
         if (failure == ResourceFailure.FAILED || withErrorId) UUID.randomUUID().toString() else null
@@ -125,6 +138,10 @@ class BoundResources(
     return failure(failure).also { answer ->
       errorId?.let { answer["errorId"] = it }
       status?.let { answer["status"] = it }
+      // What a service said of its refusal (ADR-043): left out when there is none, so that an
+      // older copy of core, which does not know the keys, sees the answer it always saw.
+      upstreamType.takeIf { it.isNotEmpty() }?.let { answer["upstreamType"] = it }
+      upstreamMessage.takeIf { it.isNotEmpty() }?.let { answer["upstreamMessage"] = it }
       // Five characters of the standard's alphabet and nothing more, whatever the binding gave.
       sqlState?.takeIf { SQL_STATE.matches(it) }?.let { answer["sqlState"] = it }
     }

@@ -401,6 +401,13 @@ constructor(
     val status: Int? = null,
     /** The standard SQLState code of a [ResourceFailure.SQL_ERROR]: five characters, no more. */
     val sqlState: String? = null,
+    /**
+     * What the service said of a 4xx as `error.type` (ADR-043): bounded, printable and masked by
+     * the host; empty when it said nothing, the answer was not 4xx or its body was not understood.
+     */
+    val upstreamType: String = "",
+    /** The `error.message` that goes with [upstreamType]; the message of this exception stays. */
+    val upstreamMessage: String = "",
 ) :
     RuntimeException(
         "Shared resource '$resource': $failure" + (status?.let { " (HTTP $it)" } ?: "")

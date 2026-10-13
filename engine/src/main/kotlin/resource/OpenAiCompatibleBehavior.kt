@@ -13,6 +13,7 @@ import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.accessors.tls.TlsFailure
 import dev.lawlan.runline.core.ResourceFailure
 import dev.lawlan.runline.engine.secret.SecretLookup
+import dev.lawlan.runline.engine.secret.SecretMasking
 import dev.lawlan.runline.engine.secret.SecretStore
 import java.security.cert.X509Certificate
 import java.time.Duration
@@ -105,7 +106,14 @@ internal class OpenAiCompatibleBehavior(
       is ResourceAliases.Resolved.Unusable ->
           OpenAiBinding(resource.name, settings, OpenAiCredential.Unavailable, observer)
       is ResourceAliases.Resolved.Ready ->
-          OpenAiBinding(resource.name, settings, credentialOf(resource), observer, tls.tls)
+          OpenAiBinding(
+              resource.name,
+              settings,
+              credentialOf(resource),
+              observer,
+              tls.tls,
+              SecretMasking::mask,
+          )
     }
   }
 

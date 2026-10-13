@@ -13,7 +13,7 @@
    - cron 掃描（[ADR-040](adr/ADR-040-cron-scan-mode.md)）：`file` 為空（或未提供）即掃描模式，每次觸發處理收件根目錄下一部尚未產生字幕的影片；沒有待處理的影片時 run 立即成功結束。掃描規則、參數與 trigger 的建立見 [runbook](runbook.md) 第 6 節。
 2. 擷取音訊：輸入可為 mp4 或其他影片格式；輸出單聲道、16000 Hz 的 WAV。影片長度超過 `maxMediaSeconds` 者在開始處理前被拒絕。
 3. 分段：silero-vad 切出 VAD-A（每段不超過 25 秒，過長者於最低能量點切開）；VAD-A 中超過 6 秒者以更短的最小靜音再切，得 VAD-B；未超過 6 秒者原樣成為 VAD-B 的一段。
-4. 轉錄：VAD-B 每段送 Lemonade 的 qwen-asr。模型名稱與請求參數是 pipeline 參數。
+4. 轉錄：VAD-B 每段送 Lemonade 的轉錄模型。模型名稱與請求參數是 pipeline 參數；端點依模型的 labels 選擇 `audio.transcriptions` 或 `chat.completions`（[ADR-042](adr/ADR-042-asr-by-model-labels.md)）。
 5. 潤飾：以 VAD-A 為單位，把其下 VAD-B 各段的文字組成 SRT，送 gemma4 潤飾，修正因 VAD 切斷句子造成的轉錄錯誤。
 6. 畫面核對與摘要：對每一個字幕條目，取其時間區間內每秒一張的畫面（最多 6 張），連同字幕送 gemma4，核對並修正字幕；同時產出影片內容摘要。
 7. 翻譯：以修正後的字幕與摘要為依據，送 gemma4 翻譯。目標語言固定為繁體中文；來源語言由影片內容決定。
@@ -30,7 +30,7 @@
 | VAD 參數（A 與 B 各一組） | 同上 | 判定門檻、最小靜音、最小語音長度；B 的最小靜音短於 A |
 | `maxSegmentSeconds`（預設 25）、`refineThresholdSeconds`（預設 6） | 同上 | VAD-A 上限與進一步細分的門檻 |
 | `cutSearchWindowSeconds` | 同上 | 過長片段尋找最低能量點的搜尋範圍 |
-| `asrModel` 與轉錄請求參數 | 同上 | qwen-asr 的模型名稱、語言提示（可空＝自動）、取樣參數 |
+| `asrModel` 與轉錄請求參數 | 同上 | 轉錄模型的名稱、語言提示（可空＝自動；`chat.completions` 路徑無效）、取樣參數 |
 | `llmModel` 與各階段覆寫（潤飾、核對、翻譯） | 同上 | gemma4 的模型名稱與取樣參數，含 thinking 開關 |
 | `maxFramesPerRequest`（預設 6）、`frameMaxEdgePixels` | 同上 | 每次核對請求的圖片上限與縮圖邊長 |
 
@@ -48,7 +48,7 @@
 
 1. 第 7 步「依據」之後的文字缺漏，假設為「依 VAD-A 分組」翻譯，以摘要作為語境。
 2. 檔案在 webhook 被呼叫時已完整寫入；呼叫端負責。掃描模式以檔案的最小年齡（`scanMinAgeSeconds`）判斷，不由呼叫端保證。
-3. Lemonade 上的 gemma4 支援圖片輸入，qwen-asr 可經音訊轉錄端點呼叫；由 [WI-1404](work-items/WI-1404-capability-feasibility.md) 驗證。
+3. Lemonade 上的 gemma4 支援圖片輸入，轉錄模型可經音訊轉錄端點或對話端點的音訊輸入呼叫（[ADR-042](adr/ADR-042-asr-by-model-labels.md)）；由 [WI-1404](work-items/WI-1404-capability-feasibility.md) 驗證。
 4. 同一個 Lemonade 服務的並行上限是 1（資源容量 1）。cron 掃描依賴它來序列化各個 run（[07](07-nfr-risks.md)）。
 5. 潤飾、核對、翻譯的回答要能逐條對回 VAD-B 條目（見 [ADR-038](adr/ADR-038-segment-model-and-stage-invariants.md)）。
 6. VAD 以獨立 JVM 小工具（ONNX Runtime）提供，pipeline 以子行程呼叫，主機不需 Python（使用者已選定，見 [03](03-options.md) 3.3 方案 C）。

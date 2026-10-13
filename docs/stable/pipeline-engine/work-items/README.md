@@ -63,6 +63,7 @@
 | [WI-56](WI-56-check-time-precision.md) | 檢查回應的時間與保存後讀回的時間完全相同 | WI-43 |
 | [WI-57](WI-57-test-environment-robustness.md) | `./gradlew check` 在開發容器（以 root 執行、負載下）穩定通過；真實瀏覽器腳本的前置條件寫入文件 | WI-26 |
 | [WI-58](WI-58-responses-create-stateful.md) | `responses.create` 在型別目錄中標為有狀態 | WI-55 |
+| [WI-1430](WI-1430-upstream-error-detail-channel.md) | `openai-compatible` 收到 4xx 時，有限度地把 `error.type`、`error.message` 交給 pipeline（[ADR-043](../adr/ADR-043-upstream-error-detail.md)）；ADR-019 與 05-ipc 的相關描述改指向 ADR-043 | 無 | 已完成（2026-10-13；core、accessors、runner、devkit、engine 測試通過；其他模組與 ktfmtCheck 未執行；`ResourceHost.kt` 的註解尚未列出新的失敗鍵） |
 | [WI-1300 至 WI-1302、WI-1304、WI-1305](../../pipeline-views/work-items/README.md) | pipeline view：宣告與上傳驗證、唯讀 view API、Console 通用呈現、具名佔位符、讀取上限（屬 [pipeline-views](../../pipeline-views/README.md)，編號與狀態以該總覽為準） | WI-1300 起依該總覽 | 已完成（2026-10-12） |
 
 建議順序：WI-00 → WI-13 → WI-01（WI-12 與 WI-01 無相依，可並行）→ (WI-02、WI-05、WI-11 並行) → WI-16 → WI-03 → WI-04（WI-03 的 IDE 實測需要 WI-17 提供外部測試專案，WI-17 在 WI-03 實作完成後進行）；WI-06 → WI-19 → WI-08 → (WI-07、WI-09 並行)；WI-10 與 WI-18 在 WI-06 之後即可進行，與其他項無先後要求。WI-02 的初始化階段需要 WI-11 提供目錄位置，WI-02 與 WI-11 需一併驗收。WI-15 與其他項無相依，在尚未完成的項目之前先做，使後續項目都使用新的套件名稱。

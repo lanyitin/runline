@@ -64,6 +64,8 @@ class OpenAiBinding(
     private val observer: OpenAiObserver = OpenAiObserver.NONE,
     /** The certificates of an `https` service; null: the JVM's default trust and no client one. */
     private val tls: ResourceTls? = null,
+    /** Hides the secrets the host knows in text that is about to reach a run (ADR-043). */
+    private val mask: (String) -> String = { it },
 ) : ResourceBinding {
   override val type: String = ResourceTypes.OPENAI_COMPATIBLE
 
@@ -437,8 +439,17 @@ class OpenAiBinding(
         continue
       }
       if (status !in 200..299) {
+        val detail =
+            if (status in 400..499) upstreamDetail(call, response.body())
+            else UpstreamErrorDetail.NONE
         response.body().close()
-        throw ResourceOperationFailure(categoryOf(status), null, status)
+        throw ResourceOperationFailure(
+            categoryOf(status),
+            null,
+            status,
+            upstreamType = detail.type,
+            upstreamMessage = detail.message,
+        )
       }
       val declared = response.headers().firstValueAsLong("content-length")
       val limit = if (plan.output != null) plan.sizes.download else plan.sizes.response
@@ -660,6 +671,46 @@ class OpenAiBinding(
       file.commit()
       return file.size
     }
+  }
+
+  /**
+   * The front of a 4xx's body, read for `error.type` and `error.message` only (ADR-043). What
+   * cannot be read or understood gives nothing; a call that was stopped still fails as stopped.
+   */
+  private fun upstreamDetail(call: Call, stream: InputStream): UpstreamErrorDetail {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(minOf(BUFFER, UpstreamErrorDetail.BODY_PREFIX_BYTES))
+    while (out.size() < UpstreamErrorDetail.BODY_PREFIX_BYTES) {
+      val idle =
+          TIMERS.schedule(
+              { call.stop(ResourceFailure.IDLE_TIMEOUT) },
+              call.limits.idleMillis,
+              TimeUnit.MILLISECONDS,
+          )
+      val read =
+          try {
+            stream.read(
+                buffer,
+                0,
+                minOf(buffer.size, UpstreamErrorDetail.BODY_PREFIX_BYTES - out.size()),
+            )
+          } catch (e: IOException) {
+            stopped(call)?.let { throw it }
+            break
+          } finally {
+            idle.cancel(false)
+          }
+      stopped(call)?.let { throw it }
+      if (read < 0) break
+      out.write(buffer, 0, read)
+    }
+    return UpstreamErrorDetail.of(out.toByteArray(), ::maskKnown)
+  }
+
+  /** The host's masking, and this resource's own key whether or not the host knows it. */
+  private fun maskKnown(text: String): String {
+    val key = (credential as? OpenAiCredential.Key)?.value?.takeIf { it.isNotEmpty() }
+    return mask(if (key != null) text.replace(key, "***") else text)
   }
 
   private fun readBody(call: Call, stream: InputStream, status: Int, limit: Long): String =

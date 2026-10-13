@@ -148,6 +148,37 @@ class OpenAiAccessorTest {
     assertEquals("lemon", e.resource)
   }
 
+  private fun call() =
+      context().accessors.openAiCompatible("lemon").call(OpenAiRequest("chat.completions", "{}"))
+
+  @Test
+  fun `what the service said of a refusal is on the exception and not in its message`() {
+    answer =
+        mapOf(
+            "ok" to false,
+            "failure" to "REQUEST_REJECTED",
+            "status" to 400,
+            "upstreamType" to "invalid_request_error",
+            "upstreamMessage" to "model does not support this endpoint",
+        )
+
+    val e = assertFailsWith<ResourceAccessException> { call() }
+
+    assertEquals("invalid_request_error", e.upstreamType)
+    assertEquals("model does not support this endpoint", e.upstreamMessage)
+    assertEquals("Shared resource 'lemon': REQUEST_REJECTED (HTTP 400)", e.message)
+  }
+
+  @Test
+  fun `an answer of an older host without the detail keys gives empty detail`() {
+    answer = mapOf("ok" to false, "failure" to "REQUEST_REJECTED", "status" to 400)
+
+    val e = assertFailsWith<ResourceAccessException> { call() }
+
+    assertEquals("", e.upstreamType)
+    assertEquals("", e.upstreamMessage)
+  }
+
   @Test
   fun `a category this copy of core does not know is a plain failure`() {
     answer = mapOf("ok" to false, "failure" to "FROM_THE_FUTURE")

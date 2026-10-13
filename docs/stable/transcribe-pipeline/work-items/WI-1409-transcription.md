@@ -1,4 +1,4 @@
-# WI-1409 qwen-asr 轉錄
+# WI-1409 轉錄模型轉錄（端點依 labels 選擇見 [ADR-042](../adr/ADR-042-asr-by-model-labels.md)）
 
 狀態：已核可（2026-10-11），未開始。儲存庫：T。相依：WI-1404、WI-1405、WI-1408。
 

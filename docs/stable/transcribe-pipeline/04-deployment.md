@@ -12,9 +12,23 @@ pipeline 與 ffmpeg、VAD 工具、Engine 在同一台主機、同一個 process
 |---|---|
 | ffmpeg 與 ffprobe | 可在 PATH 找到 |
 | VAD 工具 | 一個 jar（含 ONNX Runtime 的 CPU 原生程式庫）加固定版本與雜湊的 silero-vad ONNX 模型檔，以主機已有的 JRE 執行；不需 Python。命令列契約見 [05](05-ipc.md) |
+| 降噪工具（`denoise=true` 時必要，預設開啟） | 包裝腳本 `runline-denoise` 加固定版本與雜湊的 deep-filter 預編譯檔（DeepFilterNet3，模型內建於執行檔，不連網、僅 CPU）；Engine 容器需有 bash、`sha256sum`（或 `shasum`）、`awk`、`mktemp`。命令列契約見 [05](05-ipc.md)，版本與雜湊見下節 |
 | 收件根目錄 | 可寫掛載給 Engine；Engine 使用者可讀、可寫（pipeline 在影片旁寫出字幕檔，見下節與 [ADR-039](adr/ADR-039-subtitle-files-beside-video.md)）。只有收件根目錄可寫，其他掛載（VAD 工具目錄、模型檔）的唯讀性不變 |
-| 工作目錄 | 系統暫存區內，每個 run 專屬，run 結束時刪除；容量須容納一部影片的 WAV（約 115 MB／小時）與暫時的畫面檔 |
+| 工作目錄 | 系統暫存區內，每個 run 專屬，run 結束時刪除；容量須容納一部影片的 WAV（約 115 MB／小時）；降噪開啟時再加兩份 48 kHz 的 WAV（各約 346 MB／小時）與一份降噪後的 16 kHz WAV（約 115 MB／小時），共約 0.9 GB／小時（由格式推算，尚未量測） |
 | SQLite 檔 | 放在 `file` 資源的根目錄之下，作法同 digest-rss |
+
+## 降噪工具的部署
+
+- **位置與交付**：`runline-denoise` 包裝腳本的唯一原始檔在本儲存庫 `deploy/bin/runline-denoise`（`runline-transcribe` 專案的測試直接使用它）；Docker 映像（`transcribe`、`browser-transcribe` 階段）內含它（`/usr/local/bin/runline-denoise`）與 `/opt/runline/bin/deep-filter`，`RUNLINE_DENOISE_BINARY` 已設；systemd 的安裝步驟在 `deploy/systemd/runline-engine-transcribe.conf`。細節與檢查見 [deploy/transcribe.md](../../../deploy/transcribe.md)「降噪工具」。
+- **版本與雜湊**：deep-filter v0.5.6（MIT 或 Apache-2.0 擇一）。雜湊固定在包裝腳本內，每次執行時驗證，不符即失敗，不連網下載（[ADR-046](adr/ADR-046-denoise-before-vad.md)）。
+
+| 平台 | 預編譯檔 | sha256 |
+|---|---|---|
+| Linux x86_64（Engine 容器） | `deep-filter-0.5.6-x86_64-unknown-linux-musl`（靜態連結，36,417,296 位元組） | `70775e251eee44c0f2451a1e833326cf8bcbbe304d3e7cd12851e6fce72ef7da` |
+| macOS arm64（開發與測試） | `deep-filter-0.5.6-aarch64-apple-darwin`（27,877,081 位元組） | `4601e7f4e4c03e59a4c5b5000216ef3add3e808799cfccd95e14e83ea4611081` |
+
+- **取得**：Linux 預編譯檔取自 DeepFilterNet 儲存庫 `v0.5.6` 的釋出檔，由 `deploy/bin/runline-transcribe-fetch` 在映像建置時下載並驗證雜湊（版本與雜湊在該腳本與包裝腳本各一份，由測試比對）；執行期不下載。`runline-transcribe` 專案的測試建置步驟 `fetchDeepFilter` 依平台下載供測試用。
+- **驗證（WI-1444）**：包裝腳本與固定雜湊在 Engine 基底映像（mawk 1.3.4、uutils sha256sum 0.10.0、bash 5.3）內的行為已以 `deploy/test/denoise-wrapper-test.sh` 驗證；打包 Engine 內的完整 run 仍未驗證。
 
 ## 收件根目錄的寫入
 
@@ -31,6 +45,8 @@ pipeline 與 ffmpeg、VAD 工具、Engine 在同一台主機、同一個 process
 | `TRANSCRIBE_WORK_DIR`（選填） | 工作目錄的上層；未設定用系統暫存區 |
 | `TRANSCRIBE_VAD_COMMAND`（選填） | VAD 工具的命令；未設定用 PATH 上的預設名稱 `runline-vad` |
 | `RUNLINE_VAD_MODEL`（必要） | silero-vad 模型檔的絕對路徑；部署層設定，pipeline 與主機檢查腳本共用 |
+| `TRANSCRIBE_DENOISE_COMMAND`（選填） | 降噪工具的命令；未設定用 PATH 上的預設名稱 `runline-denoise`。只有 `denoise=true` 的 run 使用 |
+| `RUNLINE_DENOISE_BINARY`（降噪開啟時必要） | deep-filter 預編譯檔的絕對路徑；由 `runline-denoise` 讀取，不是 pipeline 讀的。未設定、不存在或雜湊不符時降噪失敗，run 以 `CONFIGURATION` 失敗並指出原因 |
 
 `RUNLINE_RUN_TIMEOUT_SECONDS` 須不設定或遠大於預期的 run 時間；`RUNLINE_SHUTDOWN_GRACE_SECONDS` 到期時 run 會被標為中斷。
 

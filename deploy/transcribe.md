@@ -6,12 +6,14 @@
 
 | 檔案 | 用途 |
 |---|---|
-| `docker/Dockerfile` 的 `transcribe-fetch`、`transcribe` 階段 | 在 Engine 映像上加 ffmpeg、ffprobe、silero-vad 模型檔與下列腳本；`engine` 階段與既有映像不變 |
+| `docker/Dockerfile` 的 `transcribe-fetch`、`transcribe` 階段 | 在 Engine 映像上加 ffmpeg、ffprobe、silero-vad 模型檔、deep-filter 與下列腳本；`engine` 階段與既有映像不變 |
 | `docker/compose.transcribe.yaml` | 疊加檔：用 `transcribe` 階段、**可寫**掛載收件根目錄、設定 `TRANSCRIBE_INTAKE_ROOT`、掛載 VAD 工具目錄 |
 | `docker/Dockerfile` 的 `browser-transcribe` 階段、`docker/compose.browser-transcribe.yaml` | 與瀏覽器並用時的單一映像與其疊加檔（見「與瀏覽器並用」） |
 | `test/combined-image-test.sh` | 並用的檢查：Compose 展開結果、兩個 systemd drop-in 不衝突；不需 Docker daemon |
 | `systemd/runline-engine-transcribe.conf` | systemd 的 drop-in |
-| `bin/runline-transcribe-fetch` | ffmpeg、ffprobe、模型檔的**唯一**版本與雜湊定義處；下載、驗證雜湊後才寫出。Dockerfile 與 systemd 主機都用它 |
+| `bin/runline-transcribe-fetch` | ffmpeg、ffprobe、模型檔、deep-filter（僅 amd64）的**唯一**版本與雜湊定義處；下載、驗證雜湊後才寫出。Dockerfile 與 systemd 主機都用它 |
+| `bin/runline-denoise` | 降噪工具的命令名稱（預設的 `TRANSCRIBE_DENOISE_COMMAND`）的**唯一原始檔**（WI-1444）：bash 包裝腳本，執行 `RUNLINE_DENOISE_BINARY` 指向的、版本與雜湊固定的 deep-filter，執行時驗證雜湊；`runline-transcribe` 專案的測試直接使用這個檔案 |
+| `test/denoise-wrapper-test.sh` | 包裝腳本的測試：以真實的 deep-filter 與 ffmpeg 產生的音訊；在 Engine 映像內也能跑（mawk、uutils `sha256sum`）。需 `RUNLINE_DENOISE_BINARY` |
 | `bin/runline-vad` | VAD 工具的命令名稱（預設的 `TRANSCRIBE_VAD_COMMAND`）：以 JRE 執行 `RUNLINE_VAD_JAR`，轉送所有參數與環境（含 pipeline 設的 `JDK_JAVA_OPTIONS`）；jar 不存在時說明並以 127 結束 |
 | `bin/runline-transcribe-check` | 檢查腳本（見「檢查」） |
 | `test/transcribe-check-test.sh`、`test/transcribe-fetch-test.sh`、`test/vad-wrapper-test.sh` | 三支腳本的測試（後者以真實的小 jar 驗證 `JDK_JAVA_OPTIONS` 到達 JVM）；不需 Docker daemon |
@@ -27,6 +29,8 @@
 | `TRANSCRIBE_VAD_COMMAND` | 未設定，用 PATH 上的 `runline-vad` | VAD 工具的命令（04） |
 | `RUNLINE_VAD_JAR` | `/opt/runline/vad/runline-vad.jar` | 本部署層的設定，只被 `bin/runline-vad` 讀：VAD 工具 jar 的位置 |
 | `RUNLINE_VAD_MODEL` | `/opt/runline/models/silero_vad.onnx` | 本部署層的設定：模型檔位置。檢查腳本讀它並以 `--model` 傳給工具（見「待 WI-1407 對齊」） |
+| `TRANSCRIBE_DENOISE_COMMAND` | 未設定，用 PATH 上的 `runline-denoise` | 降噪工具的命令（04）；只有 `denoise=true` 的 run 使用 |
+| `RUNLINE_DENOISE_BINARY` | `/opt/runline/bin/deep-filter` | 本部署層的設定，只被 `bin/runline-denoise` 與檢查腳本讀：deep-filter 執行檔的位置 |
 | `RUNLINE_VAD_MODEL_SHA256` | 未設定；改讀 `<模型檔>.sha256` | 檢查時與模型檔比對的雜湊 |
 | `RUNLINE_TRANSCRIBE_MIN_FREE_MB` | `1024` | 只用於檢查：工作目錄的可用空間下限 |
 | `TRANSCRIBE_INTAKE_HOST_DIR`（僅 Docker，必填） | 無 | 宿主上放影片的目錄，可寫掛載為 `TRANSCRIBE_INTAKE_ROOT`（pipeline 在影片旁寫字幕檔，權限與擁有者見 [04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
@@ -41,7 +45,8 @@
 | ffmpeg、ffprobe | `/usr/local/bin/` | `/usr/local/bin/` |
 | 模型檔與其 `.sha256` | `/opt/runline/models/`（映像內，root 擁有、Engine 帳號唯讀） | `/opt/runline/models/` |
 | VAD 工具 jar | `/opt/runline/vad/runline-vad.jar`（宿主目錄唯讀掛載） | `/opt/runline/vad/runline-vad.jar` |
-| 命令 `runline-vad` | `/usr/local/bin/` | `/opt/runline/bin/` |
+| 命令 `runline-vad`、`runline-denoise` | `/usr/local/bin/` | `/opt/runline/bin/` |
+| deep-filter | `/opt/runline/bin/deep-filter`（映像內，root 擁有、Engine 帳號可執行；不在 PATH 上，只有 `runline-denoise` 執行它） | `/opt/runline/bin/deep-filter` |
 | 收件根目錄 | `/var/lib/runline/intake`（可寫掛載；其他掛載仍唯讀） | 管理員指定 |
 | 工作目錄 | 容器的 `/tmp`（可寫層） | `/var/cache/runline-transcribe` |
 
@@ -71,7 +76,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe
 
 前置條件：`curl`、`tar`、`xz`（只在安裝時，用於 `runline-transcribe-fetch`）；JRE 與 Engine 已安裝（[systemd 指南](../docs/stable/pipeline-engine/04-deployment-systemd.md)）。安裝步驟寫在 `systemd/runline-engine-transcribe.conf` 檔頭，摘要：
 
-1. 執行 `bin/runline-transcribe-fetch <暫存目錄>`：下載並驗證雜湊，把 `ffmpeg`、`ffprobe` 裝到 `/usr/local/bin`，把模型檔與其 `.sha256` 裝到 `/opt/runline/models`；把 `runline-vad` 與檢查腳本裝到 `/opt/runline/bin`。
+1. 執行 `bin/runline-transcribe-fetch <暫存目錄>`：下載並驗證雜湊，把 `ffmpeg`、`ffprobe` 裝到 `/usr/local/bin`，把模型檔與其 `.sha256` 裝到 `/opt/runline/models`，把 `deep-filter` 裝到 `/opt/runline/bin`（只有 amd64 主機取得它）；把 `runline-vad`、`runline-denoise` 與檢查腳本裝到 `/opt/runline/bin`。
 2. 安裝 drop-in 為 `/etc/systemd/system/runline-engine.service.d/transcribe.conf`，`systemctl daemon-reload`。
 3. 把 `runline-vad.jar` 放到 `/opt/runline/vad/`（`root` 擁有、Engine 帳號可讀、不可寫）。
 4. 在 `/etc/runline/runline.env` 設 `TRANSCRIBE_INTAKE_ROOT`。收件根目錄須「Engine 帳號可讀、可寫」，例如目錄 `runline:runline 0755`、影片檔 `0644`；drop-in 不對它設 `ReadOnlyPaths=`（權限與擁有者見 [04](../docs/stable/transcribe-pipeline/04-deployment.md)）。
@@ -122,6 +127,20 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.ya
 3. 一次 `systemctl daemon-reload` 與 `systemctl restart runline-engine`。
 4. 兩邊的檢查：`/opt/runline/bin/runline-transcribe-check` 與 `/opt/runline/bin/runline-browser-probe`（以 Engine 的帳號與 `runline.env` 的環境，如上）。
 
+## 降噪工具
+
+`denoise=true`（pipeline 的預設）的 run 需要降噪工具（[WI-1440](../docs/stable/transcribe-pipeline/work-items/WI-1440-denoise-before-vad.md)、[ADR-046](../docs/stable/transcribe-pipeline/adr/ADR-046-denoise-before-vad.md)、交付見 [WI-1444](../docs/stable/transcribe-pipeline/work-items/WI-1444-denoise-tool-delivery.md)）。本節是交付方式的唯一寫處，runbook 與 04 連到這裡。
+
+| 項目 | 內容 |
+|---|---|
+| 命令 | `runline-denoise`（`bin/runline-denoise`，唯一原始檔）：Docker 在 `/usr/local/bin/`，systemd 在 `/opt/runline/bin/`（在 drop-in 的 `PATH` 上） |
+| 執行檔 | deep-filter 0.5.6，Linux x86_64 靜態檔，建置時由 `runline-transcribe-fetch` 取得並驗證 sha256，裝在 `/opt/runline/bin/deep-filter`；`RUNLINE_DENOISE_BINARY` 指向它（映像的 `ENV`、systemd drop-in 都已設） |
+| 平台 | 只有 `linux/amd64`。arm64 的 `transcribe` 映像能建置，但沒有 deep-filter（fetch 說明這點），`runline-transcribe-check` 會失敗；那樣的部署須在 trigger 固定 `denoise=false` 並以 `--skip-denoise` 檢查 |
+| 執行時 | 不連網；模型內建於執行檔；每次執行都驗證 deep-filter 的 sha256，不符即失敗（run 以 `CONFIGURATION` 失敗） |
+| 與瀏覽器並用 | `browser-transcribe` 階段從 `transcribe` 階段複製 `/opt/runline`（含 deep-filter）與 `runline-denoise`，並設同樣的 `RUNLINE_DENOISE_BINARY` |
+
+雜湊與版本的定義：`bin/runline-transcribe-fetch`（取得時驗證）與 `bin/runline-denoise`（執行時驗證）各有一份，`test/transcribe-fetch-test.sh` 比對兩者，不同即失敗。升級時兩處一起改（見「更新固定的輸入」）。
+
 ## 工作目錄與容量
 
 pipeline 為每個 run 在工作目錄下建立專屬目錄，放單聲道 16 kHz WAV 與暫時的畫面檔，run 結束、取消或逾時時刪除（ADR-037 第 4 點）。
@@ -160,9 +179,10 @@ transcribe pipeline 使用的 `llm` 資源（`openai-compatible`）須啟用 `au
 | 帳號 | 不是 root |
 | 收件根目錄 | `TRANSCRIBE_INTAKE_ROOT` 已設定、存在、可讀，且**真的寫得進去**（嘗試建立一個探測檔並刪除；建不成功則判失敗，`... is not writable by uid N; the pipeline writes the subtitle files beside the videos (ADR-039), so mount it read-write / make it writable for the Engine account`）。只檢查根目錄本身；影片所在的子目錄可寫與否由 run 的 `intake` 階段檢查 |
 | 工作目錄 | `TRANSCRIBE_WORK_DIR`（未設定或空白時為 `/tmp`，不看 `TMPDIR`）存在、可寫，印出可用空間，不低於下限 |
+| 降噪工具 | `TRANSCRIBE_DENOISE_COMMAND`（預設 `runline-denoise`）存在，否則 `denoise tool is not installed: ...`（說明可用 `--skip-denoise`）；`RUNLINE_DENOISE_BINARY` 已設且是可執行檔，否則 `RUNLINE_DENOISE_BINARY is not set` 或 `... is not an executable file`；然後產生 1 秒的 48 kHz 單聲道樣本，以 `<命令> --atten-lim 24 --output <輸出> <輸入>` 真的降噪一次，要求結束碼 0、輸出是 48 kHz 單聲道，印出工具的版本行（`deep-filter 0.5.6 sha256=… atten-lim=24dB`）。雜湊不符由工具拒絕：`denoise tool failed (exit 1): the sha256 of RUNLINE_DENOISE_BINARY is not the pinned ...` |
 | VAD 工具與模型 | 命令存在，否則 `VAD tool is not installed: ...`；模型檔存在，否則 `VAD model is not installed: ...`；有雜湊時相符（`... sha256 ... differs from the pinned ...`）；然後產生 2 秒的 16 kHz 單聲道樣本 WAV，呼叫 `<命令> --model <模型檔> <wav>`，要求結束碼 0 且標準輸出每行都是 0 到 1 的機率，印出最小、最大值與筆數；失敗時顯示工具的標準錯誤 |
 
-`--skip-vad` 略過最後一項並印出 `skip`，用於工具尚未交付時驗證其餘環境。不加時，工具尚未安裝會失敗並明說「工具或模型尚未安裝」，這是預期的狀態，不是環境壞了。
+`--skip-denoise` 略過降噪工具並印出 `skip`，用於以 `denoise=false` 執行 pipeline 的部署（`denoise` 預設為 true，所以不加時預設要求降噪工具；pipeline 的參數是 run 的屬性，檢查腳本看不到，因此由操作者以旗標表明）。`--skip-vad` 略過 VAD 項並印出 `skip`，用於工具尚未交付時驗證其餘環境。不加時，工具尚未安裝會失敗並明說「工具或模型尚未安裝」，這是預期的狀態，不是環境壞了。
 
 ```
 # Docker
@@ -183,6 +203,7 @@ sudo -u runline env $(grep -v '^#' /etc/runline/runline.env | xargs) /opt/runlin
 |---|---|---|
 | ffmpeg、ffprobe | johnvansickle.com 靜態建置 7.0.2；amd64 `abda8d77…cf67`、arm64 `f4149bb2…01b1`（tar.xz 的 sha256） | `bin/runline-transcribe-fetch` |
 | silero-vad 模型 | snakers4/silero-vad `v5.1.2` 的 `silero_vad.onnx`；`2623a295…788f` | 同上 |
+| deep-filter | DeepFilterNet 釋出 `v0.5.6` 的 `deep-filter-0.5.6-x86_64-unknown-linux-musl`（僅 amd64）；`70775e25…7da`（執行檔本身的 sha256，上游釋出頁面的檔案，由本專案計算） | `bin/runline-transcribe-fetch`（取得時）與 `bin/runline-denoise`（執行時） |
 | 基底映像 | 沿用 `engine` 階段的雜湊 | `docker/Dockerfile` 的第一個 `FROM` |
 
 下載後先比對雜湊，不符就不寫出任何檔案，`docker build` 也隨之失敗（`test/transcribe-fetch-test.sh` 以真實的 HTTP 伺服器提供非固定內容，驗證拒絕且目的地不留檔案）。雜湊只定義在 `runline-transcribe-fetch` 一處；Dockerfile 與主機安裝都執行它。
@@ -192,7 +213,7 @@ sudo -u runline env $(grep -v '^#' /etc/runline/runline.env | xargs) /opt/runlin
 ### 更新固定的輸入
 
 1. 從上游取得新版本（ffmpeg：`https://johnvansickle.com/ffmpeg/release-source/` 對應的 `releases/ffmpeg-<版本>-<amd64|arm64>-static.tar.xz`；模型：silero-vad 的版本標籤），下載後以 `shasum -a 256` 自行計算。
-2. 只改 `bin/runline-transcribe-fetch` 開頭的版本與雜湊。模型升級須同時確認 VAD 工具（WI-1407）支援該模型版本（07 風險表：模型版本的狀態介面不同），視為新決策。
+2. 只改 `bin/runline-transcribe-fetch` 開頭的版本與雜湊（deep-filter 另須同步改 `bin/runline-denoise` 的 `VERSION` 與 `Linux-x86_64` 的雜湊；測試會檢查兩處一致）。模型升級須同時確認 VAD 工具（WI-1407）支援該模型版本（07 風險表：模型版本的狀態介面不同），視為新決策。
 3. 重新驗證：`deploy/test/transcribe-fetch-test.sh`、重建 `transcribe` 階段（兩個平台都建一次可確認兩個雜湊）、`runline-transcribe-check`。
 
 ## 驗證紀錄

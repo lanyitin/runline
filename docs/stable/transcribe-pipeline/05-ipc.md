@@ -9,6 +9,7 @@
 | 呼叫端 → Engine | webhook，HTTP POST，JSON 本文提供 `file` | 驗證後立即 202，run 非同步 |
 | Engine cron → pipeline | cron trigger 建立 run，沒有呼叫端參數（`callerParameters` 一律為空） | 非同步；`file` 為空，pipeline 自己掃描收件根目錄（[ADR-040](adr/ADR-040-cron-scan-mode.md)） |
 | pipeline → ffprobe／ffmpeg | 行程，參數逐一傳遞（不經 shell） | 等結束 |
+| pipeline → 降噪工具 | 行程，同上；只在 `denoise=true` 時，位於 VAD 工具之前 | 等結束 |
 | pipeline → VAD 工具 | 行程，同上 | 等結束 |
 | pipeline → Lemonade | `openai-compatible` 資源：音訊轉錄（多部分，位元組）、對話（文字與圖片） | 同步，逐一，並行 1 |
 | pipeline → SQLite | `jdbc-pool` 資源 | 同步 |
@@ -20,6 +21,17 @@
 ## cron 觸發契約
 
 cron trigger 不帶任何呼叫端參數：固定參數全部來自 trigger，`file` 不設，所以 run 進入掃描模式。錯過的觸發時間不補跑；Engine 不因「前一個 run 未結束」而跳過觸發，後來的 run 在 `llm` 資源前先進先出等候（[ADR-040](adr/ADR-040-cron-scan-mode.md)）。掃描規則與排程建議見 [runbook](runbook.md) 第 6 與 14 節。
+
+## 降噪工具契約（行為層級）
+
+降噪工具只決定「怎麼降噪」，不判定語音；它的輸出只給 VAD 工具使用，音訊切片與轉錄一律取自原始音訊（[ADR-046](adr/ADR-046-denoise-before-vad.md)）。
+
+- 呼叫：`<命令> --atten-lim <dB> --output <WAV 路徑> <WAV 路徑>`。命令預設為 `runline-denoise`（可由 `TRANSCRIBE_DENOISE_COMMAND` 改）；衰減上限取自參數 `denoiseAttenLimitDb`。工具讀取環境變數 `RUNLINE_DENOISE_BINARY` 找到 deep-filter，那是工具自己的設定，pipeline 不讀。
+- 輸入：48 kHz 單聲道 16 位元 WAV（由 pipeline 的音訊擷取保證）。
+- 輸出：`--output` 指定的 WAV，48 kHz 單聲道。**不位移**：工具必須使用延遲補償，輸出與輸入的對齊延遲為 0。**長度不比輸入長，最多短 100 毫秒**（模型前瞻的尾端）；pipeline 轉為 16 kHz 時於尾端補零回原始長度，使 VAD 的視窗與時間對得上。衰減上限為 0 時不降噪，原樣輸出。同一輸入與衰減上限得到相同的位元組。
+- 標準輸出無內容；標準錯誤第一行是工具自述（名稱、版本、執行檔的 sha256、衰減上限），pipeline 記入 run 的紀錄，失敗時接著說明原因。結束碼 0 成功；1 失敗；2 參數錯誤。
+- 不連網、僅 CPU；版本與模型（內建於執行檔）的雜湊固定，執行檔缺少或雜湊不符時失敗（版本與雜湊見 [04](04-deployment.md)）。
+- pipeline 的處理：命令找不到、逾時（30 分鐘）、非 0 結束、輸出不是 48 kHz 單聲道、輸出比輸入短超過 100 毫秒，都視為部署問題，run 以 `CONFIGURATION` 失敗並指出原因，不靜默略過。
 
 ## VAD 工具契約（行為層級）
 

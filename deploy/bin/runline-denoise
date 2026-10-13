@@ -1,0 +1,79 @@
+#!/bin/bash
+# The denoising tool of runline-transcribe (WI-1440, ADR-046): runs the pinned deep-filter
+# (DeepFilterNet3, CPU only, the model is inside the executable, nothing is downloaded) on a 48 kHz
+# mono WAV file and writes the denoised audio to another file. It decides nothing about speech: the
+# pipeline gives the result to the VAD tool and cuts the clips from the original audio.
+#
+#   runline-denoise --atten-lim <dB> --output <WAV file> <WAV file>
+#
+#   RUNLINE_DENOISE_BINARY   the deep-filter executable (required)
+#
+# Standard output: nothing. Standard error: first line the tool, its version and the limit; then,
+# on failure, the reason. Exit code: 0 success; 1 failure; 2 wrong arguments.
+# The output is as long as the input, but the end the model cannot yet see (30 ms): it looks ahead,
+# and the delay of that lookahead is compensated, so a sample of the output is at the time of the
+# same sample of the input. A limit of 0 dB is no noise reduction: the input is copied.
+# The same input and limit give the same bytes. The version and the sha256 of the executable are
+# pinned below; an executable that is not the pinned one is refused.
+set -u
+
+VERSION="0.5.6"
+# Pinned per platform. linux x86_64 is the Engine container (ADR-046); the Mac is for development.
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) PINNED="70775e251eee44c0f2451a1e833326cf8bcbbe304d3e7cd12851e6fce72ef7da" ;;
+  Darwin-arm64) PINNED="4601e7f4e4c03e59a4c5b5000216ef3add3e808799cfccd95e14e83ea4611081" ;;
+  *) PINNED="" ;;
+esac
+
+usage() {
+  echo "usage: runline-denoise --atten-lim <dB> --output <WAV file> <WAV file>" >&2
+  exit 2
+}
+fail() {
+  echo "$*" >&2
+  exit 1
+}
+
+limit="" output="" input=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --atten-lim) [ $# -ge 2 ] || usage; limit="$2"; shift 2 ;;
+    --output) [ $# -ge 2 ] || usage; output="$2"; shift 2 ;;
+    -*) usage ;;
+    *) [ -z "$input" ] || usage; input="$1"; shift ;;
+  esac
+done
+[ -n "$limit" ] && [ -n "$output" ] && [ -n "$input" ] || usage
+[[ "$limit" =~ ^[0-9]+(\.[0-9]+)?$ ]] || usage
+
+binary="${RUNLINE_DENOISE_BINARY:-}"
+[ -n "$binary" ] || fail "RUNLINE_DENOISE_BINARY is not set"
+[ -f "$binary" ] && [ -x "$binary" ] || fail "RUNLINE_DENOISE_BINARY is not an executable file"
+[ -n "$PINNED" ] || fail "there is no pinned deep-filter for $(uname -s) $(uname -m)"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$binary" | cut -d' ' -f1)"
+else
+  actual="$(shasum -a 256 "$binary" | cut -d' ' -f1)"
+fi
+[ "$actual" = "$PINNED" ] || fail "the sha256 of RUNLINE_DENOISE_BINARY is not the pinned $PINNED of deep-filter $VERSION"
+[ -f "$input" ] || fail "the input file does not exist"
+
+echo "deep-filter $VERSION sha256=$PINNED atten-lim=${limit}dB" >&2
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/runline-denoise.XXXXXX")" || fail "no temporary directory"
+trap 'rm -rf "$work"' EXIT
+
+if awk -v v="$limit" 'BEGIN { exit !(v + 0 == 0) }'; then
+  # deep-filter does nothing at 0 dB and then shifts the sound by its delay compensation.
+  cp "$input" "$work/result.wav" || fail "the input file cannot be read"
+else
+  mkdir "$work/in" "$work/out" && cp "$input" "$work/in/audio.wav" || fail "the input file cannot be read"
+  if ! "$binary" -D -a "$limit" -o "$work/out" "$work/in/audio.wav" >"$work/log" 2>&1; then
+    echo "deep-filter failed:" >&2
+    tail -n 5 "$work/log" >&2
+    exit 1
+  fi
+  [ -f "$work/out/audio.wav" ] || fail "deep-filter wrote no output"
+  mv "$work/out/audio.wav" "$work/result.wav"
+fi
+mv "$work/result.wav" "$output" || fail "the output file cannot be written"

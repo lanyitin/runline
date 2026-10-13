@@ -56,8 +56,14 @@ empty="$tooldir/empty-vad"; printf '#!/bin/bash\nexit 0\n' >"$empty"
 failing="$tooldir/failing-vad"; printf '#!/bin/bash\necho "cannot load model: broken" >&2\nexit 3\n' >"$failing"
 chmod 0755 "$good" "$bad_range" "$not_numbers" "$empty" "$failing"
 
+# The denoising tool: the real wrapper of this repository and the pinned deep-filter (no stand-in).
+wrapper="$root/deploy/bin/runline-denoise"
+deep_filter="${RUNLINE_DENOISE_BINARY:-$root/../runline-transcribe/build/denoise/deep-filter}"
+[ -x "$deep_filter" ] || { echo "no deep-filter at '$deep_filter': set RUNLINE_DENOISE_BINARY to the pinned executable" >&2; exit 2; }
+denoise=("TRANSCRIBE_DENOISE_COMMAND=$wrapper" "RUNLINE_DENOISE_BINARY=$deep_filter")
+
 base=(env -i "HOME=$work" "PATH=$PATH" "TRANSCRIBE_INTAKE_ROOT=$intake" "TRANSCRIBE_WORK_DIR=$scratch")
-vad=("TRANSCRIBE_VAD_COMMAND=$good" "RUNLINE_VAD_MODEL=$model")
+vad=("TRANSCRIBE_VAD_COMMAND=$good" "RUNLINE_VAD_MODEL=$model" "${denoise[@]}")
 
 check "everything in place passes" 0 'ffmpeg.*ok|all checks passed' \
   "${base[@]}" "${vad[@]}" "$check_script"
@@ -121,8 +127,28 @@ check "no output fails" 1 'no probabilities' \
   "${base[@]}" "TRANSCRIBE_VAD_COMMAND=$empty" "RUNLINE_VAD_MODEL=$model" "$check_script"
 check "the range of the probabilities is reported" 0 'min 0.02.*max 0.91' "${base[@]}" "${vad[@]}" "$check_script"
 
+# --- denoising tool (WI-1444)
+check "the denoising tool is exercised and its version is reported" 0 'ok    denoise tool.*deep-filter 0\.5\.6' "${base[@]}" "${vad[@]}" "$check_script"
+check "the denoising sample comes back as 48 kHz mono" 0 '48 kHz mono' "${base[@]}" "${vad[@]}" "$check_script"
+check "a denoising command that is not installed is said so, with what to do" 1 "denoise tool is not installed.*--skip-denoise" \
+  "${base[@]}" "${vad[@]}" "TRANSCRIBE_DENOISE_COMMAND=$work/no-such-denoise" "$check_script"
+check "the default denoising command name is looked up on the PATH" 1 'denoise tool is not installed.*runline-denoise' \
+  env -i "HOME=$work" "PATH=$(path_without default-denoise)" "TRANSCRIBE_INTAKE_ROOT=$intake" "TRANSCRIBE_WORK_DIR=$scratch" \
+  "TRANSCRIBE_VAD_COMMAND=$good" "RUNLINE_VAD_MODEL=$model" "$check_script"
+check "no deep-filter configured names the variable" 1 'RUNLINE_DENOISE_BINARY is not set' \
+  "${base[@]}" "${vad[@]}" "RUNLINE_DENOISE_BINARY=" "$check_script"
+check "a deep-filter that is not a file names the variable" 1 'RUNLINE_DENOISE_BINARY.*is not an executable file' \
+  "${base[@]}" "${vad[@]}" "RUNLINE_DENOISE_BINARY=$work/absent-deep-filter" "$check_script"
+cp "$(command -v ls)" "$work/not-deep-filter"
+check "a deep-filter that is not the pinned one fails on its hash" 1 'denoise tool failed.*sha256.*not the pinned' \
+  "${base[@]}" "${vad[@]}" "RUNLINE_DENOISE_BINARY=$work/not-deep-filter" "$check_script"
+check "--skip-denoise leaves the tool out and says so" 0 'denoise.*skipped' \
+  "${base[@]}" "${vad[@]}" "TRANSCRIBE_DENOISE_COMMAND=$work/no-such-denoise" "$check_script" --skip-denoise
+check "both skips together are accepted" 0 'VAD.*skipped' \
+  "${base[@]}" "TRANSCRIBE_VAD_COMMAND=$work/no-such-vad" "TRANSCRIBE_DENOISE_COMMAND=$work/no-such-denoise" "$check_script" --skip-vad --skip-denoise
+
 check "--skip-vad leaves the tool out and says so" 0 'VAD.*skipped' \
-  "${base[@]}" "TRANSCRIBE_VAD_COMMAND=$work/no-such-vad" "$check_script" --skip-vad
+  "${base[@]}" "${denoise[@]}" "TRANSCRIBE_VAD_COMMAND=$work/no-such-vad" "$check_script" --skip-vad
 check "an unknown option is refused" 1 'usage' "${base[@]}" "${vad[@]}" "$check_script" --nope
 
 [ "$failures" -eq 0 ] || { printf '%s check(s) failed\n' "$failures"; exit 1; }

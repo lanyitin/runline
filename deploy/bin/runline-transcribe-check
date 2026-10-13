@@ -2,7 +2,7 @@
 # Checks the runtime of the transcribe pipeline (docs/stable/transcribe-pipeline/04-deployment.md,
 # WI-1402), in a container or on a host, as the account the Engine runs as:
 #
-#   runline-transcribe-check [--skip-vad]
+#   runline-transcribe-check [--skip-vad] [--skip-denoise]
 #
 #   ffmpeg, ffprobe    found on the PATH, their versions are printed
 #   account            not root
@@ -16,17 +16,28 @@
 #                      the one in the file <model>.sha256 beside it, when either is there), and the tool prints probabilities between 0 and 1 for a sample
 #                      16 kHz mono WAV made here. Called as: <command> --model <model> <wav>
 #
+#   denoise tool       TRANSCRIBE_DENOISE_COMMAND (default runline-denoise on the PATH) is installed,
+#                      RUNLINE_DENOISE_BINARY names the deep-filter executable, and the tool really denoises a
+#                      sample 48 kHz mono WAV made here (the tool itself refuses an executable that is not the
+#                      pinned one, so its sha256 and version are judged by running it). Called as:
+#                      <command> --atten-lim 24 --output <out.wav> <in.wav> (WI-1444)
+#
 # Every check runs and the reason of each failure is printed; the exit status is 0 only when all pass.
 # --skip-vad leaves the VAD tool out (it is delivered apart from the runtime: WI-1407) and says so.
+# --skip-denoise leaves the denoise tool out and says so: for a deployment that runs the pipeline with
+# denoise=false (the parameter is true by default and then the tool is required).
 set -u
 
 skip_vad=false
-case "${1:-}" in
-  "") ;;
-  --skip-vad) skip_vad=true ;;
-  *) echo "usage: runline-transcribe-check [--skip-vad]" >&2; exit 2 ;;
-esac
-[ "$#" -le 1 ] || { echo "usage: runline-transcribe-check [--skip-vad]" >&2; exit 2; }
+skip_denoise=false
+usage() { echo "usage: runline-transcribe-check [--skip-vad] [--skip-denoise]" >&2; exit 2; }
+for arg in "$@"; do
+  case "$arg" in
+    --skip-vad) skip_vad=true ;;
+    --skip-denoise) skip_denoise=true ;;
+    *) usage ;;
+  esac
+done
 
 failures=0
 ok() { printf 'ok    %s\n' "$*"; }
@@ -137,6 +148,50 @@ else
   fi
   if [ "$tool_ok" = true ]; then
     check_vad_output
+  fi
+fi
+
+# --- Denoise tool
+# Makes a 48 kHz mono sample, runs the tool on it and judges the result.
+check_denoise_output() {
+  local in="$scratch/denoise-in.wav" out="$scratch/denoise-out.wav" status=0 format
+  if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+    fail "denoise sample not made: ffmpeg or ffprobe not found"; return
+  fi
+  if ! ffmpeg -v error -f lavfi -i "sine=frequency=440:duration=1:sample_rate=48000" -ac 1 -c:a pcm_s16le -y "$in"; then
+    fail "denoise sample could not be made with ffmpeg"; return
+  fi
+  "$denoise_tool" --atten-lim 24 --output "$out" "$in" >"$scratch/denoise.out" 2>"$scratch/denoise.err" || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "denoise tool failed (exit $status): $(head -c 600 "$scratch/denoise.err")"
+  elif [ ! -s "$out" ]; then
+    fail "denoise tool wrote no output file for the sample"
+  elif ! format="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate,channels -of csv=p=0:s=, "$out" 2>&1)" || [ "$format" != "48000,1" ]; then
+    fail "denoise output is not 48 kHz mono WAV (ffprobe: ${format:-nothing})"
+  else
+    ok "denoise tool denoised a sample to 48 kHz mono ($(head -n 1 "$scratch/denoise.err"))"
+  fi
+}
+
+if [ "$skip_denoise" = true ]; then
+  skipped "denoise tool skipped (--skip-denoise)"
+else
+  denoise_name="${TRANSCRIBE_DENOISE_COMMAND:-runline-denoise}"
+  denoise_ok=true
+  if ! denoise_tool="$(command -v "$denoise_name" 2>/dev/null)"; then
+    fail "denoise tool is not installed: '$denoise_name' is not an executable or on the PATH (see deploy/transcribe.md; a deployment that runs with denoise=false can pass --skip-denoise)"
+    denoise_ok=false
+  fi
+  binary="${RUNLINE_DENOISE_BINARY:-}"
+  if [ -z "$binary" ]; then
+    fail "RUNLINE_DENOISE_BINARY is not set: it names the deep-filter executable the denoise tool runs (see deploy/transcribe.md)"
+    denoise_ok=false
+  elif [ ! -f "$binary" ] || [ ! -x "$binary" ]; then
+    fail "RUNLINE_DENOISE_BINARY '$binary' is not an executable file (deep-filter is installed by runline-transcribe-fetch, see deploy/transcribe.md)"
+    denoise_ok=false
+  fi
+  if [ "$denoise_ok" = true ]; then
+    check_denoise_output
   fi
 fi
 

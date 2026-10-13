@@ -32,8 +32,8 @@ transcribe 的資料在 SQLite（run、run_parameter、stage、segment、entry_t
 - 查詢遵守 [ADR-034](../../pipeline-views/adr/ADR-034-view-parameter-binding.md)（具名佔位符、無位置標記、無 PostgreSQL 專屬運算子）。
 - 薄 jar 約束不變；測試不使用 Stub 或 Mock；嚴格 TDD。
 
-## 已知限制（第一版不處理）
+## 已知限制
 
-- 摘要的段落換行在表格中不保留；全文仍可由資料庫取得。
 - 不提供字幕檔下載與播放；檔案在影片旁邊（[ADR-039](../adr/ADR-039-subtitle-files-beside-video.md)）。
-- 不顯示模型提示與回答原文、畫面時間點與畫面觀察。
+- 不顯示模型提示與回答原文（`exchange.prompt`、`exchange.response`）；以資料庫工具查詢。
+- 摘要的段落換行在表格中不保留，所以 `summary` view 依段落拆成多列（[WI-1433](WI-1433-console-summary-and-frames.md)、[WI-1435](WI-1435-group-summaries.md)）；畫面時間點與畫面觀察由 `frames` view 顯示（WI-1433）。

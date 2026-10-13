@@ -99,7 +99,8 @@ ENTRYPOINT ["/usr/local/bin/runline-entrypoint"]
 CMD ["java", "-Duser.home=/home/runline", "-jar", "/app/engine.jar"]
 
 # The Engine for the transcribe pipeline (WI-1402, docs/stable/transcribe-pipeline/04-deployment.md):
-# the same image plus ffmpeg and ffprobe, the silero-vad model and the places for the VAD tool. No Python.
+# the same image plus ffmpeg and ffprobe, the silero-vad model, the denoising tool (runline-denoise and the
+# pinned deep-filter, WI-1444) and the places for the VAD tool. No Python.
 # The inputs are fetched in a throw-away stage by deploy/bin/runline-transcribe-fetch, which holds their
 # versions and sha256 hashes (ADR-032): a changed download fails the build. The VAD tool's jar is not
 # here: it is delivered by WI-1407 and mounted (deploy/transcribe.md).
@@ -114,7 +115,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=deploy --chmod=0755 bin/runline-transcribe-fetch /usr/local/bin/
-RUN runline-transcribe-fetch /tmp/transcribe "$TARGETARCH"
+RUN runline-transcribe-fetch /tmp/transcribe "$TARGETARCH" \
+    && mkdir /tmp/transcribe/tools \
+    && { [ ! -f /tmp/transcribe/deep-filter ] || mv /tmp/transcribe/deep-filter /tmp/transcribe/tools/; }
 
 FROM engine AS transcribe
 USER root
@@ -122,13 +125,18 @@ ENV HOME=/root
 # /opt/runline/vad is where the jar of the VAD tool is mounted (read-only); root owns everything here,
 # so the Engine account can read and run it and cannot change it. The directories are made before the
 # copies: --chmod on a copy into a missing directory would give the directory the file's mode.
-RUN mkdir -p -m 0755 /opt/runline/models /opt/runline/vad
+# /opt/runline/bin holds deep-filter, which is not a command of the PATH: only runline-denoise runs it. The
+# fetch stage has it only for amd64 (the one pinned build); on arm64 the directory is empty and denoising is
+# unavailable, which runline-transcribe-check reports.
+RUN mkdir -p -m 0755 /opt/runline/models /opt/runline/vad /opt/runline/bin
 COPY --from=transcribe-fetch --chmod=0755 /tmp/transcribe/ffmpeg /tmp/transcribe/ffprobe /usr/local/bin/
 COPY --from=transcribe-fetch --chmod=0644 /tmp/transcribe/silero_vad.onnx /tmp/transcribe/silero_vad.onnx.sha256 /opt/runline/models/
-COPY --from=deploy --chmod=0755 bin/runline-vad bin/runline-transcribe-check /usr/local/bin/
-# The model and the tool are configuration of the pipeline's host, read from these variables.
+COPY --from=transcribe-fetch --chmod=0755 /tmp/transcribe/tools/ /opt/runline/bin/
+COPY --from=deploy --chmod=0755 bin/runline-vad bin/runline-denoise bin/runline-transcribe-check /usr/local/bin/
+# The model and the tools are configuration of the pipeline's host, read from these variables.
 ENV RUNLINE_VAD_MODEL=/opt/runline/models/silero_vad.onnx \
     RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar \
+    RUNLINE_DENOISE_BINARY=/opt/runline/bin/deep-filter \
     HOME=/home/runline
 USER runline
 
@@ -141,7 +149,8 @@ USER runline
 FROM browser AS browser-transcribe
 USER root
 COPY --from=transcribe /opt/runline/ /opt/runline/
-COPY --from=transcribe /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/runline-vad /usr/local/bin/runline-transcribe-check /usr/local/bin/
+COPY --from=transcribe /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/runline-vad /usr/local/bin/runline-denoise /usr/local/bin/runline-transcribe-check /usr/local/bin/
 ENV RUNLINE_VAD_MODEL=/opt/runline/models/silero_vad.onnx \
-    RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar
+    RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar \
+    RUNLINE_DENOISE_BINARY=/opt/runline/bin/deep-filter
 USER runline

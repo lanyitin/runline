@@ -58,6 +58,25 @@ for bad in latest 'v1 2' '-v1' 'a:b' 'a/b'; do
     env RUNLINE_REGISTRY=registry.invalid/runline RUNLINE_EXTRA_TAG="$bad" "$work/clean/deploy/publish-image"
 done
 
+# The stage to publish (WI-1104): refused before anything is built when it is not one of the two.
+for bad in engine transcribe 'browser extra' ''; do
+  check "refuses the stage '$bad'" 1 'stage' \
+    env RUNLINE_REGISTRY=registry.invalid/runline "$work/clean/deploy/publish-image" --stage "$bad"
+done
+check "refuses --stage without a value" 1 'stage' \
+  env RUNLINE_REGISTRY=registry.invalid/runline "$work/clean/deploy/publish-image" --stage
+# A valid stage passes argument checking and is then stopped by the next refusal (the dirty tree here).
+for ok in browser browser-transcribe; do
+  check "accepts the stage '$ok'" 1 'uncommitted' \
+    env RUNLINE_REGISTRY=registry.invalid/runline "$work/clean/deploy/publish-image" --stage "$ok"
+done
+
+# The release workflow publishes both images, builds both before it pushes either, and names them.
+workflow="$root/.forgejo/workflows/publish-image.yaml"
+check "the workflow builds the browser stage" 0 'publish-image --stage browser( |$)' grep -E 'publish-image --stage browser( |$)' "$workflow"
+check "the workflow builds the browser-transcribe stage" 0 'publish-image --stage browser-transcribe' grep -E 'publish-image --stage browser-transcribe' "$workflow"
+check "the workflow builds before it pushes" 0 'no-push' grep -E -- '--no-push' "$workflow"
+
 # The amd64 check on a daemon that must first download the base image (the case of a clean runner, where
 # Docker prints its pull progress before the probe's own output). It needs a real daemon, so it is skipped
 # loudly without one. The checkout is a copy whose Dockerfile names a base image that this test removes

@@ -31,8 +31,9 @@ services:
       # /tmp (writable layer; size: deploy/transcribe.md) and the command is runline-vad on the PATH.
     volumes:
       # The videos. Read-write: the pipeline writes the subtitle files beside each video (ADR-039). The
-      # Engine's account (uid 10001) reads the files if the host gives "other" read (or the account's
-      # group) on them, and writes only where the host gives it write on the directory of the video.
+      # Engine's uid (10001 unless `user:` names another, ADR-041) reads the files if the host gives "other"
+      # read (or its group) on them, and writes only where the host gives that uid write on the directory
+      # of the video: the simplest is a directory tree owned by the uid the Engine runs as.
       # This is the one writable mount of the overlay; the others stay read-only.
       - type: bind
         source: ${TRANSCRIBE_INTAKE_HOST_DIR:?set TRANSCRIBE_INTAKE_HOST_DIR to the directory of the videos}

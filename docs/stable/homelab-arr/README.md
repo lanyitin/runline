@@ -13,9 +13,10 @@
 | 主題 | 結論 | 詳見 |
 |---|---|---|
 | 部署形態 | arr 既有的 Docker Compose 管理面內新增 postgres、一次性 migrate、engine 三個服務；沿用 runline 的 Docker 部署設計，不採 systemd | [ADR-026](adr/ADR-026-homelab-arr-deployment.md) |
-| 映像檔 | 瀏覽器版（digest-rss 需要），在筆電交叉建置為 `linux/amd64`，推到 Forgejo registry（`forgejo.dev.lan`）；arr 只 pull，不建置 | ADR-026 |
+| 映像檔 | arr 用 `browser-transcribe`（Chrome 加 ffmpeg 與 VAD 工具，digest-rss 與 transcribe 共用一個 Engine；映像 `runline-engine-browser-transcribe`），單獨需要 Chrome 的環境仍用 `browser`（`runline-engine-browser`）；兩者由 `v*` tag 的 workflow 一起推送（WI-1104）。在筆電交叉建置為 `linux/amd64`，推到 Forgejo registry（`forgejo.dev.lan`）；arr 只 pull，不建置 | ADR-026 |
 | 入口與 TLS | arr 內既有 Traefik 以主機名稱 `runline.app.lan` 路由到 engine 的 8080；憑證由 step-ca 簽發；engine 不發布到宿主 | [04-deployment.md](04-deployment.md) |
 | 資料 | 全新 instance；postgres 容器與三個持久目錄（postgres-data、shared、resources）由 compose 定義，放在 arr 的 `/data/appdata/runline/`；首版不做備份 | 04-deployment.md |
+| 執行帳號 | Engine 以 `user: "1000:1000"` 執行（`/data/media` 的擁有者），映像支援任意 uid:gid | [ADR-041](adr/ADR-041-engine-image-arbitrary-uid.md) |
 | 密鑰 | 以 fnox（age 加密）→ `TF_VAR_*` 提供 | 04-deployment.md |
 
 ## 元件關係

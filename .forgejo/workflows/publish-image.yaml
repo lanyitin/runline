@@ -1,4 +1,4 @@
-# Builds the browser Engine image and pushes it to the Forgejo registry when a v* tag is pushed
+# Builds the browser and browser-transcribe Engine images and pushes them to the Forgejo registry when a v* tag is pushed
 # (docs/stable/homelab-arr/work-items/WI-1101-forgejo-action.md, ADR-027).
 #
 # The rules of the build and the push (linux/amd64, the tag from the commit, no latest, nothing
@@ -66,12 +66,35 @@ jobs:
           # The token is read from standard input, never from a command line.
           printf '%s' "$REGISTRY_TOKEN" | docker login "${RUNLINE_REGISTRY%%/*}" --username "$REGISTRY_USER" --password-stdin
 
-      - name: Build and push
+      # Both images are built before either is pushed (--no-push builds in the runner's daemon, tagged
+      # as the push would tag them), so a failed build leaves nothing in the registry. A build that
+      # fails stops the job here; the second stage is never started and nothing was pushed.
+      - name: Build browser
         env:
           RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
-          # The tag that triggered the run, next to the commit tag.
           RUNLINE_EXTRA_TAG: ${{ github.ref_name }}
-        run: deploy/publish-image
+        run: deploy/publish-image --stage browser --no-push
+
+      - name: Build browser-transcribe
+        env:
+          RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
+          RUNLINE_EXTRA_TAG: ${{ github.ref_name }}
+        run: deploy/publish-image --stage browser-transcribe --no-push
+
+      # The pushes reuse the layers just built. The images are pushed one after the other; if the
+      # second push fails, the job fails and the log names the image already pushed by the first step
+      # (publish-image prints the references it pushed). Pushing the same tag again completes it.
+      - name: Push browser
+        env:
+          RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
+          RUNLINE_EXTRA_TAG: ${{ github.ref_name }}
+        run: deploy/publish-image --stage browser
+
+      - name: Push browser-transcribe
+        env:
+          RUNLINE_REGISTRY: ${{ vars.RUNLINE_REGISTRY }}
+          RUNLINE_EXTRA_TAG: ${{ github.ref_name }}
+        run: deploy/publish-image --stage browser-transcribe
 
       # The login stays only for the job; do not leave the token in the runner's Docker config.
       - name: Log out of the registry

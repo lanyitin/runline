@@ -14,12 +14,26 @@
 # definition: deploy/publish-image reads it for its architecture check. Update: deploy/browser.md.
 FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636 AS engine
 
-# A dedicated unprivileged account. The three directories are the places the Engine writes to: the
-# shared root (ADR-009) and the resource root (the files of `file` shared resources, ADR-019) must
-# be volumes, the run root is scratch space. The three are siblings: none may be inside another.
+# A dedicated unprivileged account, the default: a container started without `user:` runs as uid 10001. The
+# image does not depend on it (ADR-041): a deployer may start the same image with any uid:gid, one that has no
+# entry in /etc/passwd included (arr runs it as 1000:1000, the owner of its videos), so no place the Engine
+# writes to is tied to this account:
+#
+#   /var/lib/runline/shared, /resources   volumes (ADR-009, ADR-019). Owned by the account; whoever starts the
+#                                         image as another uid gives the volumes to it (compose.registry.yaml
+#                                         does, from RUNLINE_USER). Not writable by others: they hold data.
+#   /var/lib/runline/runs                 the run root, scratch space. root's and sticky 1777, so that any uid
+#                                         can make its run directories in it and none can touch another uid's.
+#                                         A volume or a host directory mounted here has its own owner and mode.
+#   /home/runline                         HOME and the JVM's user.home (-Duser.home below), the same: root's, sticky 1777.
+#   /tmp                                  java.io.tmpdir (uploads, the SQLite driver's native library): the
+#                                         base image's own 1777.
+#
+# The three siblings under /var/lib/runline: none may be inside another.
 RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin runline \
-    && mkdir -p /var/lib/runline/shared /var/lib/runline/runs /var/lib/runline/resources \
-    && chown -R runline:runline /var/lib/runline
+    && mkdir -p /var/lib/runline/shared /var/lib/runline/resources \
+    && mkdir -p -m 1777 /var/lib/runline/runs /home/runline \
+    && chown runline:runline /var/lib/runline /var/lib/runline/shared /var/lib/runline/resources
 
 # engine.jar and run-runtime/ stay two separate parts (ADR-001): run-runtime/ must not hold Engine
 # classes.
@@ -30,7 +44,8 @@ ENV RUNLINE_RUNTIME_DIR=/app/run-runtime \
     RUNLINE_SHARED_ROOT=/var/lib/runline/shared \
     RUNLINE_RUN_ROOT=/var/lib/runline/runs \
     RUNLINE_RESOURCE_ROOT=/var/lib/runline/resources \
-    PORT=8080
+    PORT=8080 \
+    HOME=/home/runline
 
 USER runline
 EXPOSE 8080
@@ -39,7 +54,9 @@ VOLUME /var/lib/runline/shared /var/lib/runline/resources
 # The JVM is the main process (PID 1, so it gets SIGTERM itself); exec form, no shell. The
 # migration and the health check use the same engine.jar with another main class (04 "Deployment
 # entry points").
-ENTRYPOINT ["java", "-jar", "/app/engine.jar"]
+# user.home is given on the command line, not through JDK_JAVA_OPTIONS (the pipelines own that variable,
+# WI-1419): without it the JVM of a uid with no passwd entry takes "/" as the home.
+ENTRYPOINT ["java", "-Duser.home=/home/runline", "-jar", "/app/engine.jar"]
 
 # The Engine for pipelines that drive a browser (WI-1001, docs/stable/digest-rss/04-deployment.md):
 # the same image plus a real Google Chrome, a virtual display and the scripts that start them.
@@ -53,6 +70,9 @@ ENTRYPOINT ["java", "-jar", "/app/engine.jar"]
 FROM engine AS browser
 ARG CHROME_VERSION=155.0.8059.39-1
 USER root
+# The steps that run as root must not leave their files (an emulator's cache, for one) in the HOME that the
+# unprivileged accounts share: root has its own for them, and HOME is set back below.
+ENV HOME=/root
 RUN [ "$(dpkg --print-architecture)" = "amd64" ] \
     || { echo "the browser image is linux/amd64 only (Google Chrome has no other build); build with --platform linux/amd64" >&2; exit 1; }
 RUN apt-get update \
@@ -60,9 +80,8 @@ RUN apt-get update \
     && curl -fsSL -o /tmp/chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb" \
     && apt-get install -y --no-install-recommends /tmp/chrome.deb \
     && rm -rf /tmp/chrome.deb /var/lib/apt/lists/*
-# Chrome keeps small files in the account's home (its certificate database, desktop settings); the
-# account of the plain image has none. Nothing there needs to outlive the container.
-RUN mkdir -p /home/runline && chown runline:runline /home/runline
+# Chrome keeps small files in HOME (its certificate database, desktop settings), which the engine stage
+# makes writable for any uid. Nothing there needs to outlive the container.
 # The directory Xvfb puts its socket in, owned by root and sticky as X wants it, so that Xvfb does not
 # have to make it as the unprivileged account.
 RUN mkdir -p -m 1777 /tmp/.X11-unix
@@ -77,7 +96,7 @@ ENV CHROME_BIN=/usr/bin/google-chrome-stable \
     HOME=/home/runline
 USER runline
 ENTRYPOINT ["/usr/local/bin/runline-entrypoint"]
-CMD ["java", "-jar", "/app/engine.jar"]
+CMD ["java", "-Duser.home=/home/runline", "-jar", "/app/engine.jar"]
 
 # The Engine for the transcribe pipeline (WI-1402, docs/stable/transcribe-pipeline/04-deployment.md):
 # the same image plus ffmpeg and ffprobe, the silero-vad model and the places for the VAD tool. No Python.
@@ -90,6 +109,7 @@ CMD ["java", "-jar", "/app/engine.jar"]
 FROM engine AS transcribe-fetch
 ARG TARGETARCH
 USER root
+ENV HOME=/root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
@@ -98,6 +118,7 @@ RUN runline-transcribe-fetch /tmp/transcribe "$TARGETARCH"
 
 FROM engine AS transcribe
 USER root
+ENV HOME=/root
 # /opt/runline/vad is where the jar of the VAD tool is mounted (read-only); root owns everything here,
 # so the Engine account can read and run it and cannot change it. The directories are made before the
 # copies: --chmod on a copy into a missing directory would give the directory the file's mode.
@@ -107,7 +128,8 @@ COPY --from=transcribe-fetch --chmod=0644 /tmp/transcribe/silero_vad.onnx /tmp/t
 COPY --from=deploy --chmod=0755 bin/runline-vad bin/runline-transcribe-check /usr/local/bin/
 # The model and the tool are configuration of the pipeline's host, read from these variables.
 ENV RUNLINE_VAD_MODEL=/opt/runline/models/silero_vad.onnx \
-    RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar
+    RUNLINE_VAD_JAR=/opt/runline/vad/runline-vad.jar \
+    HOME=/home/runline
 USER runline
 
 # The Engine for pipelines that drive a browser and the transcribe pipeline in one process (WI-1416): the

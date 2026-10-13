@@ -1,9 +1,14 @@
 #!/bin/bash
-# Builds the Engine image for browser pipelines as linux/amd64 and pushes it to a registry, tagged with
+# Builds an Engine image for browser pipelines as linux/amd64 and pushes it to a registry, tagged with
 # the commit it was built from (docs/stable/homelab-arr/work-items/WI-1100-publishable-image.md).
 #
 #   RUNLINE_REGISTRY=forgejo.example/owner deploy/publish-image             # build and push
 #   RUNLINE_REGISTRY=forgejo.example/owner deploy/publish-image --no-push   # build only, in the local daemon
+#   RUNLINE_REGISTRY=forgejo.example/owner deploy/publish-image --stage browser-transcribe
+#
+# --stage names the Dockerfile stage to publish (docs/stable/homelab-arr/work-items/WI-1104-publish-browser-transcribe-image.md):
+#   browser             Chrome only; image runline-engine-browser (the default)
+#   browser-transcribe  Chrome plus ffmpeg and the VAD tools; image runline-engine-browser-transcribe
 #
 # Configuration comes from the environment, never from this file:
 #   RUNLINE_REGISTRY   registry host and path the image goes under, no tag and no credentials
@@ -28,10 +33,21 @@ set -euo pipefail
 fail() { printf 'publish-image: %s\n' "$*" >&2; exit 1; }
 
 push=yes
-case "${1:-}" in
-  "") ;;
-  --no-push) push=no ;;
-  *) fail "unknown argument '$1' (the only one is --no-push)" ;;
+stage=browser
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-push) push=no; shift ;;
+    --stage)
+      [ $# -ge 2 ] || fail "--stage needs a value: browser or browser-transcribe"
+      stage="$2"; shift 2 ;;
+    *) fail "unknown argument '$1' (the arguments are --no-push and --stage <browser|browser-transcribe>)" ;;
+  esac
+done
+# The stage is checked first: nothing is built for an image that does not exist. Each stage has its own
+# image name, so a registry holds both side by side.
+case "$stage" in
+  browser|browser-transcribe) ;;
+  *) fail "unknown stage '$stage' (the stages that are published are browser and browser-transcribe)" ;;
 esac
 
 # The registry is checked first: nothing is built for a push that cannot happen.
@@ -61,7 +77,7 @@ if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
   fi
   tag="$commit-dirty"
 fi
-image="$registry/runline-engine-browser:$tag"
+image="$registry/runline-engine-$stage:$tag"
 
 command -v docker >/dev/null || fail "docker is not installed"
 docker info >/dev/null 2>&1 || fail "the Docker daemon cannot be reached (is Docker, or Colima, running?)"
@@ -81,7 +97,7 @@ fi
 
 ./gradlew --console=plain :engine:engineDistribution
 
-docker build --platform linux/amd64 --target browser --build-context deploy=deploy \
+docker build --platform linux/amd64 --target "$stage" --build-context deploy=deploy \
   --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
   -f deploy/docker/Dockerfile -t "$image" engine/build/engine-dist
 
@@ -90,7 +106,7 @@ built="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")"
 
 images=("$image")
 if [ -n "$extra_tag" ]; then
-  extra_image="$registry/runline-engine-browser:$extra_tag"
+  extra_image="$registry/runline-engine-$stage:$extra_tag"
   docker tag "$image" "$extra_image"
   images+=("$extra_image")
 fi

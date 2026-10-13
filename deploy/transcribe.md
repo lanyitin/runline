@@ -60,8 +60,8 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe
 |---|---|
 | 映像 | `Dockerfile` 的 `transcribe` 階段，建在 `engine` 階段之上。單獨使用時是 `transcribe` 映像（沒有 Chrome）；與瀏覽器疊加檔並用時是 `browser-transcribe` 映像（見「與瀏覽器並用」） |
 | 平台 | `linux/amd64` 與 `linux/arm64` 皆可（靜態 ffmpeg 兩者都有），不像瀏覽器疊加檔限 amd64 |
-| 帳號 | 與 Engine 相同的 `runline`（uid 10001）。ffmpeg、ffprobe、VAD 工具都由 Engine 啟動，以該帳號執行；映像沒有以 root 執行任何這些工具 |
-| 收件根目錄 | 宿主目錄以綁定掛載（不加 `read_only`），是疊加檔唯一可寫的掛載。Engine 帳號能不能**讀寫**由宿主的檔案權限決定：影片檔要對 other 可讀（`chmod o+r`、目錄 `o+rx`），影片所在目錄要讓 uid 10001 可寫（擁有者、群組或 `o+w`）。檢查會告訴你讀不到或寫不進去。以「新檔出現」觸發 webhook 的呼叫端有忽略特定檔案的責任（[04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
+| 帳號 | 與 Engine 相同：預設 `runline`（uid 10001），可由 `user:` 改為其他 uid:gid，包括 `/etc/passwd` 沒有項目的 uid（ADR-041）。ffmpeg、ffprobe、VAD 工具都由 Engine 啟動，以該 uid 執行；映像沒有以 root 執行任何這些工具。工作目錄是 `/tmp`（1777），對任何 uid 可寫 |
+| 收件根目錄 | 宿主目錄以綁定掛載（不加 `read_only`），是疊加檔唯一可寫的掛載。Engine 帳號能不能**讀寫**由宿主的檔案權限決定：影片檔要對 other 可讀（`chmod o+r`、目錄 `o+rx`），影片所在目錄要讓 **Engine 執行的 uid** 可寫（預設 10001，`user:` 可改）。**擁有者規則：收件目錄的擁有者必須等於 Engine 執行的 uid，或目錄對該 uid 可寫**（群組或 `o+w`）；例如影片樹歸 1000:1000（目錄 0755）時，Engine 以 `user: "1000:1000"` 執行即可寫字幕檔，以預設 10001 執行則寫不進去。檢查會告訴你讀不到或寫不進去（`not writable by uid <uid>`）。以「新檔出現」觸發 webhook 的呼叫端有忽略特定檔案的責任（[04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
 | VAD 工具目錄 | 宿主目錄（可先是空的）唯讀掛載到 `/opt/runline/vad`；把 `runline-vad.jar` 放進去，重新啟動容器不需重建映像 |
 | 模型檔 | 建置時由 `runline-transcribe-fetch` 驗證雜湊後放進映像（見「版本固定」）；root 擁有，Engine 帳號不能改 |
 | 工作目錄 | 容器的 `/tmp`（可寫層），pipeline 為每個 run 建立專屬目錄並在結束時刪除。要把它放在別處，設 `TRANSCRIBE_WORK_DIR` 並提供該路徑的 volume（`tmpfs` 會佔記憶體，不建議放長影片） |
@@ -81,6 +81,8 @@ drop-in 只設預設值（`PATH`、`RUNLINE_VAD_*`、`TRANSCRIBE_WORK_DIR` 與 `
 
 ## 與瀏覽器並用
 
+（發佈：`deploy/publish-image --stage browser-transcribe` 推送 `runline-engine-browser-transcribe` 映像，推送 `v*` tag 時 workflow 與 `browser` 映像一起推送；arr 使用它，見 [browser.md](browser.md) 的發佈一節，WI-1104。）
+
 同一個 Engine 要同時跑需要 Chrome 的 pipeline（digest-rss，[瀏覽器手冊](browser.md)）與 transcribe 時，兩個覆蓋層可以一起用；不使用覆蓋層、或單獨使用其中一個，行為都與只用那一個時相同。並用得到**單一** Engine 映像，同時具備 Chrome、Xvfb 虛擬顯示、ffmpeg、ffprobe、`runline-vad` 與模型檔，兩邊的檢查都在同一個容器中通過。
 
 ### Docker
@@ -99,7 +101,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.ya
 |---|---|
 | 映像 | `Dockerfile` 的 `browser-transcribe` 階段：建在 `browser` 階段之上，再從 `transcribe` 階段複製 `/opt/runline`（模型檔、VAD 目錄）與 ffmpeg、ffprobe、`runline-vad`、`runline-transcribe-check`，並設同樣的 `RUNLINE_VAD_MODEL`、`RUNLINE_VAD_JAR`。版本與雜湊仍只定義在 `bin/runline-transcribe-fetch`（階段是複製，不是重寫），Chrome 仍只由 `CHROME_VERSION` 定義 |
 | 平台 | 只有 `linux/amd64`（Chrome 的限制；arm64 開發機需 Rosetta，見[瀏覽器手冊](browser.md)）。要在 arm64 平台用轉錄而不要 Chrome 時，單獨用本疊加檔 |
-| 帳號與入口 | 與瀏覽器映像相同：uid 10001，入口是 `runline-entrypoint`（啟動 Xvfb），`init: true` |
+| 帳號與入口 | 與瀏覽器映像相同：預設 uid 10001（可由 `user:` 改），入口是 `runline-entrypoint`（啟動 Xvfb），`init: true` |
 | 檢查 | `docker compose <上列四個 -f> exec engine runline-transcribe-check`，以及 `exec engine runline-browser-probe` |
 
 ### systemd

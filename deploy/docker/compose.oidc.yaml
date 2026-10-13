@@ -13,8 +13,9 @@
 # Do not set RUNLINE_OIDC_CLIENT_SECRET or RUNLINE_SESSION_ENCRYPTION_KEY in .env as well: a value
 # and a file for the same setting is a configuration error and the Engine does not start.
 #
-# On a Linux host the Engine's account (uid 10001) must be able to read both files and nobody else
-# should: mode 0440 with a group the container maps to, or 0444 in a directory only you can enter.
+# On a Linux host the uid the Engine runs as (10001 unless `user:` names another, ADR-041) must be able to
+# read both files and nobody else should: mode 0440 with a group the container maps to, or 0444 in a
+# directory only you can enter.
 # The two host paths are set in .env; the defaults are beside this file and ignored by git.
 
 services:

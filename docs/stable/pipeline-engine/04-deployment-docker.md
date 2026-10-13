@@ -31,9 +31,25 @@
 | 停止等待（`stop_grace_period`） | `RUNLINE_SHUTDOWN_GRACE_SECONDS` 加 15 秒（預設 45 秒） | Docker 預設 10 秒不足 |
 | 結束代碼 | Engine 優雅關閉後以 0 結束 | 平台不需特例（已實作並由 `packagedTest` 驗證，見 [04](04-deployment.md)「部署入口」） |
 
+## Engine 的帳號（uid:gid）
+
+預設 uid 10001（帳號 `runline`，gid 為映像配置的 999），可由 `user:` 改為其他 uid:gid，包括 `/etc/passwd` 沒有項目的 uid（例如 2345:2345）；同一個映像服務所有 uid（[ADR-041](../homelab-arr/adr/ADR-041-engine-image-arbitrary-uid.md)）。不指定 `user:` 時行為不變。映像內與 uid 脫鉤的位置：
+
+| 位置 | 擁有者與模式 | 為什麼 |
+|---|---|---|
+| `HOME`、JVM 的 `user.home`：`/home/runline` | root，1777（sticky） | 沒有 passwd 項目的 uid，JVM 的 `user.home` 是 `/`、`HOME` 也無處可寫；Chrome 的憑證資料庫（`~/.pki/nssdb`）與設定在此。只有容器內可見，不需持久；sticky 使各 uid 只能動自己建的檔案 |
+| run 根目錄 `RUNLINE_RUN_ROOT`：`/var/lib/runline/runs` | root，1777（sticky） | run 的私有目錄是暫存。可以當掛載點：掛上磁碟區或宿主目錄後，擁有者與模式以掛載物為準，部署者把它給 Engine 的 uid 即可 |
+| `java.io.tmpdir`：`/tmp`（含 SQLite 驅動程式解開原生程式庫的位置、上傳暫存、Xvfb 的 `/tmp/.X11-unix`） | root，1777（基底映像本來如此） | 暫存 |
+| `shared`、`resources` | 預設帳號 10001 | 這是資料磁碟區，**不**開放給所有 uid：以其他 uid 執行時，部署者把這兩個目錄給該 uid（`compose.registry.yaml` 的 `init` 容器依 `RUNLINE_USER` 做） |
+| `/app`、`/opt/runline` | root，其他帳號唯讀 | 不因 uid 而放寬 |
+
+驗證：`deploy/test/arbitrary-uid-test.sh` 建置各階段映像，以 1000:1000 與 2345:2345（後者在 passwd 沒有項目）及預設帳號啟動真實容器（含真實的 PostgreSQL），檢查上表各位置的可寫性與唯讀部分，並讓 Engine 就緒、完成一個用 SQLite 與檔案的 run、以 SIGTERM 結束；另驗證收件目錄的擁有者規則與 `compose.registry.yaml` 的 `RUNLINE_USER`。
+
+收件目錄（`/var/lib/runline/intake`，轉錄疊加檔）與 keystore、secrets 的規則相同：**擁有者必須等於 Engine 執行的 uid，或目錄對該 uid 可寫**（keystore 與 secrets 須讀得到）。
+
 ## 資源根目錄（`file` 型別共享資源）
 
-- 映像內有 `/var/lib/runline/resources`，擁有者是 Engine 的非特權帳號，`RUNLINE_RESOURCE_ROOT` 預設指向它；它是 `VOLUME`，Compose 把具名磁碟區 `resources` 掛在這裡。與共享目錄（`/var/lib/runline/shared`）、run 私有目錄（`/var/lib/runline/runs`）並列，三者互不包含（包含關係會使 Engine 啟動失敗）。
+- 映像內有 `/var/lib/runline/resources`，擁有者是 Engine 的預設非特權帳號（其他 uid 見上節），`RUNLINE_RESOURCE_ROOT` 預設指向它；它是 `VOLUME`，Compose 把具名磁碟區 `resources` 掛在這裡。與共享目錄（`/var/lib/runline/shared`）、run 私有目錄（`/var/lib/runline/runs`）並列，三者互不包含（包含關係會使 Engine 啟動失敗）。
 - 磁碟區的備份、容量與還原由部署環境負責；`docker compose down -v` 會刪除它。容器重建（`up --force-recreate`）不影響其中的檔案。
 - 以真實 Docker 驗證：`./gradlew :engine:packagedTest --tests '*DockerResourceVolumeTest*'` 用 `deploy/docker/compose.yaml` 與 Dockerfile 建立整組服務，確認 Engine 以非特權帳號寫入掛載的根目錄，並在重建容器之後檔案仍在、檢查端點回報可用。
 
@@ -51,7 +67,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.keystore.y
 | 密碼 | Docker secret，來源是宿主機的密碼檔（預設 `deploy/docker/secrets/keystore-password`，以 `.env` 的 `KEYSTORE_PASSWORD_HOST_FILE` 改），在容器內是 `/run/secrets/runline_keystore_password`（唯讀），`RUNLINE_KEYSTORE_PASSWORD_FILE` 指向它；不經環境變數 |
 | 為什麼掛目錄 | 更新是以更名覆蓋原子替換檔案；只掛單一檔案時，容器會繼續看到被取代的舊檔（實測）。更名在宿主機上做，Engine 的掛載保持唯讀 |
 | 映像 | 不含金鑰庫與密碼；`docker history`、映像各層與容器的環境變數都找不到金鑰庫密碼（由測試驗證） |
-| 宿主機權限 | 兩個檔案只有 Engine 的帳號（uid 10001）讀得到：目錄與檔案屬於 10001 或其群組，檔案權限 `0400` 或 `0440`；其他使用者可讀時 Engine 啟動記錄警告。這是 Linux 宿主機的檔案權限語意，本專案的驗證在 Colima（macOS）上做，該環境不呈現 Linux 的擁有者與權限，**沒有在 Linux 宿主機上實測** |
+| 宿主機權限 | 兩個檔案只有 Engine 的 uid（預設 10001，可由 `user:` 改為其他 uid）讀得到：目錄與檔案屬於該 uid 或其群組，檔案權限 `0400` 或 `0440`；其他使用者可讀時 Engine 啟動記錄警告。這是 Linux 宿主機的檔案權限語意，本專案的驗證在 Colima（macOS）上做，該環境不呈現 Linux 的擁有者與權限，**沒有在 Linux 宿主機上實測** |
 | 版本庫 | 兩個預設目錄列在 `deploy/.gitignore`；版本庫沒有真實金鑰庫與密碼，`.env.example` 只有佔位值 |
 
 以真實 Docker 驗證：`./gradlew :engine:packagedTest --tests '*DockerKeystoreMountTest*'` 用 `compose.yaml`、`compose.keystore.yaml`、Dockerfile 與以真實 `keytool` 做的金鑰庫建立整組服務：(1) Engine 啟動、`GET /api/v1/secrets` 列出別名；(2) 在容器內寫入金鑰庫目錄失敗，兩個掛載（金鑰庫與密碼 secret）的 `RW` 都是 `false`；(3) 容器環境變數、映像歷史與映像各層（`docker save` 的位元組）都找不到密碼；(4) 在宿主機以副本加更名原子替換金鑰庫後，`POST /api/v1/secrets/reload` 回報新別名；(5) 密碼錯誤時 Engine 容器以非 0 結束，log 含 `wrong_password` 而不含任何密碼。

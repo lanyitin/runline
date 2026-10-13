@@ -12,6 +12,13 @@
 # own configuration and secrets come from .env only (env_file), never from this file.
 #
 #   RUNLINE_IMAGE      required. The image with its commit tag.
+#   RUNLINE_USER       optional. The uid:gid the Engine and the migration run as, and the owner the init
+#                      container gives to shared and resources (ADR-041). Unset: the image's account, uid 10001
+#                      (the directories are given to 10001:10001). Any uid:gid is possible, one with no entry in
+#                      /etc/passwd included, e.g. RUNLINE_USER=1000:1000. It is also the uid that must own
+#                      (or be able to write to) every directory mounted read-write besides these, such as the
+#                      intake directory of compose.transcribe.yaml, and that must be able to read the keystore
+#                      and secrets of compose.keystore.yaml and compose.oidc.yaml.
 #   RUNLINE_DATA_DIR   required. Host directory of the three persistent directories: postgres-data,
 #                      shared and resources are made below it.
 #   TRUSTED_CA_FILE    required. Host file with the root certificate of the private CA, mounted read-only
@@ -28,6 +35,8 @@ x-engine: &engine
   image: ${RUNLINE_IMAGE:?set RUNLINE_IMAGE to the published image with its commit tag}
   platform: linux/amd64
   env_file: .env
+  # Empty: the image's own account. The init container below overrides it with root.
+  user: ${RUNLINE_USER:-}
 
 services:
   postgres:
@@ -50,7 +59,7 @@ services:
       retries: 10
 
   # One-off, as root: makes the directories the Engine writes to, and gives them (not what is in them)
-  # to the Engine's account, uid 10001. The Engine starts after it has succeeded.
+  # to the Engine's user, RUNLINE_USER (default 10001:10001). The Engine starts after it has succeeded.
   init:
     <<: *engine
     user: root
@@ -58,7 +67,7 @@ services:
     entrypoint:
       - sh
       - -c
-      - mkdir -p /data/shared /data/resources && chown 10001:10001 /data/shared /data/resources
+      - mkdir -p /data/shared /data/resources && chown ${RUNLINE_USER:-10001:10001} /data/shared /data/resources
     volumes:
       - type: bind
         source: ${RUNLINE_DATA_DIR:?set RUNLINE_DATA_DIR to the host directory of the persistent data}

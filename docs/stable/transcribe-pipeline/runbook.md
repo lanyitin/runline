@@ -53,7 +53,7 @@ Lemonade 的並行是 1，所有請求逐一送出；階段依模型分批（轉
 | 只跑 transcribe | `compose.yaml` + `compose.transcribe.yaml`（`transcribe` 映像，arm64 與 amd64 皆可） | 安裝 `runline-engine-transcribe.conf` 為 drop-in |
 | 與 digest-rss 同一個 Engine（要 Chrome） | 依序 `compose.yaml`、`compose.browser.yaml`、`compose.transcribe.yaml`、**最後**`compose.browser-transcribe.yaml`（單一映像 `browser-transcribe`，只有 linux/amd64） | 兩個 drop-in（`browser.conf`、`transcribe.conf`）並存，檔名不同，沒有共同設定項 |
 
-Docker 的啟動需要 `TRANSCRIBE_INTAKE_HOST_DIR`（宿主上放影片的目錄，可寫掛載為 `/var/lib/runline/intake`，是唯一可寫的掛載）；VAD 工具 jar 放在 `TRANSCRIBE_VAD_HOST_DIR`（預設 `./transcribe-vad`）並唯讀掛載到 `/opt/runline/vad`，換 jar 不需要重建映像。宿主上的影片要對 other 可讀（檔案 `o+r`、目錄 `o+rx`），否則容器內的 uid 10001 讀不到——這種檔案在 run 以 `UNREADABLE` 失敗（本項在容器內以權限 000 的檔案驗證）；影片所在目錄要讓 uid 10001 可寫，否則 run 在 `intake` 以 `EXPORT_DIRECTORY_NOT_WRITABLE` 失敗（第 15.2 節）。
+Docker 的啟動需要 `TRANSCRIBE_INTAKE_HOST_DIR`（宿主上放影片的目錄，可寫掛載為 `/var/lib/runline/intake`，是唯一可寫的掛載）；VAD 工具 jar 放在 `TRANSCRIBE_VAD_HOST_DIR`（預設 `./transcribe-vad`）並唯讀掛載到 `/opt/runline/vad`，換 jar 不需要重建映像。宿主上的影片要對 other 可讀（檔案 `o+r`、目錄 `o+rx`），否則 Engine 的 uid 讀不到（Docker 預設 uid 10001，可由 `user:` 改為其他 uid；影片目錄的擁有者規則見 [deploy/transcribe.md](../../../deploy/transcribe.md) 與 [04-deployment](04-deployment.md)）——這種檔案在 run 以 `UNREADABLE` 失敗（本項在容器內以權限 000 的檔案驗證）；影片所在目錄要讓 Engine 的 uid 可寫，否則 run 在 `intake` 以 `EXPORT_DIRECTORY_NOT_WRITABLE` 失敗（第 15.2 節）。
 
 **檢查**（上線前、每次改部署後）：在 Engine 的環境與帳號下執行 `runline-transcribe-check`（Docker：`docker compose <同一組 -f> exec engine runline-transcribe-check`）。它逐項印 `ok`、`skip` 或 `FAIL`：ffmpeg、ffprobe、非 root、收件根目錄可讀且**真的寫得進去**、工作目錄可寫與空間、VAD 模型雜湊、VAD 工具載入模型並輸出 0 至 1 的機率。本項在 `transcribe` 映像與 `browser-transcribe` 映像內都得到 `all checks passed`。
 
@@ -124,7 +124,7 @@ pipeline 宣告兩個角色（程式只認角色名稱）；管理員建立資�
 | `settings.endpoints` | **必須含 `audio.transcriptions`、`chat.completions`**；`models.list` 供資源檢查與潤飾開始前的模型清單檢查（沒有它，檢查被略過）。`audio.transcriptions` 預設**不啟用**，漏掉時 run 在 `transcription` 以 `CONFIGURATION` 失敗（`the llm resource cannot be used: ENDPOINT_NOT_ENABLED`，實測） |
 | `settings.allowedModels` | **強烈建議**，含 `asrModel` 與 `llmModel`（以及用到的各階段覆寫）。不在清單的模型在該階段的第一個請求以 `MODEL_NOT_ALLOWED` 讓 run 失敗（實測：`asrModel` 打錯在 `transcription`，`llmModel` 打錯在 `polish`）；沒有 `allowedModels` 時，`llmModel` 打錯由 `models.list` 的清單檢查在潤飾開始前發現（`models.list` 已列在上一列，資源建議啟用），清單取不到時由第一個請求的 404 讓 run 以 `CONFIGURATION` 失敗（本文開頭第 2 點）；有 `allowedModels` 時資源先於服務拒絕 |
 | `settings.maxRequestBytes` | 預設 32 MiB。核對請求含最多 6 張縮圖，轉錄請求含一段最長 25 秒的 WAV（800 KB）；32 MiB 綽綽有餘。調得太小時核對請求被擋，pipeline 會逐步縮小縮圖邊長，仍過大則該條目降級 |
-| `settings.defaults` | 取樣參數（`top_p`、`top_k`、`max_tokens` 等）**由這裡提供，pipeline 只送 `model` 與 `temperature`**；thinking 開時推理與答案共用 `max_tokens`，太小會截斷答案。正式值待第 17 節驗證 |
+| `settings.defaults` | 取樣參數（`top_p`、`top_k`、`max_tokens` 等）**由這裡提供，pipeline 只送 `model` 與 `temperature`**；thinking 開時推理與答案共用 `max_tokens`，太小會截斷答案（診斷與處置見第 15.3 節「大量 `TRUNCATED`」）。正式值待第 17 節驗證 |
 | `settings.timeouts` | 預設的 `firstByteMs`（15 分鐘）、`idleMs`（5 分鐘）夠用；thinking 開的非串流長生成是否撐得過未驗證 |
 | `secretAlias` | Lemonade 要金鑰時放金鑰庫並以別名引用（見 [deploy/README.md](../../../deploy/README.md)）；不要金鑰就省略 |
 
@@ -341,7 +341,16 @@ SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 | 摘要 | 全片摘要缺少算 1 | `result.summary` 與 `source_language` 為 NULL；之後不再送任何摘要請求 | 同上 |
 | 翻譯 | 一個 VAD-A 組 | 該組各條目的核對後文字（也就是未翻譯的來源語言文字） | 同上 |
 
-**什麼算「回答不符契約」而重試**：潤飾與翻譯的回答條目數、順序、序號、時間行與送出的不同、有條目為空、不是 SRT（`NOT_SRT`、`COUNT_CHANGED`、`NUMBER_CHANGED`、`TIME_CHANGED`、`EMPTY_TEXT`）；翻譯的回答含簡體字（`SIMPLIFIED_CHARACTERS`）；核對的回答不是恰好 `TEXT:`、`OBSERVATION:` 兩行；摘要缺標記、超過長度、語言代碼不合。連線錯誤、逾時、429、5xx、其他非 2xx 也一樣重試。原因的名稱出現在 log。**來源語言已是繁體中文**（代碼 `zh-TW`、`zh-HK`、`zh-MO`、`zh-Hant`）的組不送翻譯請求，直接採用核對後文字，**不算降級**。
+**什麼算「回答不符契約」而重試**：潤飾與翻譯的回答條目數、順序、序號、時間行與送出的不同、有條目為空、不是 SRT（`NOT_SRT`、`COUNT_CHANGED`、`NUMBER_CHANGED`、`TIME_CHANGED`、`EMPTY_TEXT`）；翻譯的回答含簡體字（`SIMPLIFIED_CHARACTERS`）；核對的回答不是恰好 `TEXT:`、`OBSERVATION:` 兩行；摘要缺標記、超過長度、語言代碼不合；回答被 token 上限截斷（`TRUNCATED`，見下）。連線錯誤、逾時、429、5xx、其他非 2xx 也一樣重試。原因的名稱出現在 log。**來源語言已是繁體中文**（代碼 `zh-TW`、`zh-HK`、`zh-MO`、`zh-Hant`）的組不送翻譯請求，直接採用核對後文字，**不算降級**。
+
+**`TRUNCATED`：回答被 token 上限截斷。** 回答的 `finish_reason` 為 `length` 時，不論內容是否為空（thinking 模型把額度用在推理上時常回空字串），都不採用，原因分類為 `TRUNCATED`，與 `NOT_SRT`、`COUNT_CHANGED`、`TIME_CHANGED` 並列，重試與降級規則相同。log 各有一種行（核對、摘要、翻譯的前綴為 `VERIFY`、`SUMMARY`、`TRANSLATE`）：
+
+| log 行 | 意義 |
+|---|---|
+| `POLISH RETRY … failed: TRUNCATED` | 這次嘗試被截斷，稍後重試 |
+| `POLISH DEGRADED … after k tries: TRUNCATED` | 重試用盡仍被截斷，該單位降級；該次呼叫的 `exchange.outcome` 為 `fallback`（`outcome` 仍是封閉的四個值，截斷原因記在 `exchange.finish_reason` 與 log，見 [06](06-data-model.md)） |
+
+轉錄端點沒有 `finish_reason`，不受影響。`finish_reason` 為 `stop` 或沒有時，行為不變。診斷與處置見第 15.3 節。
 
 怎麼判讀：
 
@@ -349,7 +358,7 @@ SQLite 裡的 `run.result` 與 Engine 的 `state` 的對應（實測）：
 |---|---|---|
 | 降級數是 0 | 全部由模型處理 | — |
 | 少量降級（約低於組數的 10%） | 模型偶爾違反格式 | 可用；要改善調 `llmTemperature`、`modelRetries` |
-| 某一階段全部降級，且每次都是同一個原因 | 模型不照格式回答，不是模型偶發 | `NOT_SRT`＝模型不照格式回答；先修設定（模型、`llmThinking`、提示），重送。模型 id 不存在（404）、金鑰被拒（401、403）不會降級，是 `CONFIGURATION` 失敗（第 15.2 節） |
+| 某一階段全部降級，且每次都是同一個原因 | 模型不照格式回答，不是模型偶發 | `NOT_SRT`＝模型不照格式回答，`TRUNCATED`＝答案被 `max_tokens` 截斷（第 15.3 節）；先修設定（模型、`llmThinking`、提示），重送。模型 id 不存在（404）、金鑰被拒（401、403）不會降級，是 `CONFIGURATION` 失敗（第 15.2 節） |
 | 核對降級，原因 `no pictures: TOOL_FAILED` | 影片沒有影像，或取樣時間超過影片長度（落在影片長度內但晚於最後一格畫面的時間點，取最後一秒的畫面，不會降級） | 該條目退回潤飾文字；影片沒有影像時每個條目都如此 |
 
 ## 11. log 的讀法
@@ -364,7 +373,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 行的開頭 | 意義 |
 |---|---|
 | `STAGE n/12 名稱` | 階段開始 |
-| `RESULT n/12 名稱: …; 計數; N ms` | 階段成功結束，附計數與耗時。各階段的計數：`audio` 的 `seconds`、`streams`；`vad` 的 `windows`（每視窗 32 ms）；`segmentation` 的 `a`、`b`、`keptFromA`、`noLowEnergyCuts`；`transcription` 的 `entries`、`speech`、`noSpeech`、`retries`；`polish`／`verify`／`translate` 的 `groups`／`entries`、`sent`、`degraded`、`retries`；`verify` 另有 `shrinks`、`frames`；`summary` 的 `groups`、`calls`、`batches`；`export` 的 `files`（寫出的檔數，成功時為 2） |
+| `RESULT n/12 名稱: …; 計數; N ms` | 階段成功結束，附計數與耗時。各階段的計數：`audio` 的 `seconds`、`streams`；`vad` 的 `windows`（每視窗 32 ms）；`segmentation` 的 `a`、`b`、`keptFromA`、`noLowEnergyCuts`；`transcription` 的 `entries`、`speech`、`noSpeech`、`retries`；`polish`／`verify`／`translate` 的 `groups`／`entries`、`sent`、`degraded`、`retries`、`truncated`；`verify` 另有 `shrinks`、`frames`；`summary` 的 `groups`、`calls`、`batches`、`truncated`；`export` 的 `files`（寫出的檔數，成功時為 2） |
 | `FAILED n/12 名稱: 例外型別: 訊息` | 階段失敗，run 失敗。訊息只含固定用語，不含路徑與機密 |
 | `STOPPED n/12 名稱` | 階段被取消或逾時打斷（不是失敗） |
 | `TRANSCRIBE\|POLISH\|VERIFY\|SUMMARY\|TRANSLATE RETRY …` | 單次嘗試失敗，附原因，稍後重試 |
@@ -374,6 +383,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | `… PROGRESS 25/389` | 每完成 25 個單位一行 |
 | `SCAN inspected=… candidates=… truncated=… excluded: symlink=… hidden=… other=… extension=… tooNew=… hasSubtitle=… unwritable=… attemptsExhausted=…` | 掃描模式的 `intake` 階段，每次掃描一行，只有計數：`inspected`（檢視的項目數）＝ `candidates` ＋ 各排除計數之和；`truncated=true` 表示項目超過一萬個、以已檢視的為準。**不列出路徑，也不列出所選的影片**（選定的路徑在 `run.file`） |
 | `RESULT 3/12 intake: no video to take; files=0; … ms` | 掃描找不到候選：run 立即成功結束，接著 `RUN SUMMARY` 與 `OUTCOME success: NO_PENDING`（第 9 節）。選到影片時是 `RESULT 3/12 intake: file accepted; files=1 bytes=…` |
+| `RESULT n/12 名稱: …; truncated=N; …`（`polish`、`verify`、`summary`、`translate`） | 本階段被 token 上限截斷（`finish_reason` 為 `length`）的嘗試次數，**計入每一次被截斷的嘗試，含之後重試成功者**；所以 `truncated` 可大於 `degraded`，不是 0 就表示 `max_tokens` 不足以應付至少一次呼叫（第 15.3 節）。與 `SCAN` 行的 `truncated=true|false`（掃描項目過多）無關 |
 | `STORE WARN …` | 結束的紀錄寫不進去；不改變 run 的結果 |
 | `RUN SUMMARY entries=… degraded=N (polish=… verify=… summary=… translate=…) modelCalls=… elapsed=… ms` | 所有階段完成後一行（失敗與停止的 run 沒有）。`modelCalls` 是對 `llm` 資源送出的請求總數，含每次重試 |
 | `OUTCOME …` | 最後一行（第 9 節的表）；掃描模式沒有待處理時是 `OUTCOME success: NO_PENDING` |
@@ -476,7 +486,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | `NOT_FOUND` | `file rejected: no such file in the intake root` | 檔案不存在（含指向不存在目標的符號連結）。確認影片已放進收件目錄、檔名大小寫與子目錄；Docker 確認宿主目錄已掛載 |
 | `UNREADABLE` | `file rejected: the file cannot be read` | Engine 帳號讀不到：宿主上檔案要對 other 可讀（`o+r`，目錄 `o+rx`） |
 | `CONFIGURATION` | `TRANSCRIBE_INTAKE_ROOT is not set`／`… is not an existing, readable directory`；`RUNLINE_VAD_MODEL is not set`／`… is not an existing, readable file`；`<參數名稱> must be …`；`TRANSCRIBE_WORK_DIR is not an existing, writable directory`（在 `cleanup`）；`llmModel names a model that the llm resource does not list`（`polishModel`、`verifyModel`、`translateModel` 同，在 `polish`）；`the llm resource cannot be used: ENDPOINT_NOT_ENABLED`／`MODEL_NOT_ALLOWED`／`DENIED`／`REQUEST_REJECTED (HTTP 404)`／`REQUEST_TOO_LARGE`／`PARAMETER_LOCKED`／`SECRET_UNAVAILABLE`… | 第 3 節（環境變數）、第 6.1 節（參數）、第 5.1 節（資源）。資源本身的問題與服務回的 401、403、404（金鑰被拒、模型或端點不存在）不重試也不降級，run 立即失敗，轉錄與各對話階段一致；失敗發生的階段是第一次用到該能力的階段（`ENDPOINT_NOT_ENABLED` 在 `transcription`，`MODEL_NOT_ALLOWED` 與 404 在使用該模型的第一個階段）。模型不在服務的清單內由潤飾開始前的檢查發現，訊息只有參數名稱：對照 `GET <baseUrl>/models`，修正該參數 |
-| `EXPORT_DIRECTORY_NOT_WRITABLE`（`intake`；`export` 前的再檢查也可能出現） | `subtitle files: the directory of the video cannot be written to` | Engine 帳號對**影片所在目錄**沒有寫入權限。Docker：宿主目錄要讓 uid 10001 可寫，掛載不可是唯讀；systemd：目錄要讓 `runline` 可寫。run 在 `intake` 就失敗，不做轉錄。以 root 執行時這項檢查可能不成立（不要以 root 執行 Engine） |
+| `EXPORT_DIRECTORY_NOT_WRITABLE`（`intake`；`export` 前的再檢查也可能出現） | `subtitle files: the directory of the video cannot be written to` | Engine 帳號對**影片所在目錄**沒有寫入權限。Docker：宿主目錄要讓 Engine 的 uid 可寫（規則見 04-deployment），掛載不可是唯讀；systemd：目錄要讓 `runline` 可寫。run 在 `intake` 就失敗，不做轉錄。以 root 執行時這項檢查可能不成立（不要以 root 執行 Engine） |
 | `EXPORT_OUTSIDE_ROOT` | `subtitle files: the directory of the video is outside the intake root` | 影片所在目錄解析後（含符號連結）在收件根目錄之外。移除或修正符號連結 |
 | `EXPORT_TARGET_NOT_REGULAR_FILE` | `subtitle files: a subtitle file name is taken by something that is not a file` | 影片旁邊有同名（`名稱_zh-TW.srt` 或 `名稱_<兩到三個小寫英文字母>.srt`）的目錄或符號連結。移除後重送 |
 | `EXPORT_WRITE_FAILED`（`export`） | `subtitle files: the files could not be written` | 磁碟滿、檔名過長，或權限在 run 中途改變。資料庫的 `result` 已保存：從資料庫導出（第 9 節），解決後重送 |
@@ -501,6 +511,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 兩份 SRT 的條目比影片的句子少 | 無語音的條目（轉錄為空）不輸出；VAD 參數決定切分，`segmentation` 的 `a`／`b` 與 `transcription` 的 `noSpeech` 說明 |
 | 翻譯文字與來源文字相同 | 來源語言已是繁體中文（不送翻譯，不降級），或該組降級（`translate` 的 `exchange.outcome` 為 `fallback`） |
 | 時間不準 | 字幕條目的時間是 VAD 判定的語音區間，不是模型給的；VAD 參數見 README |
+| 大量 `TRUNCATED`（log 的 `… failed: TRUNCATED`、`… DEGRADED … TRUNCATED`，或階段結果行的 `truncated=N` 不是 0；意義見第 10、11 節） | **原因**：`llm` 資源 `settings.defaults` 的 `max_tokens` 太小。thinking 模型把額度用在推理上，答案尚未開始就用完，回空字串並帶 `finish_reason=length`（不是錯誤，也不是格式錯誤）。**處置**：調高該資源 `defaults` 的 `max_tokens`（第 5.1 節），或把 `llmThinking` 設為 `off`（及 `polishThinking`、`verifyThinking`、`translateThinking`；對真實 Lemonade 是否生效未驗證，第 17 節第 5 項），然後重送。**查詢**：被截斷的呼叫是表 `exchange` 中 `finish_reason = 'length'` 者，依 `run_id` 對 `stage`、`outcome` 分組計數可知哪個階段、有多少次最後降級（`fallback`）；`stage`、`target`、`target_seq` 指出是哪一個單位。結構版本 4 之前的呼叫 `finish_reason` 為空 |
 
 ### 15.4 資源與主機
 
@@ -516,7 +527,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 
 | 現象 | 原因與處置 |
 |---|---|
-| 每次都是 `NO_PENDING`，但目錄裡有影片 | 看該 run log 的 `SCAN` 一行（第 11 節），哪個排除計數吃掉了影片：`tooNew`（還在複製或修改時間太新，等 `scanMinAgeSeconds` 過去）、`extension`（副檔名不在 `scanExtensions`；`.srt` 與其他非影片檔也算在這裡，所以此計數常常不是 0）、`hasSubtitle`（已有 `_zh-TW.srt`；重做見第 6.3 節）、`unwritable`（Engine 帳號對該目錄沒有寫入權限；Docker 是 uid 10001，第 2.2 節）、`attemptsExhausted`（失敗達 `scanMaxAttempts`：用 `run` 表查該檔案的失敗分類（第 9 節），修好後取代或修改該檔案，或調高 `scanMaxAttempts`）、`symlink`、`hidden`（符號連結與點開頭的路徑不掃描）、`other`（非一般檔案，例如 FIFO） |
+| 每次都是 `NO_PENDING`，但目錄裡有影片 | 看該 run log 的 `SCAN` 一行（第 11 節），哪個排除計數吃掉了影片：`tooNew`（還在複製或修改時間太新，等 `scanMinAgeSeconds` 過去）、`extension`（副檔名不在 `scanExtensions`；`.srt` 與其他非影片檔也算在這裡，所以此計數常常不是 0）、`hasSubtitle`（已有 `_zh-TW.srt`；重做見第 6.3 節）、`unwritable`（Engine 帳號對該目錄沒有寫入權限；Docker 的 uid 見第 2.2 節）、`attemptsExhausted`（失敗達 `scanMaxAttempts`：用 `run` 表查該檔案的失敗分類（第 9 節），修好後取代或修改該檔案，或調高 `scanMaxAttempts`）、`symlink`、`hidden`（符號連結與點開頭的路徑不掃描）、`other`（非一般檔案，例如 FIFO） |
 | `SCAN` 顯示 `inspected=0` | 收件根目錄是空的，或 `TRANSCRIBE_INTAKE_ROOT` 指向別處（第 3 節） |
 | `truncated=true` | 收件根目錄下的項目超過 10000 個，掃描以已檢視的為準；把處理過的影片移出收件根目錄 |
 | 同一部影片被處理兩次 | 先確認 `llm` 資源的容量是 1（第 5.1 節）；其次是它的 `_zh-TW.srt` 被刪除或搬走 |
@@ -544,12 +555,13 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 設定類錯誤與模型清單檢查、最後一格畫面、`TRANSCRIBE_WORK_DIR`（含不合法值）、VAD 暫存目錄、媒體失敗的 `OUTCOME` 分類 | 以 devkit 的 JVM 驗證，不是打包的 Engine：401、403、404 在轉錄與四個對話階段各自立即 `CONFIGURATION` 失敗且不重試，5xx 仍重試與降級；`llmModel`、`polishModel`、`verifyModel`、`translateModel` 不在清單內於潤飾開始前失敗，清單取不到（500、403、404、端點未啟用、空清單）略過；清單以檔案路徑回報的模型（ADR-028）通過；語音延伸到結尾的樣本（每秒 1 格、語音到檔案結尾）不降級；`TRANSCRIBE_WORK_DIR` 的建立、清理、不存在、是檔案、相對路徑、不可寫；VAD 工具的暫存目錄在工作目錄內，系統暫存區沒有新的 `onnxruntime-java*`；六種媒體失敗的 `OUTCOME` 分類（無音訊、損毀、過長、工具缺少以 run 驗證，工具失敗與逾時以分類的單元測試驗證） |
 | 參數值含 U+0000：webhook 與手動 run 回 400、不建立 run、不消耗識別碼、無 ERROR log；`jdbc-statement` 執行緒不再屬於 run 的 class loader | 以 Engine 的測試驗證（真實 PostgreSQL，真實 SQLite 檔），未在打包的 Engine 上重跑 |
 | Console 的 trigger 表單（呼叫端提供的參數）：單元、契約（真實 Engine）、e2e（真實 Engine 與 Chrome） | 通過；`dev/verify-console-security.sh` 通過 |
-| Console 的 view（WI-1422）：打包的 Engine，上傳驗證通過，`runs`、`run-stages`、`degradations`、`entries`、`result` 五個 view 各實際讀取至少一次 | 通過；資料與資料庫相符。**未驗證**：Console 畫面（只驗證 Engine 的讀取，沒有以瀏覽器看表格）；結構版本 2 的資料庫經 Engine 升級到 3（只有 `runline-transcribe` 的單元測試涵蓋）。結構目前為版本 3 |
+| Console 的 view（WI-1422）：打包的 Engine，上傳驗證通過，`runs`、`run-stages`、`degradations`、`entries`、`result` 五個 view 各實際讀取至少一次 | 通過；資料與資料庫相符。**未驗證**：Console 畫面（只驗證 Engine 的讀取，沒有以瀏覽器看表格）；結構版本 2 的資料庫經 Engine 升級到 3（只有 `runline-transcribe` 的單元測試涵蓋）。結構目前為版本 4 |
 | 設定缺漏：VAD 命令、VAD jar、模型檔、收件根目錄、`PATH` 無 ffmpeg；資源缺端點、模型不在 `allowedModels`、模型服務連不上；參數不合法 | 失敗訊息如第 15 節 |
 | Docker：`transcribe` 映像與 `browser-transcribe` 合用映像，`runline-transcribe-check` 通過、完整 run、容器內的負向案例與取消 | 通過；合用映像只跑短與長兩個 run |
 | 字幕檔輸出（WI-1420）：檔名、語系、位元組相同、原子換名、目錄不可寫與同名目錄的拒絕、降級與取消不寫檔 | 以 devkit 的 JVM 驗證（真實檔案系統與 SQLite、`FakeOpenAiServer`）；打包的 Engine 上只重跑了「檔名、語系、位元組相同」（cron 掃描與 webhook 的 run，見下方 cron 掃描列），其餘項目未在打包的 Engine 上逐項重跑 |
 | 收件根目錄可寫與唯讀掛載（WI-1421）：Docker `transcribe` 映像內的真實 Engine，`FakeOpenAiServer` 作模型服務 | 可寫掛載：run `success-degraded`（降級是最後一格畫面無法取出，與本項無關），影片旁出現 `movie_en.srt`、`movie_zh-TW.srt`（`rw-r--r--`），與 `result` 逐位元組相同，`stage` 有 `export`（輸入 2、輸出 2）；唯讀掛載：`runline-transcribe-check` 失敗並指出缺什麼，run 在 `intake` 以 `EXPORT_DIRECTORY_NOT_WRITABLE` 失敗，沒有檔案寫出 |
 | cron 掃描（WI-1423、WI-1424）：打包的 Engine（`engine.jar` 的現有產物），PostgreSQL 17 容器，Engine 以主機行程執行；真實 cron trigger（`* * * * *`，UTC，不設 `file`），可寫的收件目錄，`FakeOpenAiServer` 作模型服務，macOS `say` 合成的 8.3 秒影片（3 個條目） | 通過。**(1) 篩選與序列化**：目錄有兩部符合的影片（`lectures/one.mp4`、`two.MKV`，修改時間在過去）、一部太新的、一部已有 `done_zh-TW.srt` 的、一部 `.avi`：第 1、2 次觸發各處理一部（依修改時間由舊到新），各得 `_en.srt` 與 `_zh-TW.srt`（與 `result` 逐位元組相同；12 階段，`export` 的 `files=2`）；`SCAN` 行先是 `candidates=2`（`extension=2 tooNew=1 hasSubtitle=1`），再是 `candidates=1`；第 3 次觸發 `inspected=10 candidates=0`，`OUTCOME success: NO_PENDING`，Engine `SUCCEEDED`，`run.result_note` 為 `NO_PENDING`，沒有寫出任何檔案。**(2) 失敗上限**：一部沒有音訊的影片（修改時間最舊）連續 3 次觸發各以 `MEDIA_NO_AUDIO` 失敗，第 4 次觸發改處理另一部影片並成功，第 5 次 `NO_PENDING`（`attemptsExhausted=1`）；修改該檔案的修改時間後，下一次觸發又選到它（重新計數）。**(3) 重疊**：兩個 cron trigger 同一分鐘到點、兩部影片、模型服務每次呼叫延遲 4 秒（一個 run 約 66 秒）：一個 run 取得資源，另一個 `WAITING_FOR_RESOURCES`；前者結束後後者才開始並選到另一部影片（`v1.mp4`、`v2.mp4` 各處理一次，沒有重複）；下一分鐘到點的兩個 run 依序取得資源，各得 `NO_PENDING`。另：手動 run 省略 `file` 進入掃描模式；`callerParameters` 為 `["file"]` 的 webhook trigger 帶 `{}` 或 `{"file":""}` 得 202 並進入掃描模式，帶 `{"file":" "}` 的 run 以 `INVALID_NAME` 失敗；沒有列 `file` 的 webhook trigger 忽略本文並掃描；cron trigger 設 `callerParameters` 得 422 `caller_parameters_not_allowed` |
+| 被截斷的回答（WI-1426）：`finish_reason` 的讀取與記錄（`exchange.finish_reason`）、`TRUNCATED` 的重試與降級、`truncated=N` 計數 | 以 `FakeOpenAiServer` 驗證三種情境，各有不同的處置：空字串加 `length`、部分文字加 `length`（兩者都不採用，重試，用盡後降級並留下 `TRUNCATED`）、正常文字加 `stop`（採用，行為不變）；既有測試維持通過。不是打包的 Engine，也不是真實 Lemonade |
 | 部署檔：檢查腳本的工作目錄判定與收件根目錄可寫判定、`runline-vad` 包裝腳本傳遞 `JDK_JAVA_OPTIONS` | 腳本層測試通過（含突變驗證）；未在真實映像與 systemd 下實跑 |
 
 ### 16.2 未驗證
@@ -557,6 +569,7 @@ RESULT 7/12 transcription: segments transcribed; entries=389 speech=389 noSpeech
 | 項目 | 原因 |
 |---|---|
 | **真實 Lemonade 的全部行為** | 沒有可連的服務；見第 17 節 |
+| **真實 Lemonade 的 `length` 情境**：thinking 模型在 `max_tokens` 不足時是否確實回空字串加 `finish_reason=length`（而不是其他欄位或其他值）、`TRUNCATED` 在真實輸出上的比例、調高 `max_tokens` 或 `llmThinking=off` 後是否消失 | `FakeOpenAiServer` 的回答是依 OpenAI 相容格式預先給定的；不確定真實 Lemonade 是否回報 `finish_reason`（第 17 節第 5 項的 thinking 觀察可一併確認） |
 | LLM 階段的耗時、容量估算（07）中依賴真實 Lemonade 的數字 | 同上，維持待量測 |
 | 真實素材的畫面擷取成本、請求大小（真實 1080p 影片 6 張 512 px 縮圖） | 樣本是 320×240 的合成畫面 |
 | 6 小時上限附近的影片、數十小時的 run、記憶體與磁碟壓力 | 時間；樣本最長 32 分鐘 |

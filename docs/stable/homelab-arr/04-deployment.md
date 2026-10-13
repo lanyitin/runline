@@ -28,6 +28,7 @@
 ## 映像檔
 
 - 在筆電對 `linux/amd64` 交叉建置瀏覽器版（Chrome 只有 amd64；arm64 筆電須模擬）並推到 Forgejo registry；Chrome 版本固定。tag 使用不可變的版本識別（commit），不使用浮動的 `latest`，使回滾與稽核可行。
+- arr 使用 `browser-transcribe` 映像（`<registry>/runline-engine-browser-transcribe:<tag>`，Chrome 加 ffmpeg 與 VAD 工具，供同一個 Engine 跑 digest-rss 與 transcribe）；單獨需要 Chrome 的環境仍可用 `browser` 映像（`runline-engine-browser`）。兩個映像由 `deploy/publish-image --stage <階段>` 建置，推送 `v*` tag 時 Forgejo workflow 以相同的 commit 與額外 tag 一起推送（WI-1104，細節見 [deploy/browser.md](../../../deploy/browser.md)）。
 - arr 的 compose 以明確 tag 引用；升級＝建置新 tag、推送、更新 tag、apply、確認容器真的重啟（apply 成功不等於容器已重啟，須檢查單元結果與執行中的映像檔 tag）。
 - 映像檔不含密鑰與組態，維持 pipeline-engine 現行規則。
 
@@ -36,7 +37,7 @@
 - 持久目錄放在 `/data/appdata/runline/` 下的 postgres-data、shared、resources（bind mount，`/data` 為 hdd 上的 ZFS 卷）。
 - arr 的 Docker 沒有 userns-remap，容器內 uid N 就是 arr 內的 uid N，不需換算。擁有者的準備方式：
   - postgres-data：不預建，由 postgres 容器首次啟動自行建立並擁有（同 arr 上 metatube-postgres 的做法）。
-  - shared、resources：由 compose 內一次性的 root 初始化容器建立 `/data/appdata/runline` 與這兩個目錄，並把這兩個目錄（不遞迴）的擁有者設為 Engine 的帳號（uid 10001）；engine 在它成功完成後才啟動（同 arr 上 rqbit 的做法）。不在 cloud-init 做，因為它只在首次開機執行。
+  - shared、resources：由 compose 內一次性的 root 初始化容器建立 `/data/appdata/runline` 與這兩個目錄，並把這兩個目錄（不遞迴）的擁有者設為 Engine 執行的 uid:gid（arr 用 1000:1000，與 `/data/media` 的擁有者一致，見 [ADR-041](adr/ADR-041-engine-image-arbitrary-uid.md)；映像本身預設 10001，由 compose 的 `user: "1000:1000"` 覆寫）；engine 在它成功完成後才啟動（同 arr 上 rqbit 的做法）。不在 cloud-init 做，因為它只在首次開機執行。
 - 首版不備份（已接受）：postgres 的 jar、定義與 run 紀錄，以及 resources 的檔案，在磁碟毀損時遺失。resources 與 postgres 在 pipeline-engine 的規則下視為資料，所以這是明確承擔的風險，不是預設。
 - shared 視為可重建的快取。
 

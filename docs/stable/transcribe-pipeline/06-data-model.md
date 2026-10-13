@@ -25,7 +25,7 @@ erDiagram
 | STAGE | 階段名稱、狀態、起訖時間、計數（輸入與輸出筆數、失敗、降級）、失敗原因 |
 | SEGMENT_A / SEGMENT_B | 起訖秒、序號；B 指向所屬 A；B 另記是否由 A 原樣沿用 |
 | ENTRY_TEXT | 每個 B 條目在各階段的文字：轉錄、潤飾、核對、翻譯；核對另記畫面時間點（秒，每張一筆）與一句畫面觀察，不存圖片 |
-| EXCHANGE | 每次模型呼叫：階段、對象（A 組、B 條目或整個 run）、模型 id（實際回報）、提示與回答文字、耗時、token 用量、結果（成功、重試、失敗、退回；失敗指終局失敗的最後一次嘗試，重試指之後還會再試的失敗嘗試） |
+| EXCHANGE | 每次模型呼叫：階段、對象（A 組、B 條目或整個 run）、模型 id（實際回報）、提示與回答文字、耗時、token 用量、結果（成功、重試、失敗、退回；失敗指終局失敗的最後一次嘗試，重試指之後還會再試的失敗嘗試）、`finish_reason`（回答的結束原因，如 `stop`、`length`；沒有回報者與版本 4 之前的呼叫為空）。結果仍是封閉的四個值：回答因 token 上限被截斷（`finish_reason` 為 `length`）時，原因 `TRUNCATED` 記在 `finish_reason` 與 log，不是結果的值（[runbook](runbook.md) 第 10 節）；轉錄呼叫沒有 `finish_reason` |
 | SUBTITLE_FILE | `export` 階段寫出（或嘗試寫出）的字幕檔，以 RUN 與語系為鍵：語系（檔名中的語系）、收件根目錄下的相對路徑、是否寫出。記錄的是 run 實際做了什麼，Console 的 view 依此回答，不由檔案系統推測；版本 3 之前的 run 沒有 |
 | RESULT | 來源語言標示、來源語言 SRT、繁體中文 SRT、影片摘要。影片旁的兩個字幕檔是這兩份 SRT 的副本（逐位元組相同，[ADR-039](adr/ADR-039-subtitle-files-beside-video.md)），不是新資料；「寫出了哪個檔」的紀錄是 SUBTITLE_FILE，不是 RESULT 的欄位 |
 
@@ -50,7 +50,7 @@ pipeline 的執行環境不提供 Engine 的 run 識別，所以 RUN 不記它�
 
 ## 遷移
 
-只增不改；版本記在資料庫；啟動時由 pipeline 建立或升級，作法沿用 digest-rss（WI-1405 定義）。檔案指紋以追加的遷移加入 RUN，舊的 run 兩欄為空。版本 3 加入表 SUBTITLE_FILE（WI-1422），舊的 run 沒有紀錄。
+只增不改；版本記在資料庫；啟動時由 pipeline 建立或升級，作法沿用 digest-rss（WI-1405 定義）。檔案指紋以追加的遷移加入 RUN，舊的 run 兩欄為空。版本 3 加入表 SUBTITLE_FILE（WI-1422），舊的 run 沒有紀錄。版本 4 為 EXCHANGE 加入 `finish_reason` 欄（WI-1426），舊的呼叫為空。
 
 ## 多租戶
 

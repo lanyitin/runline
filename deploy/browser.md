@@ -32,9 +32,12 @@
 ```
 RUNLINE_REGISTRY=registry.example/owner deploy/publish-image          # 建置並推送
 RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只在本機建置
+RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --stage browser-transcribe   # 發佈另一個階段
 ```
 
-- `RUNLINE_REGISTRY`（環境變數，必填）：registry 位址與路徑，不含 tag、帳密。映像為 `$RUNLINE_REGISTRY/runline-engine-browser:<commit 前 12 碼>`，最後一行輸出印出完整引用。沒有浮動 tag。
+- `--stage <階段>`（選填，WI-1104）：要發佈的 `Dockerfile` 階段，`browser`（預設，行為與沒有此參數時完全相同）或 `browser-transcribe`（Chrome 加 ffmpeg、ffprobe、VAD 工具與模型，見 [transcribe.md](transcribe.md) 的「與瀏覽器並用」）。映像名稱隨階段：`runline-engine-browser` 或 `runline-engine-browser-transcribe`；tag 規則、架構檢查與工作樹檢查兩者相同。其他值在建置之前就被拒絕。arr 用 `browser-transcribe`；單獨需要 Chrome 的環境仍可用 `browser`。
+
+- `RUNLINE_REGISTRY`（環境變數，必填）：registry 位址與路徑，不含 tag、帳密。映像為 `$RUNLINE_REGISTRY/runline-engine-<階段>:<commit 前 12 碼>`（預設階段 `browser` 即 `runline-engine-browser`），最後一行輸出印出完整引用。沒有浮動 tag。
 - `RUNLINE_EXTRA_TAG`（環境變數，選填）：同一映像再加的第二個 tag，例如版本 tag `v1.2.0`。加在 commit tag 之外而非取代，commit tag 先推；拒絕 `latest` 與不合法的 tag，且在建置之前檢查。入口每推一個引用就印一行。
 - 憑證：入口不讀不存。先 `docker login <host>`（密碼由終端機提示或 `--password-stdin`），推送使用該登入。
 - 工作樹有未提交或未追蹤的變更時拒絕推送並說明原因；`--no-push` 仍可建置，tag 為 `<commit>-dirty`。
@@ -42,7 +45,7 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 
 ### 推送 `v*` tag 時由 Forgejo Action 建置（WI-1101、ADR-027）
 
-`.forgejo/workflows/publish-image.yaml` 只在推送符合 `v*` 的 tag 時執行（分支與其他 tag 不觸發），在 runner 上準備 JDK 25、Node（`.node-version`）與 registry 登入後執行同一個 `deploy/publish-image`，並以 `RUNLINE_EXTRA_TAG` 帶入觸發它的 tag。規則只在入口一處，產物與筆電的可互換；它不接觸 arr、不改部署設定，上線仍由維運者手動把 `RUNLINE_IMAGE` 改成新的 tag。
+`.forgejo/workflows/publish-image.yaml` 只在推送符合 `v*` 的 tag 時執行（分支與其他 tag 不觸發），在 runner 上準備 JDK 25、Node（`.node-version`）與 registry 登入後依序對 `browser` 與 `browser-transcribe` 兩個階段執行同一個 `deploy/publish-image`，並以 `RUNLINE_EXTRA_TAG` 帶入觸發它的 tag（兩個映像的 commit tag 與額外 tag 相同）。兩個映像都先以 `--no-push` 建置完才推送，所以任何一個建置失敗時 registry 什麼都沒有；若第二個推送失敗，工作失敗，日誌中第一個推送步驟已印出它推送的引用，重新執行同一個 tag 即補齊。規則只在入口一處，產物與筆電的可互換；它不接觸 arr、不改部署設定，上線仍由維運者手動把 `RUNLINE_IMAGE` 改成新的 tag。
 
 在 Forgejo 的儲存庫設定（Actions）需要：
 
@@ -59,13 +62,14 @@ RUNLINE_REGISTRY=registry.example/owner deploy/publish-image --no-push   # 只�
 | 變數 | 說明 |
 |---|---|
 | `RUNLINE_IMAGE`（必填） | 入口印出的映像引用（含 commit tag） |
+| `RUNLINE_USER` | engine、migrate 執行的 uid:gid，也是 `init` 容器給 `shared`、`resources` 的擁有者；預設 `10001:10001`（映像的帳號）。見 [ADR-041](../docs/stable/homelab-arr/adr/ADR-041-engine-image-arbitrary-uid.md) |
 | `RUNLINE_DATA_DIR`（必填） | 宿主目錄；其下的 `postgres-data`、`shared`、`resources` 是三個持久目錄 |
 | `TRUSTED_CA_FILE`（必填） | 私有 CA 根憑證檔，唯讀掛載為容器內信任目錄中唯一的檔案 |
 | `ENGINE_SHM_SIZE` | engine 的共享記憶體，預設 `1gb` |
 | `ENGINE_MEM_LIMIT`、`ENGINE_CPUS` | engine 的記憶體與 CPU 上限，預設不限 |
 | `GPU_DEVICE`、`RENDER_GROUP_ID` | 只用於 `compose.registry-gpu.yaml`：裝置（預設 `/dev/dri`）與其數字群組（必填） |
 
-行為與 `compose.yaml` 加 `compose.browser.yaml` 相同：migrate 先於 engine、`stop_grace_period` 45s、就緒探測、`init: true`；差異是 engine 不發布連接埠（由同一 Compose 網路上的反向代理連 8080），並多一個一次性的 root 容器 `init`，在 engine 啟動前建立 `shared`、`resources` 並把這兩個目錄（不遞迴）的擁有者設為 uid 10001。`postgres-data` 不預建，由 PostgreSQL 首次啟動時建立。
+行為與 `compose.yaml` 加 `compose.browser.yaml` 相同：migrate 先於 engine、`stop_grace_period` 45s、就緒探測、`init: true`；差異是 engine 不發布連接埠（由同一 Compose 網路上的反向代理連 8080），並多一個一次性的 root 容器 `init`，在 engine 啟動前建立 `shared`、`resources` 並把這兩個目錄（不遞迴）的擁有者設為 `RUNLINE_USER`（預設 `10001:10001`）。`RUNLINE_USER`（選用）同時是 engine 與 migrate 執行的 uid:gid（例如 `1000:1000`），未設時用映像的預設帳號。`postgres-data` 不預建，由 PostgreSQL 首次啟動時建立。
 
 驗證：`deploy/test/publish-test.sh`（不需 daemon）。其餘在 Colima（Rosetta）與本機 `registry:2` 上實測：從乾淨 clone 建置並推送，刪除本機映像後在只有範本、`.env` 與憑證檔的目錄 `docker compose up -d` 拉取並啟動，engine 就緒、`runline-browser-probe` 執行完成、在映像上跑一個 pipeline 確認 Engine 的類別對 run 不可見。**未實測**：amd64 原生的筆電、真實的 Forgejo registry（含認證）、GPU 疊加檔在有 `/dev/dri` 的主機。
 
@@ -122,7 +126,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.ya
 |---|---|
 | 映像 | `Dockerfile` 的 `browser` 階段，建在 `engine` 階段之上（`compose.yaml` 指定 `target: engine`，原本的映像不變）。以 `ARG CHROME_VERSION`（預設 `155.0.8059.39-1`，WI-1000 量測的版本）從 Google 的套件庫安裝 Chrome，另含 Xvfb、`fonts-noto-cjk`、`curl`、`procps`。非 amd64 建置時，建置步驟以說明訊息失敗 |
 | 可重現性 | 映像**不在** WI-32 的位元組級可重現範圍內：那個保證是給 `engine.jar` 等 jar 的，映像只是打包它們。Chrome 以固定版本安裝，基底映像以雜湊固定（見「更新固定的雜湊」），但 apt 的相依套件仍會隨時間改變。發佈建置（`verifyReproducibleRelease`）不受影響 |
-| 帳號 | 與 Engine 相同的 `runline`（uid 10001）。Chrome 在容器內以 `--no-sandbox` 執行（容器本身是隔離邊界；沙箱需要使用者命名空間，預設的容器沒有）；`HOME=/home/runline` 供 Chrome 放小檔案，不需持久 |
+| 帳號 | 與 Engine 相同：預設 `runline`（uid 10001），可由 `user:` 改為其他 uid:gid，包括 `/etc/passwd` 沒有項目的 uid（ADR-041）。Chrome 在容器內以 `--no-sandbox` 執行（容器本身是隔離邊界；沙箱需要使用者命名空間，預設的容器沒有）；`HOME=/home/runline` 供 Chrome 放小檔案（憑證資料庫、設定），不需持久；該目錄是 root 擁有、1777（sticky），任何 uid 都寫得進去，各 uid 只能動自己建的檔案（位置與理由：[04-deployment-docker](../docs/stable/pipeline-engine/04-deployment-docker.md)「Engine 的帳號」） |
 | 顯示 | `runline-entrypoint` 在 `DISPLAY` 上啟動 Xvfb（`-nolisten tcp`）。Xvfb 以子殼層啟動，由 init 接手，不是 JVM 的子行程。容器重啟（`docker restart`）時先清掉上次留下的鎖檔（實測：重啟後顯示正常出現）。顯示沒有在 10 秒內出現時只在 log 警告，Engine 照常啟動 |
 | init | `compose.browser.yaml` 設 `init: true`：PID 1 是 Docker 的 init（tini），回收被取消而遺留的 Chrome 輔助行程。Java 為 PID 1 時它們成為殭屍（見「實測」）。`docker run` 要加 `--init` |
 | `/dev/shm` | 預設 64 MiB，Chrome 會不足；映像的 `CHROME_ARGS` 帶 `--disable-dev-shm-usage` 讓它改用 `/tmp`。替代做法是容器設 `shm_size: 1gb` 並拿掉該旗標（未實測） |
@@ -213,10 +217,10 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.ya
 ```
 
 1. 裝置掛載：`devices: - /dev/dri:/dev/dri`。
-2. 讓 Engine 的帳號（uid 10001）能開 render node，兩種方式擇一：
+2. 讓 Engine 的 uid（預設 10001，`user:` 可改）能開 render node，兩種方式擇一：
    - **加入裝置所屬的群組**（建議）：`stat -c %g /dev/dri/renderD128` 得到數字群組，設 `.env` 的 `RENDER_GROUP_ID`；疊加檔以 `group_add` 加入。要數字，因為容器的 `/etc/group` 不認得宿主機的群組名稱。
    - **以 root 執行容器**：把疊加檔的 `group_add` 換成 `user: root`。這放寬整個容器（磁碟區、Chrome）的帳號限制，所以不建議。
-3. 帳號進不了裝置時，探測會說：`/dev/dri=present, not accessible to uid 10001 (give the container the device's group)`（以一個權限為 600 的假 render node 模擬實測了這個訊息；沒有真實裝置）。
+3. 帳號進不了裝置時，探測會說：`/dev/dri=present, not accessible to uid <Engine 的 uid> (give the container the device's group)`（以一個權限為 600 的假 render node 模擬實測了這個訊息；沒有真實裝置）。
 
 ### 主機端（systemd）
 

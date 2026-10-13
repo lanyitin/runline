@@ -6,7 +6,7 @@
 
 ## 規則（要求，不是建議）
 
-1. **金鑰庫密碼只用密碼檔參數提供**：每個 `keytool` 指令用 `-storepass:file <檔案>`（與 `-deststorepass:file`、`-srcstorepass:file`、`-new:file`），不用 `-storepass <密碼>`，也不讓 `keytool` 向終端機詢問後以輸入回顯。密碼檔只有一行（`keytool` 與 Engine 都讀第一行），權限 `0600` 或 `0400`，只有操作的人與服務帳號（見平台指南）讀得到。理由：命令列參數會出現在行程清單與 shell 歷史。
+1. **金鑰庫密碼只用密碼檔參數提供**：每個 `keytool` 指令用 `-storepass:file <檔案>`（與 `-deststorepass:file`、`-srcstorepass:file`、`-new:file`），不用 `-storepass <密碼>`，也不讓 `keytool` 向終端機詢問後以輸入回顯。密碼檔只有一行（`keytool` 與 Engine 都讀第一行），權限 `0600` 或 `0400`，只有操作的人與服務帳號（見平台指南；Docker 是 Engine 執行的 uid，預設 10001，可由 `user:` 改為其他 uid，[ADR-041](../docs/stable/homelab-arr/adr/ADR-041-engine-image-arbitrary-uid.md)）讀得到。換 uid 時請重建容器，不要沿用舊的可寫層（舊 uid 建立的檔案換 uid 後可能寫不進去）。理由：命令列參數會出現在行程清單與 shell 歷史。
 2. **機密的值從標準輸入以管線提供**，不寫在命令列。用 shell 內建的 `printf` 不會在行程清單出現；要互動輸入時用 `read -rs`：
    ```
    read -rs SECRET; printf '%s\n' "$SECRET" | keytool -importpass ...; unset SECRET

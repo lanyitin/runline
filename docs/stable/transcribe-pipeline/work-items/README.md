@@ -33,6 +33,10 @@
 | [WI-1423](WI-1423-cron-scan.md) | T | cron 掃描模式：`file` 為空時挑一部尚未產生字幕的影片處理（[ADR-040](../adr/ADR-040-cron-scan-mode.md)） | WI-1420 | 已完成（2026-10-12；第 10 條重疊 run 的實機驗證在 WI-1424） |
 | [WI-1424](WI-1424-cron-scan-docs.md) | R | cron 掃描的文件、trigger 設定與實機驗證 | WI-1423、WI-1421 | 已完成（2026-10-12；打包的 Engine 與真實 cron trigger 驗證篩選、失敗上限與重疊 run，模型服務為 FakeOpenAiServer，真實 Lemonade 未驗證） |
 
+| [WI-1426](WI-1426-finish-reason-length.md) | T | 模型因 token 上限被截斷（`finish_reason=length`）時，明確辨識、記錄並以專用原因重試與降級 | 無 | 已完成（2026-10-12；結構版本 4；runbook 與資料模型見 WI-1427） |
+
+| [WI-1427](WI-1427-runbook-truncated.md) | R | runbook 與資料模型補上 `TRUNCATED`、`truncated=N` 與 `exchange.finish_reason`（結構版本 4） | WI-1426 | 已完成（2026-10-12；真實 Lemonade 的 `length` 情境未驗證） |
+
 派工順序：WI-1420 → WI-1421 → WI-1423 → WI-1424 → WI-1422，一次派一項。WI-1422 放最後，使 `runs` view 涵蓋「無待處理」的 run 與檔案指紋。
 
 ```mermaid

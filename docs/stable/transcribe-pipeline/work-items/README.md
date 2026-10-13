@@ -58,7 +58,7 @@
 
 | [WI-1439](WI-1439-dual-vad-combination.md) | T | 兩個 VAD 機率以 0.1 秒格子加權（0.3／0.7）合併並分段 | WI-1438、WI-1434、WI-1435 | 已取代，不派工（同 WI-1438） |
 | [WI-1440](WI-1440-denoise-before-vad.md) | T | VAD 前以 DeepFilterNet3 降噪（[ADR-046](../adr/ADR-046-denoise-before-vad.md)） | WI-1434、WI-1435 | 已完成（2026-10-13；結構版本 9；新參數 `denoise`、`denoiseAttenLimitDb`；驗收 7 以 `~/fixtures/dfn/` 的固定資料驗證：37 段、涵蓋 20.46%、邊界差 0.0 秒；測試需設環境變數 `TRANSCRIBE_DFN_FIXTURES`，未設則該 4 個測試失敗；主模組 979＋vad 36＝1015 個測試、16 個略過、0 失敗，由架構師加總結果檔；Linux 容器內的 wrapper、雜湊檢查與 arr run 未驗證；文件待補） |
-| [WI-1441](WI-1441-sweep-window-failure-degrades.md) | T | 補掃窗口轉錄失敗時降級（略過、計數、可查），不讓 run 失敗 | WI-1436 | 待派工（在 WI-1440 之後） |
+| [WI-1441](WI-1441-sweep-window-failure-degrades.md) | T | 補掃窗口轉錄失敗時降級（略過、計數、可查），不讓 run 失敗 | WI-1436 | 已完成（2026-10-13；結構版本 10，`sweep_window` 新增 `failure` 欄；新計數 `sweepFailed`；主模組 993＋vad 36＝1029 個測試、16 個略過、0 失敗，由架構師加總結果檔；失敗窗口是否計入 `degraded` 待決定；文件待補） |
 | [WI-1442](WI-1442-docs-alignment-wi1432-1440.md) | R、T | 文件對齊：WI-1432 至 WI-1441 的行為寫進入口、runbook、資料模型、IPC、部署與相關 ADR | WI-1440、WI-1441 | 待派工（在 WI-1441 之後） |
 
 派工順序：WI-1420 → WI-1421 → WI-1423 → WI-1424 → WI-1422，一次派一項。WI-1422 放最後，使 `runs` view 涵蓋「無待處理」的 run 與檔案指紋。

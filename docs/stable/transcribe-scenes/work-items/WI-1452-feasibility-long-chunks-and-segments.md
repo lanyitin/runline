@@ -1,6 +1,6 @@
 # WI-1452 可行性關卡：長片段轉錄與場景片段的成本
 
-本文回答：30 秒片段的轉錄是否比現行短段好、請求是否在上限內；場景片段附圖的潤飾要多久、換人標記準不準。狀態：已核可（2026-10-14）。相依：無。決策見 [ADR-051](../adr/ADR-051-long-chunks-and-forced-alignment.md)、[ADR-052](../adr/ADR-052-scenes-as-llm-units.md)、[ADR-053](../adr/ADR-053-polish-with-frames-and-speaker-turns.md)。儲存庫：T（量測工具與報告）。量測在 arr 與真實 Lemonade 上進行，由使用者或 homelab-deployer 執行。
+本文回答：30 秒片段的轉錄是否比現行短段好、請求是否在上限內；場景片段附圖的潤飾要多久、換人標記準不準。狀態：已核可（2026-10-14）。相依：無；轉錄的量測依賴 WI-1461。決策見 [ADR-051](../adr/ADR-051-long-chunks-and-forced-alignment.md)、[ADR-052](../adr/ADR-052-scenes-as-llm-units.md)、[ADR-053](../adr/ADR-053-polish-with-frames-and-speaker-turns.md)。儲存庫：T（量測工具與報告）。量測在 arr 與真實 Lemonade 上進行，由使用者或 homelab-deployer 執行。
 
 ## 行為與驗收條件
 
@@ -9,7 +9,7 @@
    - 單次耗時；
    - 人工抽查至少 30 句的錯字與斷句錯誤數；
    - 整段無語音或雜音部分的幻覺句數。
-2. **場景片段潤飾的成本**：取 10 個約 12 秒的片段，各以 4、8、12 張畫面（長邊 512）附上條目送 gemma4（thinking 關），記錄：
+2. **場景片段潤飾的成本**：取 10 個約 12 秒的片段，各以 4、6、8 張畫面（長邊 512）附上條目送 gemma4（thinking 關），記錄：
    - 請求大小、單次耗時、prompt 與 completion token；
    - 回答是否守住條目、序號、時間與行數；
    - 以此推算一小時影片的潤飾、片段摘要、翻譯總時間，與 3 小時目標比較。

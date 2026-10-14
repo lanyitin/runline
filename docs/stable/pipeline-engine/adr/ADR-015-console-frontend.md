@@ -108,3 +108,4 @@ Engine 原本只有 HTTP API，沒有操作介面。使用者決定做一個給�
 - 管理員與開發人員的 Bearer token 會輸入到瀏覽器，傳輸機密性（TLS 終止於入口）從「建議」變成實質必要，見 [ADR-017](ADR-017-console-websocket-and-token.md) 與 [07](../07-nfr-risks.md)。
 - ADR-012 的「免認證端點」清單擴充；其「新增端點預設需要認證」原則不變。
 - 實作拆為 [WI-30](../work-items/WI-30-node-toolchain.md)（Node 工具鏈）、[WI-31](../work-items/WI-31-frontend-build-and-static-serving.md)（建置接線與靜態檔）與 [WI-33](../work-items/WI-33-console-shell-and-i18n.md)（骨架與多語系）。
+- Console 在手機上的版面與驗證標準見 [ADR-048](../../console-responsive/adr/ADR-048-responsive-console.md)。

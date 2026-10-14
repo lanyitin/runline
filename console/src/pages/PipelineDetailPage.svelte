@@ -170,24 +170,26 @@
         {#if pipeline.metadata.parameters.length === 0}
           <p>{i18n.t('pipeline.params.none')}</p>
         {:else}
-          <table class="rl-table">
-            <thead>
-              <tr>
-                <th scope="col">{i18n.t('pipeline.param.name')}</th>
-                <th scope="col">{i18n.t('pipeline.param.required')}</th>
-                <th scope="col">{i18n.t('pipeline.param.default')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each pipeline.metadata.parameters as parameter (parameter.name)}
+          <div class="rl-scroll-x">
+            <table class="rl-table rl-sticky-first">
+              <thead>
                 <tr>
-                  <td><PlainText value={parameter.name} mono /></td>
-                  <td>{parameter.required ? i18n.t('pipeline.param.required') : i18n.t('pipeline.param.optional')}</td>
-                  <td>{#if parameter.default !== null}<PlainText value={parameter.default} mono />{/if}</td>
+                  <th scope="col">{i18n.t('pipeline.param.name')}</th>
+                  <th scope="col">{i18n.t('pipeline.param.required')}</th>
+                  <th scope="col">{i18n.t('pipeline.param.default')}</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each pipeline.metadata.parameters as parameter (parameter.name)}
+                  <tr>
+                    <td><PlainText value={parameter.name} mono /></td>
+                    <td>{parameter.required ? i18n.t('pipeline.param.required') : i18n.t('pipeline.param.optional')}</td>
+                    <td>{#if parameter.default !== null}<PlainText value={parameter.default} mono />{/if}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         {/if}
       </section>
 

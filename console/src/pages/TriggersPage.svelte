@@ -123,7 +123,7 @@
     </div>
   {:else}
     <div class="rl-table-wrap">
-      <table class="rl-table">
+      <table class="rl-table rl-sticky-first">
         <thead>
           <tr>
             <th scope="col">{i18n.t('triggers.col.name')}</th>

@@ -18,7 +18,7 @@
   const { i18n } = useApp();
 </script>
 
-<nav aria-label={i18n.t('topbar.breadcrumb')}>
+<nav class="crumbs" aria-label={i18n.t('topbar.breadcrumb')}>
   <ol>
     {#each crumbs as crumb, index (index)}
       <li>

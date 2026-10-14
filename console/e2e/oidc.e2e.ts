@@ -19,7 +19,17 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { describeAuthMethodsContract, describeOidcSessionContract } from '../contract/auth-contract';
 import { parseCallers } from '../contract/system-contract';
 import { describeUsersContract } from '../contract/users-contract';
-import { launchChrome, newContext, sessionContent, violations } from './browser';
+import {
+  PHONE_360,
+  PHONE_390,
+  WIDEST_NARROW,
+  horizontalOverflow,
+  launchChrome,
+  newContext,
+  sessionContent,
+  violations,
+} from './browser';
+import { dialogIn, trouble } from './phone';
 
 const engineUrl = process.env.E2E_OIDC_ENGINE_URL;
 if (!engineUrl) {
@@ -78,8 +88,8 @@ async function providerAdmin(path: string, init: RequestInit = {}) {
 }
 
 let counter = 0;
-async function makePerson(groups: string[]): Promise<Person> {
-  const username = `e2e${Date.now().toString(36)}${counter++}`;
+async function makePerson(groups: string[], suffix = ''): Promise<Person> {
+  const username = `e2e${Date.now().toString(36)}${counter++}${suffix}`;
   const password = `pw-${username}`;
   const created = await providerAdmin('/users', {
     method: 'POST',
@@ -132,7 +142,8 @@ async function signedInWithProvider(context: BrowserContext, who: Person, path =
   await page.goto(`${engineUrl}${path}`);
   await signInLink(page).click();
   await atProvider(page, who);
-  await page.locator('aside nav').waitFor({ timeout: 20_000 });
+  // Attached, not visible: on a phone the navigation is a drawer that is closed.
+  await page.locator('aside nav').waitFor({ state: 'attached', timeout: 20_000 });
   return { page, errors };
 }
 
@@ -426,6 +437,56 @@ describe('the administration of users in the Console', () => {
   });
 });
 
+// WI-63 (ADR-048): the same administration on a phone. The sign-in with the provider, the page of the
+// users (a name without a space is the longest thing it shows), the dialog of the sessions of a
+// person and the questions of disabling one are in the window, and the page does not scroll sideways.
+describe.each([
+  ['360px', PHONE_360],
+  ['390px', PHONE_390],
+  ['767px', WIDEST_NARROW],
+])('the administration of users on a phone at %s', (_name, viewport) => {
+  test('the sign-in with the provider does not scroll sideways, and its link can be pressed', async () => {
+    const context = await newContext(browser, 'en-US', undefined, viewport);
+    const page = await context.newPage();
+    await page.goto(`${engineUrl}/runs`);
+    await signInLink(page).waitFor();
+
+    expect(await horizontalOverflow(page)).toBe(0);
+    expect(await trouble(page, 'body')).toEqual([]);
+    await context.close();
+  });
+
+  test('the page of users holds its first column, and the sessions and the questions are in the window', async () => {
+    const dana = await makePerson([ADMIN_GROUP]);
+    const eli = await makePerson([DEVELOPER_GROUP], 'long'.repeat(10));
+    const eliContext = await newContext(browser, 'en-US');
+    await signedInWithProvider(eliContext, eli, '/runs');
+    const danaContext = await newContext(browser, 'en-US', undefined, viewport);
+    const { page } = await signedInWithProvider(danaContext, dana, '/users');
+
+    const row = page.locator('table.users tbody tr').filter({ has: page.locator('.name', { hasText: eli.username }) });
+    await row.waitFor();
+    expect(await horizontalOverflow(page)).toBe(0);
+    expect(await trouble(page, 'main')).toEqual([]);
+    const table = page.locator('table.users');
+    expect(await table.evaluate((el) => getComputedStyle(el.querySelector('tbody td')!).position)).toBe('sticky');
+    expect(await table.evaluate((el) => getComputedStyle(el.parentElement!).overflowX)).not.toBe('visible');
+
+    await row.getByRole('button', { name: 'Sessions' }).click();
+    const dialog = await dialogIn(page, viewport);
+    await dialog.locator('tbody tr').first().waitFor();
+    expect(await horizontalOverflow(page)).toBe(0);
+    expect(await trouble(page, '[role=dialog]')).toEqual([]);
+    await dialog.locator('button[aria-label="Close"]').click();
+
+    await row.getByRole('button', { name: 'Disable' }).click();
+    await dialogIn(page, viewport);
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+    await danaContext.close();
+    await eliContext.close();
+  });
+});
+
 // The start of a sign-in is a page the browser is sent to, so when it fails it must come back to
 // the Console with words, not show the Engine's answer (WI-1208, ADR-031).
 describe('the start of a sign-in that fails', () => {
@@ -442,6 +503,22 @@ describe('the start of a sign-in that fails', () => {
     expect(new URL(page.url()).search).toBe('');
     expect(await signInLink(page).count()).toBe(1);
     expect((await context.cookies()).find((c) => c.name === 'runline_session')).toBeUndefined();
+    await context.close();
+  });
+
+  test.each([
+    ['360px', PHONE_360],
+    ['390px', PHONE_390],
+    ['767px', WIDEST_NARROW],
+  ])('the words of the failure fit a phone at %s', async (_name, viewport) => {
+    const context = await newContext(browser, 'en-US', undefined, viewport);
+    const page = await context.newPage();
+    await page.goto(`${unreachableEngineUrl}/runs`);
+    await signInLink(page).click();
+    await page.locator('[data-login-error]').waitFor({ timeout: 20_000 });
+
+    expect(await horizontalOverflow(page)).toBe(0);
+    expect(await trouble(page, 'body')).toEqual([]);
     await context.close();
   });
 

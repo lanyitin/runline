@@ -690,3 +690,14 @@ describe('the data section, in the language', () => {
     expect(text(section(view).querySelector('.view-heading'))).toBe('Orders');
   });
 });
+
+describe('the table of a view on a narrow screen', () => {
+  test('scrolls sideways in a container of its own, with the first column held', async () => {
+    const view = await page({ extra: 'view=orders' });
+    await waitForTable(view);
+
+    const table = section(view).querySelector('table')!;
+    expect(table.classList.contains('rl-sticky-first')).toBe(true);
+    expect(table.closest('.rl-table-wrap')).not.toBeNull();
+  });
+});

@@ -138,7 +138,7 @@
       <button class="rl-btn primary" type="button" onclick={() => (form = {})}>{i18n.t('resources.define')}</button>
     </div>
   {:else}
-    <div class="grid">
+    <div class="grid rl-grid">
       {#each resources as resource (resource.name)}
         <ResourceCard
           {resource}

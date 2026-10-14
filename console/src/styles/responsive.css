@@ -1,0 +1,329 @@
+/* The narrow layout (ADR-048). The Console has two layouts: narrow, a window below 768px, and wide,
+   everything else, which is the layout of the other style sheets and is not changed here. The width
+   is written down once, in the media query below, and nothing else in the Console names it: a
+   component that needs another look on a narrow screen gets its rules in this block, on a class it
+   carries, not a media query of its own.
+
+   The component styles are scoped by Svelte, so a plain class selector here would lose to them by
+   specificity (and by the order of the style sheets); `:root:root` puts every rule above them. */
+
+/* Where you are gives way first when the top bar is full, at any width (a window of 768px has a
+   sidebar and less than 530px for the bar): the crumbs shorten, the bar does not push the page wider. */
+:root:root .crumbs,
+:root:root .crumbs ol,
+:root:root .crumbs li {
+  min-width: 0;
+}
+:root:root .crumbs li > :not(.sep) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A page that is a stack of blocks, and a dialog, are as wide as the window lets them be, at any width
+   (a window of 768px has a sidebar and less than 530px for the page): what is wider than that, a
+   table or a name without a space, stays in its own container and does not stretch the page or the
+   dialog. They look as they did whenever the content fits. */
+:root:root .rl-stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+:root:root .rl-stack > * {
+  min-width: 0;
+}
+:root:root .overlay {
+  grid-template-columns: minmax(0, 1fr);
+}
+:root:root .overlay > [role='dialog'] {
+  min-width: 0;
+}
+:root:root .overlay [role='dialog'] .body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The title of a dialog may be a name without a space: it wraps, and the button that closes the
+   dialog keeps its place at the end of the line. */
+:root:root .overlay [role='dialog'] header h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+:root:root .overlay [role='dialog'] header .close {
+  flex: none;
+}
+
+/* Only a narrow screen has a scrim behind the drawer. */
+.rl-nav-scrim {
+  display: none;
+}
+
+@media (max-width: 767.98px) {
+  /* Navigation: the sidebar is a drawer, out of the way (and out of reach of the keyboard) until the
+     menu button of the top bar opens it. */
+  :root:root aside.sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(var(--sidebar-width), 85vw);
+    height: 100dvh;
+    transform: translateX(-100%);
+    visibility: hidden;
+    /* Closing, it is hidden once it has slid away. */
+    transition:
+      transform var(--motion),
+      visibility 0s linear var(--motion);
+  }
+  :root:root aside.sidebar[data-open='true'] {
+    transform: none;
+    visibility: visible;
+    box-shadow: var(--shadow-popover);
+    /* Opening, it can be used at once: the keyboard goes into it as it opens. */
+    transition: transform var(--motion);
+  }
+  :root:root .rl-nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    padding: 0;
+    border: 0;
+    background: var(--overlay);
+  }
+  body.rl-nav-open {
+    overflow: hidden;
+  }
+
+  /* The top bar: the menu button, where you are (it shortens to fit), the language and the way to
+     sign out. Who is signed in is secondary and is left out; what does not fit one line goes to the next. */
+  :root:root header.topbar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    height: auto;
+    min-height: var(--topbar-height);
+    padding: var(--space-2) var(--space-3);
+  }
+  :root:root header.topbar .menu {
+    display: inline-flex;
+  }
+  :root:root header.topbar .right {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+  :root:root header.topbar .user {
+    display: none;
+  }
+  :root:root .crumbs {
+    flex: 1 1 6rem;
+  }
+  :root:root .crumbs ol {
+    overflow: hidden;
+  }
+  :root:root main {
+    padding: var(--space-4);
+  }
+
+  /* Touch: what is pressed is 44px high at least, and a field has 16px type, below which iOS zooms
+     into it when it gets the keyboard. */
+  :root:root button,
+  :root:root select,
+  :root:root textarea,
+  :root:root input:not([type='checkbox'], [type='radio']) {
+    min-height: 44px;
+  }
+  :root:root button {
+    min-width: 44px;
+  }
+  :root:root input,
+  :root:root select,
+  :root:root textarea {
+    font-size: var(--text-md);
+  }
+  :root:root input[type='checkbox'],
+  :root:root input[type='radio'] {
+    width: 24px;
+    height: 24px;
+  }
+  :root:root label:has(> input[type='checkbox'], > input[type='radio']) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 44px;
+  }
+  :root:root aside.sidebar a.item,
+  :root:root .crumbs a,
+  :root:root .rl-table td a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  :root:root aside.sidebar a.item {
+    display: flex;
+  }
+
+  /* Information pages (WI-62). Content that is wider than a phone stays in its own container and
+     never makes the page scroll sideways: a grid is one column and may shrink, a long word breaks,
+     and what is a table on a wide screen is a column of cards. */
+  :root:root .rl-card,
+  :root:root .rl-page-head > div {
+    min-width: 0;
+  }
+  :root:root .rl-page-head h1 {
+    overflow-wrap: anywhere;
+  }
+  :root:root .rl-dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+  :root:root .rl-dl dt:not(:first-child) {
+    margin-top: var(--space-3);
+  }
+  :root:root .rl-toolbar {
+    align-items: stretch;
+  }
+  :root:root .rl-toolbar > .rl-field,
+  :root:root .rl-toolbar > .live {
+    flex: 1 1 100%;
+  }
+  /* The tick box of the toolbar is in the middle of its 44px, not above the middle by the padding the
+     wide layout gives it to line up with the fields. */
+  :root:root .rl-toolbar > label:has(> input[type='checkbox']) {
+    padding-bottom: 0;
+  }
+  :root:root form.view-params {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  :root:root form.view-params .rl-field {
+    min-width: 0;
+  }
+  :root:root form.view-params .submit {
+    align-self: stretch;
+  }
+
+  /* A line of the log is its facts (number, time, stream), then its text on a row of its own, so that
+     the text has the width of the panel and wraps in it. */
+  :root:root [role='log'] .line {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    gap: 0 var(--space-3);
+  }
+  :root:root [role='log'] .line .text {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  /* A table whose first column is held while the rest scrolls inside its container. */
+  :root:root .rl-sticky-first :is(th, td):first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+    box-shadow: 1px 0 0 var(--border);
+  }
+  :root:root .rl-sticky-first thead th:first-child {
+    z-index: 2;
+    background: var(--bg);
+  }
+  :root:root .rl-sticky-first th[scope='row'] {
+    width: auto;
+    max-width: 10rem;
+    overflow-wrap: anywhere;
+  }
+  /* The held column is a name, and a name is long: it wraps within a width, so that it never takes
+     the window and the columns after it (the actions of the row) can be scrolled into view. */
+  :root:root .rl-sticky-first td:first-child {
+    max-width: 10rem;
+    overflow-wrap: anywhere;
+  }
+
+  /* The lists (runs, pipelines, the runs of the overview): one card for a row. The cells are the
+     same cells; each says which column it is in, with the words of the column; the head of the table
+     is not needed; the link that opens the row covers the card, and the links beside it lie above it. */
+  :root:root .rl-table-wrap:has(> .rl-cards) {
+    overflow: visible;
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+  :root:root .rl-cards,
+  :root:root .rl-cards tbody {
+    display: block;
+    width: 100%;
+  }
+  :root:root .rl-cards thead {
+    display: none;
+  }
+  :root:root .rl-cards tbody tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  :root:root .rl-cards td {
+    display: block;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    border-top: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  :root:root .rl-cards td:first-child,
+  :root:root .rl-cards td.source,
+  :root:root .rl-cards td.actions {
+    grid-column: 1 / -1;
+  }
+  :root:root .rl-cards td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  :root:root .rl-cards a.rl-card-link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+  :root:root .rl-cards td a:not(.rl-card-link) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Administration, forms and dialogs (WI-63). What is made to look like a button is a button (a link,
+     the text of a file chooser): it has 44px as the button has. Cards of resources are one column, and what a card says about a resource
+     (a path, an address) wraps in the card. */
+  :root:root .rl-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* A tick box that is alone in its cell has a label around it to be hit in. */
+  :root:root label.rl-hit {
+    justify-content: center;
+    min-width: 44px;
+  }
+  :root:root .rl-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root:root .resource .settings div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  /* A link beside text keeps its place in the line, and still has 44px to be hit in. */
+  :root:root main a:not(.rl-btn, .rl-card-link, .rl-table a) {
+    position: relative;
+  }
+  :root:root main a:not(.rl-btn, .rl-card-link, .rl-table a)::after {
+    content: '';
+    position: absolute;
+    inset: -12px -4px;
+  }
+}

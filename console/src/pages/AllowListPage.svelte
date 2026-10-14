@@ -122,7 +122,7 @@
         <p class="rl-empty">{i18n.t('allow.noMatch')}</p>
       {:else}
         <div class="rl-table-wrap">
-          <table class="rl-table entries">
+          <table class="rl-table rl-sticky-first entries">
             <thead>
               <tr>
                 <th scope="col">{i18n.t('allow.col.kind')}</th>
@@ -164,7 +164,7 @@
     <section>
       <h2 class="group">{i18n.t('allow.history')}</h2>
       <div class="rl-table-wrap">
-        <table class="rl-table history">
+        <table class="rl-table rl-sticky-first history">
           <thead>
             <tr>
               <th scope="col">{i18n.t('allow.history.col.version')}</th>

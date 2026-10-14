@@ -10,14 +10,26 @@
   // admins marked with a tag in words. The Engine's version stays at the foot.
   interface Props {
     role: Role;
+    id: string;
+    /** On a narrow screen the sidebar is a drawer: this says whether it is open (a modal dialog). */
+    open: boolean;
+    element?: HTMLElement | null;
   }
-  let { role }: Props = $props();
+  let { role, id, open, element = $bindable(null) }: Props = $props();
 
   const { i18n, session } = useApp();
   const groups = $derived(navGroups(role, { oidc: session.oidc !== null }));
 </script>
 
-<aside class="sidebar">
+<aside
+  class="sidebar"
+  {id}
+  bind:this={element}
+  aria-label={i18n.t('nav.drawer')}
+  data-open={open ? 'true' : undefined}
+  role={open ? 'dialog' : undefined}
+  aria-modal={open ? 'true' : undefined}
+>
   <div class="brand">
     <BrandMark />
     <span>Runline</span>

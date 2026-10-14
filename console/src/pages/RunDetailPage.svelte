@@ -183,16 +183,18 @@
       {#if Object.keys(run.parameters).length === 0}
         <p>{i18n.t('run.parameters.none')}</p>
       {:else}
-        <table class="rl-table">
-          <tbody>
-            {#each Object.entries(run.parameters) as [name, value] (name)}
-              <tr>
-                <th scope="row"><PlainText value={name} mono /></th>
-                <td><PlainText value={value} mono multiline /></td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+        <div class="rl-scroll-x">
+          <table class="rl-table rl-sticky-first">
+            <tbody>
+              {#each Object.entries(run.parameters) as [name, value] (name)}
+                <tr>
+                  <th scope="row"><PlainText value={name} mono /></th>
+                  <td><PlainText value={value} mono multiline /></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
     </section>
 

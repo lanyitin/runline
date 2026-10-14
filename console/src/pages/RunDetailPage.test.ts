@@ -510,3 +510,14 @@ describe('cancelling a run', () => {
     expect(t.view.querySelector('button.cancel')).toBeNull();
   });
 });
+
+describe('the page of a run on a narrow screen', () => {
+  test('has the table of parameters in a container of its own that scrolls sideways, with the first column held', async () => {
+    const t = await begin();
+    await t.ready();
+
+    const table = t.view.querySelector('.parameters table')!;
+    expect(table.classList.contains('rl-sticky-first')).toBe(true);
+    expect(table.closest('.rl-scroll-x')).not.toBeNull();
+  });
+});

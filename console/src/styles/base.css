@@ -288,6 +288,7 @@ h3 {
 }
 
 .rl-table-wrap {
+  position: relative;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -308,4 +309,20 @@ h3 {
 /* A modal dialog is open: the page behind it does not scroll. */
 body.rl-modal-open {
   overflow: hidden;
+}
+
+/* Wide content (a table, code, a long string) never makes the page scroll sideways: it scrolls or
+   wraps inside its own container. These two are the shared ways to do it (WI-61); pages use them
+   and do not invent their own. `rl-scroll-x` scrolls the content of the container sideways;
+   `rl-break` lets a long word (a hash, a name, a line of text from the server) break anywhere. */
+.rl-scroll-x {
+  /* Its own containing block: what is placed inside it (text only a screen reader reads) is
+     clipped with the rest, and does not reach past the window. */
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.rl-break {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

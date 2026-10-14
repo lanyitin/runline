@@ -144,7 +144,7 @@
   <legend>{i18n.t('resources.form.openai.parameters')}</legend>
   <span class="rl-help">{i18n.t('resources.form.openai.parameters.help')}</span>
   <div class="rl-table-wrap">
-    <table class="rl-table parameters">
+    <table class="rl-table rl-sticky-first parameters">
       <thead>
         <tr>
           <th>{i18n.t('resources.form.openai.parameter')}</th>
@@ -172,13 +172,15 @@
               />
             </td>
             <td>
-              <input
-                id="openai-locked-{parameter.name}"
-                type="checkbox"
-                aria-label={i18n.t('resources.form.openai.lockedOf', { name: parameter.name })}
-                bind:checked={typed.locked}
-                onchange={() => onchange('openai-parameters')}
-              />
+              <label class="rl-hit">
+                <input
+                  id="openai-locked-{parameter.name}"
+                  type="checkbox"
+                  aria-label={i18n.t('resources.form.openai.lockedOf', { name: parameter.name })}
+                  bind:checked={typed.locked}
+                  onchange={() => onchange('openai-parameters')}
+                />
+              </label>
             </td>
             <td>
               {#if parameter.ceiling}

@@ -10,13 +10,29 @@
   interface Props {
     crumbs: Crumb[];
     identity: Identity;
+    /** The menu button (narrow screens only, styles/responsive.css) and the drawer it opens. */
+    menuControls: string;
+    menuOpen: boolean;
+    ontoggle: () => void;
+    menuButton?: HTMLButtonElement | null;
   }
-  let { crumbs, identity }: Props = $props();
+  let { crumbs, identity, menuControls, menuOpen, ontoggle, menuButton = $bindable(null) }: Props = $props();
 
   const { i18n, session } = useApp();
 </script>
 
 <header class="topbar">
+  <button
+    bind:this={menuButton}
+    class="menu"
+    type="button"
+    aria-label={i18n.t('nav.menu')}
+    aria-expanded={menuOpen}
+    aria-controls={menuControls}
+    onclick={ontoggle}
+  >
+    <span class="bars" aria-hidden="true"></span>
+  </button>
   <Breadcrumb {crumbs} />
   <div class="right">
     <LanguageSwitcher />
@@ -44,6 +60,49 @@
     padding: 0 var(--space-6);
     background: var(--surface);
     border-bottom: 1px solid var(--border);
+  }
+  /* Only the narrow layout has a menu button (styles/responsive.css). */
+  .menu {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .menu:hover {
+    background: var(--surface-subtle);
+  }
+  /* Three bars, drawn by CSS: no image to load. */
+  .bars,
+  .bars::before,
+  .bars::after {
+    display: block;
+    width: 18px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentColor;
+  }
+  .bars {
+    position: relative;
+  }
+  .bars::before,
+  .bars::after {
+    content: '';
+    position: absolute;
+    left: 0;
+  }
+  .bars::before {
+    top: -6px;
+  }
+  .bars::after {
+    top: 6px;
   }
   .right {
     display: flex;

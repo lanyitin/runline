@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createTestApp, type TestApp } from '../../test-support/app';
+import { expectCards } from '../../test-support/cards';
 import { ManualClock, ManualVisibility } from '../../test-support/manual-clock';
 import OverviewPage from './OverviewPage.svelte';
 
@@ -132,5 +133,14 @@ describe('the overview', () => {
     await t.loaded();
     expect(t.tile('今日 run')).toBe('5');
     expect(t.view.textContent).toContain('最近的 run');
+  });
+});
+
+describe('the overview on a narrow screen', () => {
+  test('has the recent runs as the same table, each cell with the name of its column, and one link that covers the card', async () => {
+    const t = await page(mixed);
+    await t.loaded();
+
+    expectCards(t.view.querySelector('table'), ['Run', 'Pipeline', 'State', 'Duration', 'Created']);
   });
 });

@@ -114,7 +114,7 @@
     <p class="rl-empty">{i18n.t('pipelines.noMatch')}</p>
   {:else}
     <div class="rl-table-wrap">
-      <table class="rl-table">
+      <table class="rl-table rl-cards">
         <thead>
           <tr>
             <th scope="col">{i18n.t('pipelines.col.name')}</th>
@@ -129,20 +129,20 @@
         <tbody>
           {#each shown as definition (JSON.stringify([definition.contentHash, definition.uploader, definition.name]))}
             <tr>
-              <td>
+              <td data-label={i18n.t('pipelines.col.name')}>
                 <div class="name">
-                  <Link href={pipelineHref(definition.contentHash, definition.name, definition.uploader)}>
+                  <Link href={pipelineHref(definition.contentHash, definition.name, definition.uploader)} class="rl-card-link">
                     <PlainText value={definition.name} mono />
                   </Link>
                 </div>
                 <div class="class"><PlainText value={definition.className} mono /></div>
               </td>
-              <td><Badge kind="verdict" value={definition.verdict} /></td>
-              <td><span class="hash rl-mono" title={definition.contentHash}>{shortHash(definition.contentHash)}</span></td>
-              <td><PlainText value={definition.uploadedBy} /></td>
-              <td class="rl-nowrap"><Timestamp iso={definition.uploadedAt} /></td>
-              <td><span class="allow-list rl-mono"><PlainText value={definition.allowListVersion} /></span></td>
-              <td class="rl-nowrap">
+              <td data-label={i18n.t('pipelines.col.verdict')}><Badge kind="verdict" value={definition.verdict} /></td>
+              <td data-label={i18n.t('pipelines.col.version')}><span class="hash rl-mono" title={definition.contentHash}>{shortHash(definition.contentHash)}</span></td>
+              <td data-label={i18n.t('pipelines.col.uploader')}><PlainText value={definition.uploadedBy} /></td>
+              <td class="rl-nowrap" data-label={i18n.t('pipelines.col.uploadedAt')}><Timestamp iso={definition.uploadedAt} /></td>
+              <td data-label={i18n.t('pipelines.col.allowList')}><span class="allow-list rl-mono"><PlainText value={definition.allowListVersion} /></span></td>
+              <td class="rl-nowrap actions" data-label={i18n.t('pipelines.col.actions')}>
                 <Link href={pipelineHref(definition.contentHash, definition.name, definition.uploader)}>{i18n.t('pipelines.details')}</Link>
                 ·
                 <Link href={newRunHref(definition.contentHash, definition.name, {}, definition.uploader)}>{i18n.t('pipelines.run')}</Link>

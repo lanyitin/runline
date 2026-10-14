@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createTestApp, type TestApp } from '../../test-support/app';
+import { expectCards } from '../../test-support/cards';
 import { fakeJar } from '../../test-support/fake-jars';
 import PipelinesPage from './PipelinesPage.svelte';
 
@@ -254,4 +255,21 @@ test('the jar of the fake is what the page shows after an upload', async () => {
   );
   const view = app.mount(PipelinesPage);
   await vi.waitFor(() => expect(names(view)).toEqual(['fresh']));
+});
+
+describe('the pipelines page on a narrow screen', () => {
+  test('is the same table, each cell with the name of its column, and one link that covers the card', async () => {
+    const view = await page(two, { identity: root });
+    await loaded(view);
+
+    expectCards(view.querySelector('table'), [
+      'Pipeline',
+      'Verdict',
+      'Version (hash)',
+      'Uploaded by',
+      'Uploaded',
+      'Allow-list',
+      'Actions',
+    ]);
+  });
 });

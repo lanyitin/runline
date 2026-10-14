@@ -2,6 +2,7 @@ import { mount } from 'svelte';
 import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/base.css';
+import './styles/responsive.css';
 import App from './App.svelte';
 import { createEngineApi } from './api/engine-api.ts';
 import { createConnectionMonitor } from './api/connection.svelte.ts';

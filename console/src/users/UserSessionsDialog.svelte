@@ -93,7 +93,7 @@
       <p class="empty">{i18n.t('users.sessions.empty')}</p>
     {:else}
       <div class="rl-table-wrap">
-        <table class="rl-table">
+        <table class="rl-table rl-sticky-first">
           <thead>
             <tr>
               <th scope="col">{i18n.t('users.sessions.col.started')}</th>

@@ -314,3 +314,14 @@ describe('the page of a pipeline', () => {
     ]);
   });
 });
+
+describe('the page of a pipeline on a narrow screen', () => {
+  test('has the table of parameters in a container of its own that scrolls sideways, with the first column held', async () => {
+    const view = await page();
+    await ready(view);
+
+    const table = section(view, 'Parameters').querySelector('table')!;
+    expect(table.classList.contains('rl-sticky-first')).toBe(true);
+    expect(table.closest('.rl-scroll-x')).not.toBeNull();
+  });
+});

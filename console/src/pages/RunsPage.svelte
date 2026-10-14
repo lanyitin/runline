@@ -197,7 +197,7 @@
     <p class="rl-empty">{runs.length === 0 ? i18n.t('runs.empty.title') : i18n.t('runs.noMatch')}</p>
   {:else}
     <div class="rl-table-wrap">
-      <table class="rl-table">
+      <table class="rl-table rl-cards">
         <thead>
           <tr>
             <th scope="col">{i18n.t('runs.col.run')}</th>
@@ -211,20 +211,20 @@
         <tbody>
           {#each shown as run (run.runId)}
             <tr>
-              <td>
-                <Link href={runHref(run.runId)} class="run-id rl-mono" title={run.runId}>{run.runId.slice(0, 8)}</Link>
+              <td data-label={i18n.t('runs.col.run')}>
+                <Link href={runHref(run.runId)} class="run-id rl-mono rl-card-link" title={run.runId}>{run.runId.slice(0, 8)}</Link>
               </td>
-              <td>
+              <td data-label={i18n.t('runs.col.pipeline')}>
                 <div class="pipeline"><PlainText value={run.pipeline} mono /></div>
                 <div class="version"><span class="hash rl-mono" title={run.contentHash}>{shortHash(run.contentHash)}</span></div>
               </td>
-              <td><Badge kind="runState" value={run.state} /></td>
-              <td class="source">
+              <td data-label={i18n.t('runs.col.state')}><Badge kind="runState" value={run.state} /></td>
+              <td class="source" data-label={i18n.t('runs.col.source')}>
                 <span class="kind">{enumLabel(i18n.translate, 'runSource', run.source.kind)}</span>
                 <PlainText value={run.source.name} />
               </td>
-              <td class="duration rl-mono rl-nowrap">{durationOf(run)}</td>
-              <td class="rl-nowrap"><Timestamp iso={run.createdAt} relativeTo={new Date(now)} /></td>
+              <td class="duration rl-mono rl-nowrap" data-label={i18n.t('runs.col.duration')}>{durationOf(run)}</td>
+              <td class="rl-nowrap" data-label={i18n.t('runs.col.created')}><Timestamp iso={run.createdAt} relativeTo={new Date(now)} /></td>
             </tr>
           {/each}
         </tbody>

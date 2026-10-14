@@ -228,28 +228,30 @@
       {#if parameterNames.length === 0}
         <p>{i18n.t('trigger.params.none')}</p>
       {:else}
-        <table class="rl-table">
-          <thead>
-            <tr>
-              <th scope="col">{i18n.t('trigger.params.name')}</th>
-              <th scope="col">{i18n.t('trigger.params.given')}</th>
-              <th scope="col">{i18n.t('trigger.params.effective')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each parameterNames as parameter (parameter)}
-              {@const given = trigger.parameters[parameter]}
+        <div class="rl-scroll-x">
+          <table class="rl-table rl-sticky-first">
+            <thead>
               <tr>
-                <td><PlainText value={parameter} mono /></td>
-                <td>{#if given !== undefined}<PlainText value={given} mono />{/if}</td>
-                <td>
-                  <span class="value"><PlainText value={trigger.effectiveParameters[parameter] ?? ''} mono /></span>
-                  {#if given === undefined}<span class="rl-help">{i18n.t('trigger.params.default')}</span>{/if}
-                </td>
+                <th scope="col">{i18n.t('trigger.params.name')}</th>
+                <th scope="col">{i18n.t('trigger.params.given')}</th>
+                <th scope="col">{i18n.t('trigger.params.effective')}</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each parameterNames as parameter (parameter)}
+                {@const given = trigger.parameters[parameter]}
+                <tr>
+                  <td><PlainText value={parameter} mono /></td>
+                  <td>{#if given !== undefined}<PlainText value={given} mono />{/if}</td>
+                  <td>
+                    <span class="value"><PlainText value={trigger.effectiveParameters[parameter] ?? ''} mono /></span>
+                    {#if given === undefined}<span class="rl-help">{i18n.t('trigger.params.default')}</span>{/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
       {#if trigger.kind === 'webhook'}
         <p class="callers">
@@ -316,7 +318,7 @@
         <p>{i18n.t('firing.empty')}</p>
       {:else if firings.length > 0}
         <div class="rl-table-wrap">
-          <table class="rl-table">
+          <table class="rl-table rl-sticky-first">
             <thead>
               <tr>
                 <th scope="col">{i18n.t('firing.col.time')}</th>

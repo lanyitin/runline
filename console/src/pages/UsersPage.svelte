@@ -108,7 +108,7 @@
     </div>
   {:else}
     <div class="rl-table-wrap">
-      <table class="rl-table users">
+      <table class="rl-table rl-sticky-first users">
         <thead>
           <tr>
             <th scope="col">{i18n.t('users.col.name')}</th>

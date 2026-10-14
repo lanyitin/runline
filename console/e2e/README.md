@@ -253,3 +253,21 @@ in the navigation and the address is turned away. An Engine with
 login on answers the sign-in page's one extra question with a 401 (`GET /api/v1/auth/session` while
 nobody is signed in), which a browser lists in its console: the other scripts, which assert that the
 console is empty, are run against the Engine with login off.
+
+## The phone sizes (`e2e/responsive*.e2e.ts`, WI-61 to WI-64)
+
+The narrow layout of the Console (ADR-048: [docs/stable/console-responsive](../../docs/stable/console-responsive/README.md)) is verified in the same real browser, against the same Engine, with the same variables and steps as the scripts above; there is no command of its own and nothing more to prepare. The browser window is made 360px, 390px or 768px wide (`PHONE_360`, `PHONE_390`, `NARROWEST_WIDE` in `e2e/browser.ts`; 767px, the last narrow width, is also used by the scripts of the pages). A script of the phone sizes is part of `npm run e2e`; one alone:
+
+```
+(cd console && npx vitest run --config vitest.e2e.config.ts e2e/responsive)   # all four
+(cd console && npx vitest run --config vitest.e2e.config.ts e2e/responsive-routes.e2e.ts)
+```
+
+| Script | What it checks |
+|---|---|
+| `responsive.e2e.ts` | the foundation: the breakpoint, the drawer of the navigation, the top bar, the size of what is touched |
+| `responsive-information.e2e.ts` | runs, log, pipelines, views and the overview: cards, tables that scroll in their own container |
+| `responsive-admin.e2e.ts` | the pages of administration, the forms and the dialogs |
+| `responsive-routes.e2e.ts` | every route of `ROUTES`, as a developer and as an admin: with data, nothing found, refused; at each size the page does not scroll sideways, the navigation opens and closes and each of its links can be pressed, and the main action of the page can be pressed |
+
+`responsive-routes.e2e.ts` fails when a route is added to `src/app/routes.ts` and not named in its list of cases, so a new page cannot escape the check. The page of users exists only on an Engine with login with a provider and is verified at 360px, 390px and 767px by `oidc.e2e.ts` (`npm run e2e:oidc`). What this does not verify: a real phone, the Safari of iOS (its zoom on a focused field, the bars of its window), the touch of a finger rather than the click of a browser, and a landscape phone.

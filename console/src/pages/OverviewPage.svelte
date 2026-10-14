@@ -116,7 +116,7 @@
     <p class="rl-empty">{i18n.t('runs.empty.title')}</p>
   {:else}
     <div class="rl-table-wrap">
-      <table class="rl-table">
+      <table class="rl-table rl-cards">
         <thead>
           <tr>
             <th scope="col">{i18n.t('runs.col.run')}</th>
@@ -129,11 +129,11 @@
         <tbody>
           {#each runs.slice(0, RECENT) as run (run.runId)}
             <tr>
-              <td><Link href={runHref(run.runId)} class="rl-mono">{run.runId.slice(0, 8)}</Link></td>
-              <td class="pipeline"><PlainText value={run.pipeline} mono /></td>
-              <td class="state"><Badge kind="runState" value={run.state} /></td>
-              <td class="rl-mono rl-nowrap">{durationOf(run)}</td>
-              <td class="rl-nowrap"><Timestamp iso={run.createdAt} relativeTo={new Date(now)} /></td>
+              <td data-label={i18n.t('runs.col.run')}><Link href={runHref(run.runId)} class="rl-mono rl-card-link">{run.runId.slice(0, 8)}</Link></td>
+              <td class="pipeline" data-label={i18n.t('runs.col.pipeline')}><PlainText value={run.pipeline} mono /></td>
+              <td class="state" data-label={i18n.t('runs.col.state')}><Badge kind="runState" value={run.state} /></td>
+              <td class="rl-mono rl-nowrap" data-label={i18n.t('runs.col.duration')}>{durationOf(run)}</td>
+              <td class="rl-nowrap" data-label={i18n.t('runs.col.created')}><Timestamp iso={run.createdAt} relativeTo={new Date(now)} /></td>
             </tr>
           {/each}
         </tbody>

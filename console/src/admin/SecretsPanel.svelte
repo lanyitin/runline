@@ -119,7 +119,7 @@
       <p class="rl-help">{i18n.t('secrets.empty')}</p>
     {/if}
     <div class="rl-table-wrap">
-      <table class="rl-table">
+      <table class="rl-table rl-sticky-first">
         <thead>
           <tr>
             <th>{i18n.t('secrets.alias')}</th>

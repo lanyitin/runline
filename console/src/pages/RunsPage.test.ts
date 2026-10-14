@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createTestApp, type TestApp } from '../../test-support/app';
+import { expectCards } from '../../test-support/cards';
 import { ManualClock, ManualVisibility } from '../../test-support/manual-clock';
 import type { RunState } from '../../test-support/fake-backend';
 import RunsPage from './RunsPage.svelte';
@@ -312,5 +313,23 @@ describe('the list updating by itself', () => {
       'The list could not be refreshed; what is shown was read earlier.',
     );
     expect(rows(view)).toHaveLength(3);
+  });
+});
+
+describe('the runs list on a narrow screen', () => {
+  const headers = ['Run', 'Pipeline', 'State', 'Source', 'Duration', 'Created'];
+
+  test('is the same table, each cell with the name of its column, and one link that covers the card', async () => {
+    const { view } = await page({ seed: seedFew });
+    await loaded(view);
+
+    expectCards(view.querySelector('table'), headers);
+  });
+
+  test('names the columns in the language of the page', async () => {
+    const { view } = await page({ seed: seedFew, languages: ['zh-TW'] });
+    await loaded(view);
+
+    expectCards(view.querySelector('table'), ['Run', 'Pipeline', '狀態', '來源', '耗時', '建立時間']);
   });
 });

@@ -22,7 +22,7 @@
 </script>
 
 <div class="rl-table-wrap">
-  <table class="rl-table">
+  <table class="rl-table rl-sticky-first">
     <thead>
       <tr>
         {#each page.columns as column (column.name)}

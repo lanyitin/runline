@@ -18,7 +18,7 @@
 | 處理單位 | 以畫面變化切出場景，場景再切成約 12 秒的場景片段；潤飾、摘要、翻譯以場景片段為單位 | [ADR-052](adr/ADR-052-scenes-as-llm-units.md) |
 | 潤飾與換人 | 潤飾附畫面，並以「換人資料」標出新說話者的開頭；SRT 是否畫出破折號由參數決定，兩份 SRT 一致；刪除畫面核對階段 | [ADR-053](adr/ADR-053-polish-with-frames-and-speaker-turns.md) |
 | 摘要與翻譯 | 片段、場景、全片三層摘要，全片摘要含角色表且依主題組織；翻譯附角色表與場景摘要 | [ADR-054](adr/ADR-054-scene-summaries-and-translation-context.md) |
-| thinking、生成上限與止損 | thinking 預設關閉；開啟時用專屬的取樣參數與推理額度；轉錄請求帶生成上限；截斷不拆批，同一原因連續失敗時及早停止 | [ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md) |
+| thinking、生成上限與止損 | thinking 預設關閉；開啟時用專屬的取樣參數與推理額度；轉錄請求帶生成上限；截斷不拆批，同一原因連續失敗時及早停止 | [ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)、[ADR-057](adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)（上限只適用 chat 端點；對齊回應固定含字詞時間） |
 
 ## 處理階段
 

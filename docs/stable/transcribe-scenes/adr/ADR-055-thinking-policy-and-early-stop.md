@@ -1,6 +1,6 @@
 # ADR-055 thinking 的取樣政策、生成上限、分開的逾時與及早止損
 
-本文回答：開啟 thinking 時要送什麼取樣參數與額度、每個模型請求的生成上限、逾時如何分設、同一原因連續失敗時何時停止。狀態：已核可（2026-10-14）。補充 stable 的 `modelCallTimeoutSeconds` 與截斷處理（WI-1426、WI-1432）；取代 [ADR-049](../../../stable/transcribe-pipeline/adr/ADR-049-batches-with-read-only-context.md) 中「重試用盡時對半拆開再試」的作法。
+本文回答：開啟 thinking 時要送什麼取樣參數與額度、每個模型請求的生成上限、逾時如何分設、同一原因連續失敗時何時停止。狀態：已核可（2026-10-14）。補充 stable 的 `modelCallTimeoutSeconds` 與截斷處理（WI-1426、WI-1432）；取代 [ADR-049](../../../stable/transcribe-pipeline/adr/ADR-049-batches-with-read-only-context.md) 中「重試用盡時對半拆開再試」的作法。決策 4 的適用範圍見 [ADR-057](ADR-057-asr-endpoints-and-alignment-word-timing.md)。
 
 ## 背景
 
@@ -24,11 +24,13 @@ WI-1451 在 arr 的量測另外顯示：
 1. **thinking 預設關閉**：所有 gemma4 階段各有 thinking 開關，預設關閉。關閉的作法沿用現行（預填已結束的推理）。
 2. **開啟時的取樣**：送 `thinkingTemperature`（預設 1.0）取代該階段的 temperature；另送推理額度 `thinkingTokenBudget`，與答案的生成上限相加作為該次的 `max_tokens`。資源鎖定 temperature 時，log 提示 thinking 的取樣參數無法生效。
 3. **截斷不拆批**：單元（片段）重試用盡即降級，不再拆小重試。
-4. **轉錄的生成上限**：每個轉錄請求都帶生成上限，依該次音訊的秒數計算：`asrTokensPerSecond` 乘以秒數，再加 `asrTokenMargin`。範圍包含長片段、現行的短段與補掃。
+4. **轉錄的生成上限**：每個走 chat 端點的轉錄請求都帶生成上限，依該次音訊的秒數計算：`asrTokensPerSecond` 乘以秒數，再加 `asrTokenMargin`。範圍包含長片段、現行的短段與補掃。
    - 這是讓伺服器端停止失控生成的唯一手段。逾時只結束用戶端的等待，不保證伺服器停止。
+   - 走 `audio.transcriptions` 的模型沒有生成上限：OpenAI 的轉錄協定沒有這個欄位，Engine 資源也不放行多送的欄位。這個端點只受 `asrCallTimeoutSeconds` 保護，文件須明說這項限度。
+   - Qwen3-ASR 固定走 chat 端點，所以預設配置的每個轉錄請求都有生成上限。
    - 達到上限的回答視為截斷，依重試、降級與止損規則處理，不採用其文字。
    - 預設值須涵蓋快速對白的正常輸出。依據是 WI-1452 實測的「每秒音訊的輸出 token 數」最大值，再留餘裕。
-   - 所有模型請求都必須帶生成上限。對話階段已有上限；thinking 開啟時依決策 2 計算。
+   - 所有 chat 模型請求都必須帶生成上限。對話階段已有上限；thinking 開啟時依決策 2 計算。
 5. **分開的逾時**：轉錄的單次逾時 `asrCallTimeoutSeconds` 與對話階段的 `modelCallTimeoutSeconds` 分開設定，都只能縮短資源的逾時。
 6. **及早止損**：一個階段內，連續 `earlyStopFailures` 次（預設 5）呼叫都因同一原因失敗（例如截斷、逾時、5xx），且期間沒有任何成功時：
    - 立即停止該 run；
@@ -44,11 +46,12 @@ WI-1451 在 arr 的量測另外顯示：
   - 系統性的失敗在數分鐘內浮現，不再耗費數小時；
   - 開 thinking 的情況有可用的取樣參數；
   - 轉錄逾時可以短而不傷及對話階段；
-  - 失控的轉錄在數秒內被伺服器截止，不再佔住 Lemonade。
+  - 失控的 chat 轉錄在數秒內被伺服器截止，不再佔住 Lemonade。
 - 失去：
   - 偶發的連續失敗也可能觸發止損（以門檻與「同一原因」降低機率）；
   - 推理內容增加資料量（依保留期清除）；
-  - 生成上限設得太低時，語速極快的片段會被截斷而降級（以實測值加餘裕降低機率）。
+  - 生成上限設得太低時，語速極快的片段會被截斷而降級（以實測值加餘裕降低機率）；
+  - 換成走 `audio.transcriptions` 的轉錄模型時，失控生成只能靠逾時結束用戶端的等待，伺服器端不一定停止。
 
 ## 後果
 

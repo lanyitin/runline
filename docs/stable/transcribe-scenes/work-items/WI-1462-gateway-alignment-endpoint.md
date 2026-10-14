@@ -1,13 +1,14 @@
 # WI-1462 llm-gateway 的對齊端點
 
-本文回答：llm-gateway 如何以 GPU 提供 Qwen3-ForcedAligner，並與 Lemonade、d1 共用 GPU。狀態：已核可（2026-10-14），待派工。相依：無。決策見 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md)，契約見 [05](../05-ipc.md)。儲存庫：G（llm-gateway，`/Users/lanyitin/Projects/Personal/llm-gateway`）。
+本文回答：llm-gateway 如何以 GPU 提供 Qwen3-ForcedAligner，並與 Lemonade、d1 共用 GPU。狀態：已核可（2026-10-14），派工中。相依：無。決策見 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md) 與 [ADR-057](../adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)，契約見 [05](../05-ipc.md)。儲存庫：G（llm-gateway，`/Users/lanyitin/Projects/Personal/llm-gateway`）。
 
 ## 行為與驗收條件
 
 1. **端點**：OpenAI 相容的音訊轉錄端點（含 `/v1` 與 `/api/v1` 兩種前綴）。
    - 請求的模型是對齊模型時，由 gateway 處理：
-     - 輸入：音訊檔、語言、要對齊的文字（`prompt`）；
-     - 回應：`verbose_json` 格式，含全文與每個字詞的文字、起點、終點（秒）。
+     - 輸入：音訊檔、語言、要對齊的文字（`prompt`）、`response_format`；只使用 `model`、`language`、`prompt`、`response_format` 與音訊檔，這是 Engine 資源放行的欄位；
+     - 回應：`response_format` 為 `verbose_json` 時，回應含全文與每個字詞的文字、起點、終點（秒）。對齊模型不要求 `timestamp_granularities`，沒有帶也一律回字詞時間；收到該欄位時忽略，不回錯誤；
+     - `response_format` 不是 `verbose_json` 時，回 400，`param` 指出該欄位。
    - 其他模型照舊原樣轉發給 Lemonade，行為與現在相同。
 2. **對齊結果的契約**：
    - 字詞依時間排序，時間落在音訊長度內；
@@ -29,10 +30,10 @@
    - 新增的 Python 相依固定版本。
 7. **可觀測**：`/_proxy/health` 列出目前佔用 GPU 的一方（含對齊）、對齊模型是否已載入、進行中的對齊請求數。
 8. **文件**：README 新增：
-   - 對齊端點的契約與呼叫範例，並註明 `prompt` 在此是逐字稿；
+   - 對齊端點的契約與呼叫範例，並註明 `prompt` 在此是逐字稿，以及 `verbose_json` 固定含字詞時間；
    - 新的環境變數（模型 revision、裝置、可用 VRAM 門檻）；
    - 切換規則的三方說明；
-   - 從 Engine 資源呼叫的部署後檢查步驟。
+   - 從 Engine 資源呼叫的部署後檢查步驟，檢查用的請求只含 Engine 放行的欄位。
 9. **效能紀錄**：在 Lemonade 主機上，對 30 秒日語片段記錄：
    - 切換到對齊的耗時；
    - 每片段的對齊耗時（中位數、最大值）；

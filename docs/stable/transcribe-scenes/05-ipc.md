@@ -6,8 +6,8 @@
 
 | 對象 | 方式 | 單位 | 傳遞的資料 | 失敗處理 |
 |---|---|---|---|---|
-| Lemonade：轉錄 | `chat.completions`（同步），音訊輸入（沿用 [ADR-042](../../stable/transcribe-pipeline/adr/ADR-042-asr-by-model-labels.md) 的端點選擇） | 長片段 | 原始音訊的片段（約 30 秒）→ 語言與文字；請求帶生成上限 | 逾時、5xx、截斷：重試；用盡則該片段沒有文字，計入降級；連續失敗時止損（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)） |
-| gateway：對齊 | `audio.transcriptions`（同步，multipart），模型為對齊模型 | 長片段；全部轉錄完成後依序送出 | 原始音訊的片段、語言、轉錄文字（放在 `prompt`）→ 全文與每個字詞的文字、起點、終點（秒） | 逾時、5xx、服務不可用、格式不符：重試；用盡則該片段改用估計時間（[ADR-051](adr/ADR-051-long-chunks-and-forced-alignment.md)），計入降級；連續失敗時止損 |
+| Lemonade：轉錄 | `chat.completions`（同步），音訊輸入；Qwen3-ASR 固定走此端點（沿用 [ADR-042](../../stable/transcribe-pipeline/adr/ADR-042-asr-by-model-labels.md) 的端點選擇，[ADR-057](adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)） | 長片段 | 原始音訊的片段（約 30 秒）→ 語言與文字；請求帶生成上限 | 逾時、5xx、截斷：重試；用盡則該片段沒有文字，計入降級；連續失敗時止損（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)） |
+| gateway：對齊 | `audio.transcriptions`（同步，multipart），模型為對齊模型 | 長片段；全部轉錄完成後依序送出 | 原始音訊的片段、語言、轉錄文字（放在 `prompt`）、`response_format` 為 `verbose_json` → 全文與每個字詞的文字、起點、終點（秒） | 逾時、5xx、服務不可用、格式不符：重試；用盡則該片段改用估計時間（[ADR-051](adr/ADR-051-long-chunks-and-forced-alignment.md)），計入降級；連續失敗時止損 |
 | ffmpeg：場景偵測 | 本機子行程 | 整部影片一次 | 影片 → 場景切點與分數 | 失敗則整部影片視為一個場景，記錄並計入降級 |
 | ffmpeg：畫面 | 本機子行程（pipe） | 場景片段 | 時間點 → 圖片（只在記憶體） | 取不到畫面時，該片段不附圖照常送出 |
 | Lemonade：潤飾 | `chat.completions`，文字＋多張圖 | 場景片段 | 規則、片段的條目、畫面、前一片段的唯讀語境 → 條目（含行與換人標記） | 契約違反或截斷：重試；用盡則該片段保留轉錄文字、不標換人，計入降級 |
@@ -23,8 +23,12 @@ Lemonade 的呼叫都經 gateway 原樣轉發。
 - **換人在回答中的表示**：回答的每一行若是新說話者的開頭，以行首的對話破折號表示；pipeline 解析後存成資料、從文字中拿掉，輸出時才依參數畫回。
 - **唯讀語境**：語境只供理解，回答中出現語境內容視同契約違反。
 - **冪等**：每次呼叫只讀取資料、回傳結果，重送不會產生副作用；寫入由 pipeline 在收到合格回答後以交易完成。對齊同一片段重送得到同樣的結果。
+- **轉錄的生成上限**：
+  - chat 端點的每個轉錄請求都帶生成上限（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md) 決策 4）；
+  - OpenAI 的轉錄協定沒有這個欄位，Engine 資源也只放行 `model`、`language`、`prompt`、`response_format`、`temperature`，所以走 `audio.transcriptions` 的模型沒有生成上限，只受 `asrCallTimeoutSeconds` 保護。
+- **對齊的請求**：只使用 Engine 資源放行的欄位：音訊檔、`model`、`language`、`prompt`（逐字稿）、`response_format`（`verbose_json`）。不送 `timestamp_granularities`。
 - **對齊的回應**：
-  - 比照 OpenAI 音訊轉錄的 `verbose_json` 與字詞時間戳格式；
+  - 比照 OpenAI 音訊轉錄的 `verbose_json` 與字詞時間戳格式；對齊模型沒有「只回全文」的模式，`verbose_json` 的回應固定含字詞時間；
   - 字詞依時間排序，時間落在該片段的長度內；
   - 字詞串接後與送出的文字一致，空白與標點的處理寫在 gateway 的 README；
   - 不符合時視同格式不符。

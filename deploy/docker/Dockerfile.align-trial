@@ -1,0 +1,50 @@
+# The trial image of the aligner (WI-1451, docs/stable/transcribe-scenes/04-deployment.md): an image of
+# the `transcribe` stage (deploy/docker/Dockerfile) plus the aligner of runline-transcribe, for the
+# feasibility measurement on a real host. It is built apart from the production images, on top of one
+# of them, and changes nothing of them: no stage of deploy/docker/Dockerfile names this file, and
+# deploy/publish-image does not build it.
+#
+# The aligner is runline-transcribe's align/ directory, given as the build context `align`. Its own
+# script align/fetch installs it, and holds the versions and sha256 of what it downloads: the CPython of
+# python-build-standalone, the locked packages (CPU-only torch, qwen-asr, …) and the files of
+# Qwen3-ForcedAligner-0.6B. A changed download fails the build. The tool runs on the CPU only and never
+# uses the network; the model is in the image.
+#
+#   docker build --target transcribe --platform linux/amd64 --build-context deploy=deploy \
+#       -f deploy/docker/Dockerfile -t runline-engine-transcribe engine/build/engine-dist
+#   docker build --platform linux/amd64 --build-arg BASE_IMAGE=runline-engine-transcribe \
+#       --build-context align=../runline-transcribe/align \
+#       -f deploy/docker/Dockerfile.align-trial -t runline-engine-transcribe-align-trial deploy/docker
+#
+# BASE_IMAGE may as well be the browser-transcribe image. The base is an image this repository builds,
+# not an external input, so it is named by its tag (as check-pins exempts runline-engine*).
+ARG BASE_IMAGE=runline-engine-transcribe
+
+FROM ${BASE_IMAGE} AS align-fetch
+USER root
+ENV HOME=/root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl libarchive-tools \
+    && rm -rf /var/lib/apt/lists/*
+# Only what decides the downloads is copied here, so that a change of the tool's own files (the last
+# stage takes them from the context) does not download 2 GB again. fetch installs the tool's files
+# too; empty ones stand in for them in this stage.
+COPY --from=align fetch pins model.sha256 /tmp/align-src/
+COPY --from=align requirements/ /tmp/align-src/requirements/
+RUN touch /tmp/align-src/runline-align /tmp/align-src/runline_align.py \
+    && /tmp/align-src/fetch /tmp/align
+
+FROM ${BASE_IMAGE}
+USER root
+ENV HOME=/root
+# Root owns the tool and the model, so the Engine account (any uid, ADR-041) can run and read them and
+# cannot change them. The model is beside the silero-vad model.
+COPY --from=align-fetch --chown=root:root /tmp/align/model/ /opt/runline/models/qwen3-forced-aligner-0.6b/
+COPY --from=align-fetch --chown=root:root /tmp/align/python/ /opt/runline/align/python/
+COPY --from=align --chown=root:root --chmod=0755 runline-align /opt/runline/align/
+COPY --from=align --chown=root:root --chmod=0644 runline_align.py pins model.sha256 /opt/runline/align/
+RUN ln -s /opt/runline/align/runline-align /usr/local/bin/runline-align
+# The model is configuration of the tool's host, read from this variable (04-deployment).
+ENV RUNLINE_ALIGN_MODEL=/opt/runline/models/qwen3-forced-aligner-0.6b \
+    HOME=/home/runline
+USER runline

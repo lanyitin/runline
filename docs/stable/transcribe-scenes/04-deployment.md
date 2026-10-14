@@ -1,15 +1,41 @@
 # 4 部署
 
-狀態：已核可（2026-10-14）。本文回答：為了對齊與場景偵測，映像與主機要多提供什麼。現行部署見 [stable 04](../../stable/transcribe-pipeline/04-deployment.md) 與 `deploy/transcribe.md`；本文只寫差異。
+狀態：已核可（2026-10-14）。本文回答：為了對齊與場景偵測，各主機與服務要多提供什麼。現行部署見 [stable transcribe-pipeline 04](../../stable/transcribe-pipeline/04-deployment.md) 與 `deploy/transcribe.md`；本文只寫差異。對齊的位置見 [ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)。
 
-## 對齊工具
+## 拓撲
 
-- **形態**：Engine 映像（`transcribe` 與 `browser-transcribe` 兩個階段）內的獨立行程，由 pipeline 啟動、等待結束，作法同降噪工具（[ADR-046](../../stable/transcribe-pipeline/adr/ADR-046-denoise-before-vad.md)）。
-- **執行環境**：映像加入 Python 執行環境與對齊所需的推論程式庫，只用 CPU，版本固定。
-- **模型檔**：Qwen3-ForcedAligner 的權重放在映像內，以雜湊固定（與其他固定雜湊的項目一起由 `check-pins` 檢查）。執行時不得連網下載。
-- **帳號**：沿用任意 uid 的作法（[ADR-041](../../stable/homelab-arr/adr/ADR-041-engine-image-arbitrary-uid.md)）；工具的快取與暫存寫在工作目錄，不寫 HOME 以外的固定位置。
-- **代價**：映像增加 Python 與推論程式庫的大小，以及模型檔（量級數百 MB 到約 2 GB，以 WI-1451 實測為準）。
-- **主機（systemd）部署**：主機要提供相同版本的 Python 環境與模型檔，位置以環境變數指定。
+```mermaid
+flowchart LR
+  subgraph arr
+    E[Engine + transcribe pipeline]
+  end
+  subgraph Lemonade 主機
+    G[llm-gateway :8098] --> L[Lemonade :13305]
+    G --> A[Qwen3-ForcedAligner]
+    G --> D[d1-3B]
+  end
+  E -- openai-compatible 資源 --> G
+```
+
+- 同一張 GPU 上，Lemonade、對齊模型與 d1 三方輪流佔用，由 gateway 切換。
+- Engine 的所有模型呼叫都經 gateway。
+
+## 對齊（llm-gateway）
+
+- **形態**：gateway 程序內載入的模型，以 OpenAI 相容的音訊轉錄端點提供，契約見 [05](05-ipc.md)。
+- **執行環境**：沿用 gateway 的 Python 環境與 CUDA；新增對齊所需的程式庫，版本固定。
+- **模型檔**：Qwen3-ForcedAligner 固定 revision 與檔案雜湊，預先下載到主機；執行時不連網下載。
+- **維運**：
+  - 由使用者在 Lemonade 主機維運（user 層級 systemd 服務 `llm-gateway`），不隨 runline 映像部署；
+  - gateway 的健康狀態列出目前佔用 GPU 的一方，以及對齊模型是否已載入。
+- **Engine 映像**：不變，不加入 Python 與對齊模型。
+
+## Engine 資源
+
+- transcribe 使用的 `openai-compatible` 資源，上游位址從 Lemonade（13305）改為 gateway（8098）。
+- 音訊轉錄條目維持啟用，請求大小上限須容納 30 秒的音訊。
+- 這項切換由使用者或 homelab-deployer 在 WI-1455 的版本上線前完成。
+- 切換後，同一資源的其他 pipeline（例如 digest-rss）也改經 gateway；gateway 對 d1 與對齊以外的請求原樣轉發。
 
 ## 場景偵測
 
@@ -21,13 +47,14 @@
 
 ## 組態
 
-| 環境變數或參數 | 用途 |
-|---|---|
-| 對齊工具的位置（環境變數） | 映像內預設；主機部署時指定 |
-| 對齊模型檔的位置（環境變數） | 同上 |
-| pipeline 參數 | 見 [05](05-ipc.md) 與各 ADR；新參數的完整清單在 runline-transcribe 的 README |
+| 項目 | 位置 | 用途 |
+|---|---|---|
+| 對齊模型名稱 | transcribe 的 pipeline 參數 | 送到音訊轉錄條目的模型名稱，須與 gateway 的設定一致 |
+| 對齊模型的 revision、裝置、切換逾時 | gateway 的環境變數 | 比照 d1 的設定方式 |
+| Engine 資源的上游位址 | Engine 的資源設定 | 指向 gateway |
+| 其他 pipeline 參數 | 見 [05](05-ipc.md) 與各 ADR；完整清單在 runline-transcribe 的 README | |
 
-## 啟動時的檢查
+## 檢查
 
-- 對齊工具或模型檔不存在：run 在對齊階段以明確的失敗類別失敗（與 `VAD_TOOL_MISSING` 同類）；Engine 本身照常啟動。
-- `runline-entrypoint` 的啟動報告列出對齊工具的版本與模型檔雜湊（只報告、不攔阻）。
+- gateway 無法載入對齊模型或取得 GPU 時，回覆服務不可用；pipeline 依重試、降級與止損處理（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)）。
+- 部署後，以一段短音訊經 Engine 資源呼叫對齊模型，確認可用（由 WI-1462 提供步驟）。

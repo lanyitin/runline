@@ -1,6 +1,6 @@
 # WI-1454 對齊工具進入映像與主機部署
 
-本文回答：對齊工具與模型檔如何隨 Engine 部署、如何驗證可用。狀態：已核可（2026-10-14）。相依：WI-1451。決策見 [ADR-051](../adr/ADR-051-long-chunks-and-forced-alignment.md)，部署見 [04](../04-deployment.md)。儲存庫：R（映像、部署腳本與文件），T（工具本身，若 WI-1451 留在 T）。
+本文回答：對齊工具與模型檔如何隨 Engine 部署、如何驗證可用。狀態：作廢（2026-10-14），由 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md) 與 [WI-1462](WI-1462-gateway-alignment-endpoint.md) 取代：對齊改在 llm-gateway 以 GPU 執行，Engine 映像不加入對齊工具。相依：WI-1451。決策見 [ADR-051](../adr/ADR-051-long-chunks-and-forced-alignment.md)，部署見 [04](../04-deployment.md)。儲存庫：R（映像、部署腳本與文件），T（工具本身，若 WI-1451 留在 T）。
 
 ## 行為與驗收條件
 

@@ -24,6 +24,8 @@
 | 字幕檔輸出 | 最後階段 `export` 在影片旁寫出「影片檔名_語系.srt」兩個檔（來源語言與 `zh-TW`），內容與資料庫的 `result` 相同；收件根目錄須可寫 | [ADR-039](adr/ADR-039-subtitle-files-beside-video.md) |
 | 補掃 | VAD 沒涵蓋的空隙（相鄰條目之間，含影片首尾）切成固定長度的窗口，逐窗口送同一個轉錄模型；有語音者成為新的字幕條目（標記來源為補掃、時間為估計值），疑似雜音的幻覺被過濾且可查；窗口轉錄失敗時略過該窗口，run 繼續，並計入降級（結果為 `success-degraded`）；預設開啟 | [ADR-044](adr/ADR-044-asr-coverage-sweep.md) |
 | 降噪後 VAD | VAD 之前以 DeepFilterNet3 降噪（獨立行程，預設開啟）；降噪音訊只供 VAD，切片與轉錄一律取自原始音訊；取代雙 VAD（ADR-045） | [ADR-046](adr/ADR-046-denoise-before-vad.md) |
+| 潤飾與翻譯的語境 | 修訂 ADR-038 決策 4：潤飾與翻譯改以連續的有語音條目組成批次（預設每批 20 條）送出，附前後各一段固定範圍（120 秒、30 條）的唯讀語境；翻譯的前文附已翻好的譯文，不再附全片摘要；重試用盡時對半拆開再試，只降級真正失敗的條目 | [ADR-049](adr/ADR-049-batches-with-read-only-context.md) |
+| 字幕長度與合併 | 一條字幕以約 6 秒為原則；輸出 SRT 時把太短且間隔不到 1 秒的相鄰條目合併成兩行顯示，資料庫條目不合併；分段預設值待在 arr 比較後調整（實作中） | [ADR-050](adr/ADR-050-subtitle-length-and-merge.md) |
 
 ## 元件關係
 
@@ -87,11 +89,11 @@ flowchart LR
 | 5 IPC 模型 | [05-ipc.md](05-ipc.md) | 已核可 |
 | 6 資料模型 | [06-data-model.md](06-data-model.md) | 已核可 |
 | 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
-| 8 決策記錄（ADR-036 至 046；ADR-045 已被 ADR-046 取代） | [adr/](adr/) | 已核可 |
+| 8 決策記錄（ADR-036 至 046、049、050；ADR-045 已被 ADR-046 取代；ADR-038 決策 4 已由 ADR-049 修訂） | [adr/](adr/) | 已核可 |
 | 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |
 | 上線手冊 | [runbook.md](runbook.md)（管理員的上線、第一次執行、查詢、降級與中斷處置、排錯、已驗證與未驗證清單） | 已核可 |
 
 ## 與其他 stable 文件的關係
 
 - [ADR-005](../pipeline-engine/adr/ADR-005-trigger-binding.md) 規定「Webhook 請求的內容不影響參數，只作為觸發訊號」，並註明需要由 webhook 內容決定參數時另開 ADR 修訂。ADR-036 即該修訂，取代 ADR-005 的這一條；README「Triggers」與 `08-api.md` 的 webhook 段落已由 [WI-1400](work-items/WI-1400-webhook-caller-parameters.md) 同步修訂。
-- 編號：ADR-034、035 與 WI-1300 至 1305 屬於 [pipeline-views](../pipeline-views/README.md)；本專案使用 ADR-036 至 038 與 WI-1400 起。
+- 編號：ADR-034、035 與 WI-1300 至 1305 屬於 [pipeline-views](../pipeline-views/README.md)；本專案使用 ADR-036 至 038 與 WI-1400 起。ADR-047、048 屬於其他專案，本專案之後的決策為 ADR-049、050。

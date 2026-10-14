@@ -1,6 +1,6 @@
 # ADR-039 字幕檔寫在影片旁邊，檔名為「影片檔名_語系.srt」
 
-狀態：已核可（2026-10-12）。補充 [ADR-037](ADR-037-unsafe-pipeline-and-intake-root.md)（pipeline 開始在收件根目錄內寫入）。與既有文件衝突，以本文為準，並由 [WI-1420](../work-items/WI-1420-subtitle-export.md)、[WI-1421](../work-items/WI-1421-writable-intake-root.md) 同步修訂：[01-requirements](../01-requirements.md) 第 9 條「全部寫入資料庫」、[04-deployment](../04-deployment.md)「收件根目錄以唯讀掛載給 Engine」。回答：最後的字幕檔如何產出、放在哪裡、如何命名、如何避免半成品與越界寫入。
+狀態：已核可（2026-10-12）。補充 [ADR-037](ADR-037-unsafe-pipeline-and-intake-root.md)（pipeline 開始在收件根目錄內寫入）。字幕檔的內容為合併顯示後的 SRT，見 [ADR-050](ADR-050-subtitle-length-and-merge.md)（2026-10-13）。與既有文件衝突，以本文為準，並由 [WI-1420](../work-items/WI-1420-subtitle-export.md)、[WI-1421](../work-items/WI-1421-writable-intake-root.md) 同步修訂：[01-requirements](../01-requirements.md) 第 9 條「全部寫入資料庫」、[04-deployment](../04-deployment.md)「收件根目錄以唯讀掛載給 Engine」。回答：最後的字幕檔如何產出、放在哪裡、如何命名、如何避免半成品與越界寫入。
 
 ## 背景
 

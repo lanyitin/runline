@@ -31,10 +31,17 @@
 | [WI-1463](WI-1463-truncation-degrades-chunk.md) | T | 轉錄片段被截斷時降級，不重試、不計入及早止損；全部失敗才讓 run 失敗 | WI-1455、WI-1456 | 已完成（2026-10-15），T 的 161838b；已核可 |
 | [WI-1464](WI-1464-times-out-of-model-answers.md) | T | 潤飾與翻譯的請求與回答不帶條目時間，由 pipeline 依序號補回；失敗 run 的降級數顯示修正 | WI-1457、WI-1459 | 已完成（2026-10-15），T 的 53e3466；已核可 |
 | [WI-1465](WI-1465-repetition-penalties.md) | T | 轉錄截斷後帶重複懲罰重試一次；摘要可選的懲罰參數 | WI-1463、WI-1464 | 已完成（2026-10-15），T 的 0ef37ac；已核可 |
-| [WI-1466](WI-1466-low-information-transcript.md) | T | 轉錄文字幾乎全是重複語助詞時視同沒有文字：不產出條目、不參與來源語言、全部如此時 run 以 NO_TRANSCRIPT 失敗；降級括號納入轉錄 | WI-1463、WI-1465 | 已核可（2026-10-15），待派工 |
+| [WI-1466](WI-1466-low-information-transcript.md) | T | 轉錄文字幾乎全是重複語助詞時視同沒有文字：不產出條目、不參與來源語言、全部如此時 run 以 NO_TRANSCRIPT 失敗；降級括號納入轉錄 | WI-1463、WI-1465 | 已完成（2026-10-15），T 的 c730302；新增參數 asrLowInformationRatio（預設 0.75）；相關範圍 676 個測試通過；已核可 |
 | [WI-1467](WI-1467-resume-run-from-stage.md) | T | 失敗或中斷的 run 以新 run 從任一階段續跑：起點之前沿用來源 run，起點階段按單位延續，之後重算；參數可覆寫 | WI-1455 至 WI-1465 | 已完成（2026-10-15），T 的 6cbf0a2、53fe0db、c9ba617；全套測試因使用者決定中斷而未跑完，相關範圍 119 個測試通過；已核可 |
 | [WI-1468](WI-1468-answer-contract-per-segment.md) | T | 潤飾、摘要、翻譯的回答違反契約：重試附原因、翻譯行數規則依換人標記放寬、未翻譯獨立成因、保留合格條目、及早止損以片段計數 | WI-1459、WI-1464、WI-1465 | 已完成（2026-10-15），T 的 aed32ca；相關範圍 779 個測試，除既有的 DenoiseRecordsTest 一項失敗外通過；已核可 |
 | [WI-1469](WI-1469-test-suite-speed.md) | T | 縮短測試套件執行時間：先量測，去掉人為等待、共用啟動、類別層級並行、量測工具與平台相依測試分組；不降低檢查力 | 無 | 部分完成（2026-10-15），T 的 2d1388c、92b8b80、ba0cdeb、ecd9747：共用樣本、降噪基準跳過、並行與 measurementTest 分組；全套時間目標未驗證；已核可 |
+| [WI-1470](WI-1470-resume-from-degraded-run.md) | T | success-degraded 的 run 也可當續跑來源：降級的單位視為未完成而重做；續跑只送要變更的參數，不繼承來源 run 的值 | WI-1467、WI-1468 | 已完成（2026-10-15），T 的 4d6df56；相關範圍 682 個測試，除既有的 DenoiseRecordsTest 一項失敗外通過；已核可 |
+| [WI-1471](WI-1471-any-chinese-and-context-check.md) | T | 翻譯接受任何中文字形（取消簡體字檢查）；語境重複檢查不誤判與前文譯文相同的短句 | WI-1468 | 已完成（2026-10-15），T 的 10de292；相關範圍 489 個測試通過（唯一的 SummaryRunTest 失敗由 WI-1466 的測試資料引起，已在 T 的 618d016 修正）；已核可 |
+| [WI-1472](WI-1472-recheck-carried-units.md) | T | 續跑時以現行規則重新檢查被沿用的譯文（含假名、行數），不通過的條目重做 | WI-1470 | 已完成（2026-10-15），T 的 709032a；相關範圍測試全數通過；已核可 |
+| [WI-1473](WI-1473-lenient-translate-polish-answers.md) | T | 翻譯與潤飾的回答依序號寬鬆解析，取不到才以條目降級；翻譯的換人標記由 pipeline 補回 | WI-1468、WI-1471、WI-1472 | 已核可（2026-10-15），派工中 |
+| [WI-1474](WI-1474-lenient-summary-answers.md) | T | 摘要與角色表的回答寬鬆解析：標記尋找、語言碼對應、角色逐列採用、超長截斷 | WI-1458、WI-1468 | 已核可（2026-10-15），待派工（建議待 WI-1473 完成後） |
+| [WI-1475](WI-1475-retry-and-early-stop-policy.md) | T | 重試只留給服務錯誤與空手而回（每片段 1 次，不附原因）；及早止損以片段計數；角色表不為描述編譯名 | WI-1468 | 已核可（2026-10-15），待派工（建議待 WI-1474 完成後） |
+| [WI-1476](WI-1476-cancelled-run-records-its-end.md) | T | 被取消的 run 記錄結束狀態並可當續跑來源；取消盡快中止進行中的呼叫 | WI-1467 | 已核可（2026-10-15），待派工 |
 
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。
 

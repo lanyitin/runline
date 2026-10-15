@@ -7,7 +7,7 @@
 - **CPU 的量測結果**：WI-1451 在 arr（8 vCPU，float32）初步量測，每片段約 17 秒，其中約 8 秒是啟動與載入；推估一小時約 35 分鐘，超過 30 分鐘的關卡。即使只啟動一次，推估仍約 19 分鐘，峰值記憶體約 6 GB，映像增加約 1.9 GB（壓縮後）。
 - **GPU 的分布**（2026-10-14 唯讀查詢）：
   - arr 只有 Intel Iris Xe 內顯，沒有可用的 GPU 運算環境；
-  - Lemonade 主機有 NVIDIA RTX 5070 Laptop（規格 8 GB），Lemonade 以 CUDA 執行 Qwen3-ASR。
+  - Lemonade 主機有 NVIDIA RTX 5070 Laptop（記憶體 12 GB，`nvidia-smi` 顯示 12,231 MiB），Lemonade 以 CUDA 執行 Qwen3-ASR。
 - **既有的 gateway**：Lemonade 主機上已有使用者維護的 llm-gateway（Python，user 層級 systemd 服務，埠 8098）。
   - 它在同一張 GPU 上輪流提供 d1 決策模型與 Lemonade：同一時間只有一邊佔用 GPU，依請求類型切換。
   - d1 以外的請求原樣轉發給 Lemonade。

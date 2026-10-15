@@ -17,12 +17,22 @@
 | [WI-1451](WI-1451-feasibility-forced-alignment.md) | T | 可行性關卡：經 gateway 以 GPU 對齊 30 秒片段的耗時與失敗率；時間精度延後到成品字幕核對 | WI-1461、WI-1462 | 關卡通過（2026-10-14）：一小時推估約 1 分鐘，對齊失敗 0；時間精度待成品字幕核對 |
 | [WI-1452](WI-1452-feasibility-long-chunks-and-segments.md) | T | 可行性關卡：30 秒片段的請求大小與耗時；場景片段附圖的潤飾成本；場景偵測的門檻；轉錄品質與換人正確率延後到成品字幕核對 | 無（轉錄的量測依賴 WI-1461） | 關卡通過（2026-10-14）：請求大小、成本、場景偵測皆符合；預設值見 [ADR-058](../adr/ADR-058-measured-defaults.md)；轉錄品質與換人正確率待成品字幕核對 |
 | [WI-1454](WI-1454-aligner-in-image.md) | R、T | 對齊工具與模型檔進入 `transcribe` 系列映像與主機部署 | WI-1451 | 作廢（2026-10-14），由 ADR-056 與 WI-1462 取代 |
-| [WI-1455](WI-1455-long-chunks-alignment-entries.md) | T | 長片段切分、轉錄、經 gateway 對齊、組成條目；移除 VAD-A／B、補掃與輸出時合併 | WI-1451、WI-1452、WI-1453、WI-1461、WI-1462 | 已核可（2026-10-14），派工中 |
-| [WI-1456](WI-1456-scenes-and-segments.md) | T | 場景偵測與場景片段、條目歸屬 | WI-1455 | 已核可（2026-10-14），待派工 |
-| [WI-1457](WI-1457-polish-with-turns-and-dash.md) | T | 潤飾附畫面與換人資料；SRT 依參數畫破折號；刪除核對階段 | WI-1456 | 已核可（2026-10-14），待派工 |
-| [WI-1458](WI-1458-three-layer-summary.md) | T | 片段、場景、全片三層摘要與角色表 | WI-1457 | 已核可（2026-10-14），待派工 |
-| [WI-1459](WI-1459-translation-with-context.md) | T | 翻譯附角色表、場景摘要與前文，保留行與換人 | WI-1458 | 已核可（2026-10-14），待派工 |
-| [WI-1460](WI-1460-views-and-docs-alignment.md) | T、R | Console view 改讀新資料；runbook、資料模型、入口文件對齊 | WI-1459 | 已核可（2026-10-14），待派工 |
+| [WI-1455](WI-1455-long-chunks-alignment-entries.md) | T | 長片段切分、轉錄、經 gateway 對齊、組成條目；移除 VAD-A／B、補掃與輸出時合併 | WI-1451、WI-1452、WI-1453、WI-1461、WI-1462 | 已完成（2026-10-15），T 的 55bb8a1；舊表暫時仍寫（橋接），至 WI-1456 起逐項替換 |
+| [WI-1456](WI-1456-scenes-and-segments.md) | T | 場景偵測與場景片段、條目歸屬 | WI-1455 | 已完成（2026-10-15），T 的 fa94d03；舊表仍寫，由 WI-1457 至 WI-1460 替換讀取者後停寫 |
+| [WI-1457](WI-1457-polish-with-turns-and-dash.md) | T | 潤飾附畫面與換人資料；SRT 依參數畫破折號；刪除核對階段 | WI-1456 | 已完成（2026-10-15），T 的 faa767d；移除 verify* 與 maxFramesPerRequest 參數，新增 framesPerSegment、subtitleDialogueDash |
+| [WI-1458](WI-1458-three-layer-summary.md) | T | 片段、場景、全片三層摘要與角色表 | WI-1457 | 已完成（2026-10-15），T 的 da8fb20；移除 summaryGroupSystemPrompt，新增 summarySegmentSystemPrompt、summarySceneSystemPrompt；group_summary 暫時橋接寫入至 WI-1460 |
+| [WI-1459](WI-1459-translation-with-context.md) | T | 翻譯附角色表、場景摘要與前文，保留行與換人 | WI-1458 | 已完成（2026-10-15），T 的 93eedb8；移除 contextBatchEntries、contextSeconds、contextMaxEntries；舊表橋接寫入至 WI-1460 |
+| [WI-1460](WI-1460-views-and-docs-alignment.md) | T、R | Console view 改讀新資料；runbook、資料模型、入口文件對齊 | WI-1459 | 已核可（2026-10-14），T 的部分已完成（2026-10-15，T 的 55a664a）；R 的對齊稿在 draft（07-nfr-risks、01 第 56 行），待核可 |
+
+實機測試後追加：
+
+| 項目 | 儲存庫 | 目標 | 相依 | 狀態 |
+|---|---|---|---|---|
+| [WI-1463](WI-1463-truncation-degrades-chunk.md) | T | 轉錄片段被截斷時降級，不重試、不計入及早止損；全部失敗才讓 run 失敗 | WI-1455、WI-1456 | 已完成（2026-10-15），T 的 161838b；架構師依授權決定，待使用者回顧 |
+
+| [WI-1464](WI-1464-times-out-of-model-answers.md) | T | 潤飾與翻譯的請求與回答不帶條目時間，由 pipeline 依序號補回；失敗 run 的降級數顯示修正 | WI-1457、WI-1459 | 架構師依授權決定（2026-10-15），派工中，待使用者回顧 |
+
+| [WI-1465](WI-1465-repetition-penalties.md) | T | 轉錄截斷後帶重複懲罰重試一次；摘要可選的懲罰參數 | WI-1463、WI-1464 | 架構師依使用者指示決定（2026-10-15），待 WI-1464 驗收後派工，待使用者回顧 |
 
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。
 

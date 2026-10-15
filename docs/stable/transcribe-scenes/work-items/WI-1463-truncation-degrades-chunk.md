@@ -1,6 +1,6 @@
 # WI-1463 轉錄片段被截斷時降級，不重試、不計入及早止損
 
-本文回答：轉錄片段被生成上限截斷時 pipeline 要怎麼做。狀態：架構師依授權決定（2026-10-15），待使用者回顧。相依：WI-1455、WI-1456。決策見 [ADR-059](../adr/ADR-059-truncated-chunk-is-content-not-outage.md)。儲存庫：T。
+本文回答：轉錄片段被生成上限截斷時 pipeline 要怎麼做。狀態：已核可（2026-10-15），已完成。相依：WI-1455、WI-1456。決策見 [ADR-059](../adr/ADR-059-truncated-chunk-is-content-not-outage.md)。儲存庫：T。
 
 ## 行為與驗收條件
 

@@ -1,6 +1,6 @@
 # ADR-060 條目時間不送給模型也不由模型回傳
 
-本文回答：潤飾與翻譯的請求與回答要不要帶條目的時間軸。狀態：架構師依使用者的自主決策授權決定（2026-10-15），待使用者回顧。修改 [ADR-053](ADR-053-polish-with-frames-and-speaker-turns.md) 與 [ADR-054](ADR-054-scene-summaries-and-translation-context.md) 中「回答保留條目時間」的作法（目標不變：條目的數量、序號、時間不被改動）、[05](../05-ipc.md) 的條目不變式，以及 [WI-1457](../work-items/WI-1457-polish-with-turns-and-dash.md)、[WI-1459](../work-items/WI-1459-translation-with-context.md) 的「時間不變」檢查方式。
+本文回答：潤飾與翻譯的請求與回答要不要帶條目的時間軸。狀態：已核可（2026-10-15）。修改 [ADR-053](ADR-053-polish-with-frames-and-speaker-turns.md) 與 [ADR-054](ADR-054-scene-summaries-and-translation-context.md) 中「回答保留條目時間」的作法（目標不變：條目的數量、序號、時間不被改動）、[05](../05-ipc.md) 的條目不變式，以及 [WI-1457](../work-items/WI-1457-polish-with-turns-and-dash.md)、[WI-1459](../work-items/WI-1459-translation-with-context.md) 的「時間不變」檢查方式。
 
 ## 背景
 

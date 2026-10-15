@@ -1,6 +1,6 @@
 # ADR-059 轉錄片段被截斷是內容問題，不是服務中斷
 
-本文回答：轉錄片段因生成上限被截斷時，如何重試、降級，以及是否計入及早止損。狀態：架構師依使用者的自主決策授權決定（2026-10-15），待使用者回顧；決策 1 由 [ADR-061](ADR-061-repetition-penalties-on-loops.md) 修改為「首次截斷後帶懲罰重試一次」。修改 [ADR-055](ADR-055-thinking-policy-and-early-stop.md) 決策 6 與 [WI-1461](../work-items/WI-1461-asr-generation-cap.md) 條件 3 中「截斷計入及早止損」的部分，僅限轉錄階段。
+本文回答：轉錄片段因生成上限被截斷時，如何重試、降級，以及是否計入及早止損。狀態：已核可（2026-10-15）；決策 1 由 [ADR-061](ADR-061-repetition-penalties-on-loops.md) 修改為「首次截斷後帶懲罰重試一次」。修改 [ADR-055](ADR-055-thinking-policy-and-early-stop.md) 決策 6 與 [WI-1461](../work-items/WI-1461-asr-generation-cap.md) 條件 3 中「截斷計入及早止損」的部分，僅限轉錄階段。
 
 ## 背景
 

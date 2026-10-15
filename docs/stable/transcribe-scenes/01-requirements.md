@@ -53,7 +53,7 @@
 
 ## 假設
 
-1. Qwen3-ForcedAligner 能在 Engine 主機的 CPU 上以可接受的速度處理 30 秒片段（WI-1451 驗證）。
+1. Qwen3-ForcedAligner 能在 Lemonade 主機的 GPU 上，經 llm-gateway 以可接受的速度處理 30 秒片段（WI-1451 驗證，[ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)）。
 2. Lemonade 接受 30 秒 WAV 的轉錄請求，大小在資源的 `maxRequestBytes` 之內（WI-1452 驗證）。
 3. gemma4 在 thinking 關閉時，能依畫面與文字合理標出換人（WI-1452 抽樣驗證）。
 4. 影片有畫面；沒有畫面的影片整部視為一個場景，潤飾與摘要不附圖。

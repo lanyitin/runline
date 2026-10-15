@@ -12,12 +12,12 @@
 | 項目 | 儲存庫 | 目標 | 相依 | 狀態 |
 |---|---|---|---|---|
 | [WI-1453](WI-1453-thinking-policy-and-early-stop.md) | T | thinking 取樣政策、分開的逾時、截斷不拆批、及早止損、推理與 5xx 的紀錄 | 無 | 已完成（2026-10-14）；runbook 的部分併入 WI-1460 |
-| [WI-1461](WI-1461-asr-generation-cap.md) | T | 每個轉錄請求帶生成上限，截斷依規則處理；量測工具套用同樣的上限 | WI-1453 | 已核可（2026-10-14），派工中 |
-| [WI-1462](WI-1462-gateway-alignment-endpoint.md) | G | llm-gateway 以 GPU 提供對齊模型，經 OpenAI 相容的音訊轉錄端點；與 Lemonade、d1 輪流佔用 GPU | 無 | 已完成並在實機驗證核心路徑（2026-10-14）；條件 9 的效能紀錄待量測 |
+| [WI-1461](WI-1461-asr-generation-cap.md) | T | 每個轉錄請求帶生成上限，截斷依規則處理；量測工具套用同樣的上限 | WI-1453 | 已完成（2026-10-14） |
+| [WI-1462](WI-1462-gateway-alignment-endpoint.md) | G | llm-gateway 以 GPU 提供對齊模型，經 OpenAI 相容的音訊轉錄端點；與 Lemonade、d1 輪流佔用 GPU | 無 | 已完成並在實機驗證（2026-10-14）；條件 9 已量測：切換約 4 至 5 秒、每片段中位數 0.07 秒、對齊期間 GPU 總佔用峰值 2,519 MB |
 | [WI-1451](WI-1451-feasibility-forced-alignment.md) | T | 可行性關卡：經 gateway 以 GPU 對齊 30 秒片段的耗時與失敗率；時間精度延後到成品字幕核對 | WI-1461、WI-1462 | 關卡通過（2026-10-14）：一小時推估約 1 分鐘，對齊失敗 0；時間精度待成品字幕核對 |
-| [WI-1452](WI-1452-feasibility-long-chunks-and-segments.md) | T | 可行性關卡：30 秒片段的請求大小與耗時；場景片段附圖的潤飾成本；場景偵測的門檻；轉錄品質與換人正確率延後到成品字幕核對 | 無（轉錄的量測依賴 WI-1461） | 量測已完成（2026-10-14），成本符合；待使用者提供 `maxRequestBytes` 與判定場景偵測後通過 |
+| [WI-1452](WI-1452-feasibility-long-chunks-and-segments.md) | T | 可行性關卡：30 秒片段的請求大小與耗時；場景片段附圖的潤飾成本；場景偵測的門檻；轉錄品質與換人正確率延後到成品字幕核對 | 無（轉錄的量測依賴 WI-1461） | 關卡通過（2026-10-14）：請求大小、成本、場景偵測皆符合；預設值見 [ADR-058](../adr/ADR-058-measured-defaults.md)；轉錄品質與換人正確率待成品字幕核對 |
 | [WI-1454](WI-1454-aligner-in-image.md) | R、T | 對齊工具與模型檔進入 `transcribe` 系列映像與主機部署 | WI-1451 | 作廢（2026-10-14），由 ADR-056 與 WI-1462 取代 |
-| [WI-1455](WI-1455-long-chunks-alignment-entries.md) | T | 長片段切分、轉錄、經 gateway 對齊、組成條目；移除 VAD-A／B、補掃與輸出時合併 | WI-1451、WI-1452、WI-1453、WI-1461、WI-1462 | 已核可（2026-10-14），待派工 |
+| [WI-1455](WI-1455-long-chunks-alignment-entries.md) | T | 長片段切分、轉錄、經 gateway 對齊、組成條目；移除 VAD-A／B、補掃與輸出時合併 | WI-1451、WI-1452、WI-1453、WI-1461、WI-1462 | 已核可（2026-10-14），派工中 |
 | [WI-1456](WI-1456-scenes-and-segments.md) | T | 場景偵測與場景片段、條目歸屬 | WI-1455 | 已核可（2026-10-14），待派工 |
 | [WI-1457](WI-1457-polish-with-turns-and-dash.md) | T | 潤飾附畫面與換人資料；SRT 依參數畫破折號；刪除核對階段 | WI-1456 | 已核可（2026-10-14），待派工 |
 | [WI-1458](WI-1458-three-layer-summary.md) | T | 片段、場景、全片三層摘要與角色表 | WI-1457 | 已核可（2026-10-14），待派工 |
@@ -28,7 +28,7 @@
 
 派工順序：
 1. WI-1461、WI-1462、WI-1451 的工具修訂：已完成。
-2. WI-1451 與 WI-1452 的實機量測：已完成；WI-1451 關卡通過，WI-1452 待 `maxRequestBytes` 與場景偵測的判定。
-3. 兩個關卡通過後，Engine 資源的上游改指 gateway（[04](../04-deployment.md)），再派 WI-1455 及其後各項。
+2. WI-1451 與 WI-1452 的實機量測：已完成，兩個關卡通過。
+3. WI-1455 及其後各項依相依順序派工；WI-1455 的版本上線前，Engine 資源的上游改指 gateway（[04](../04-deployment.md)）。
 
 關卡不通過時停下來，由架構決定，不繼續後續項目。

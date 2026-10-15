@@ -1,6 +1,6 @@
 # WI-1462 llm-gateway 的對齊端點
 
-本文回答：llm-gateway 如何以 GPU 提供 Qwen3-ForcedAligner，並與 Lemonade、d1 共用 GPU。狀態：已完成並在實機驗證核心路徑（2026-10-14）；條件 9 的效能紀錄待量測。相依：無。決策見 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md) 與 [ADR-057](../adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)，契約見 [05](../05-ipc.md)。儲存庫：G（llm-gateway，`/Users/lanyitin/Projects/Personal/llm-gateway`）。
+本文回答：llm-gateway 如何以 GPU 提供 Qwen3-ForcedAligner，並與 Lemonade、d1 共用 GPU。狀態：已完成並在實機驗證（2026-10-14）；條件 9 已量測：切換約 4 至 5 秒、每片段中位數 0.07 秒、對齊期間 GPU 總佔用峰值 2,519 MB。相依：無。決策見 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md) 與 [ADR-057](../adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)，契約見 [05](../05-ipc.md)。儲存庫：G（llm-gateway，`/Users/lanyitin/Projects/Personal/llm-gateway`）。
 
 ## 行為與驗收條件
 
@@ -13,6 +13,7 @@
 2. **對齊結果的契約**：
    - 字詞依時間排序，時間落在音訊長度內；
    - 字詞串接後與送出的文字一致，空白與標點的處理規則寫在 README；
+   - 回傳的字詞保留送入文字的原字元，不做相容字元的改寫（全形英數、半形片假名、羅馬數字、上標、組合用字元）；
    - 以日語與英語的語音各測一次。
 3. **請求驗證**：比照決策 API 的錯誤格式（OpenAI 格式，`param` 指出欄位）。
    - 缺少音訊、文字或語言，或音訊無法解碼：回 400；
@@ -23,7 +24,9 @@
    - 另一方有進行中的請求時不切換，排隊的一方優先；
    - d1、對齊、Lemonade 三方之間的切換都正確，原有 d1 與 Lemonade 的切換行為不變；
    - 對齊的推論一次只跑一個。
-5. **無法服務**：無法取得 GPU、VRAM 不足或模型載入失敗時，回 503 並說明原因，不改用 CPU。
+5. **無法服務與推理失敗**：
+   - 無法取得 GPU、VRAM 不足或模型載入失敗時，回 503 並說明原因，不改用 CPU；
+   - 推理本身丟出例外時，回 500，OpenAI 錯誤格式，`type` 為 `server_error`、`code` 為 `inference_failed`，訊息說明原因，與決策 API 的 500 一致；失敗後 GPU 狀態一致（進行中計數歸零，後續請求照常）。
 6. **版本固定與離線**：
    - 對齊模型的 revision 與檔案雜湊固定；
    - 執行時不連網下載，模型檔不存在或雜湊不符時，以明確訊息回 503；

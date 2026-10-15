@@ -1,6 +1,6 @@
 # WI-1462 llm-gateway 的對齊端點
 
-本文回答：llm-gateway 如何以 GPU 提供 Qwen3-ForcedAligner，並與 Lemonade、d1 共用 GPU。狀態：已核可（2026-10-14），派工中。相依：無。決策見 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md) 與 [ADR-057](../adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)，契約見 [05](../05-ipc.md)。儲存庫：G（llm-gateway，`/Users/lanyitin/Projects/Personal/llm-gateway`）。
+本文回答：llm-gateway 如何以 GPU 提供 Qwen3-ForcedAligner，並與 Lemonade、d1 共用 GPU。狀態：已完成並在實機驗證核心路徑（2026-10-14）；條件 9 的效能紀錄待量測。相依：無。決策見 [ADR-056](../adr/ADR-056-alignment-on-gateway-gpu.md) 與 [ADR-057](../adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)，契約見 [05](../05-ipc.md)。儲存庫：G（llm-gateway，`/Users/lanyitin/Projects/Personal/llm-gateway`）。
 
 ## 行為與驗收條件
 

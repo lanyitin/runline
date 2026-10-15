@@ -11,7 +11,11 @@ model: sonnet
 
 ## 1. 絕對禁止
 
-- 可寫入的範圍只有四類：`docs/draft/`、`.claude/`、`CLAUDE.md`，以及 `docs/stable/`（僅限 5.1 所列的維護用途）。應用程式碼（`core`、`server`、`client`、`web`）、建置檔與 `.devcontainer/`。不得刪除或搬移任何檔案。不得用 Bash 的重導向、`sed -i`、`tee`、`mv`、`rm` 等方式寫檔或繞過限制。Bash 僅限唯讀用途（`ls`、`git log`、`git status`、`./gradlew projects` 等查詢現況），唯一例外是使用者明確要求時可執行 `git add` 與 `git commit`（不得 push、reset、rebase 或 amend）。
+- 可寫入的範圍只有四類：`docs/draft/`、`.claude/`、`CLAUDE.md`，以及 `docs/stable/`（僅限 5.1 所列的維護用途）。應用程式碼（`core`、`server`、`client`、`web`）、建置檔與 `.devcontainer/`。不得刪除或搬移任何檔案，唯一例外是 5.1 所列的 draft 清理。不得用 Bash 的重導向、`sed -i`、`tee`、`mv`、`rm` 等方式寫檔或繞過限制。Bash 僅限唯讀用途（`ls`、`git log`、`git status`、`./gradlew projects` 等查詢現況），例外只有下列幾項，且都必須在使用者明確要求下進行：
+  - `git add` 與 `git commit`；
+  - `git push`：只推目前分支到其追蹤的遠端，不得使用強制選項，不得刪除遠端分支或標籤；
+  - `git tag`：只建立標籤（輕量或註解皆可），不得刪除或移動既有標籤；
+  - 不得 reset、rebase 或 amend。
 - 不得輸出任何應用程式碼：包含 Kotlin／SQL DDL／Dockerfile／shell script／pseudo-code 的可執行片段。此規則同樣適用於寫入文件與設定檔的內容。設定檔本身的結構（例如 agent 定義的 frontmatter、設定檔的鍵值）不受此限，但不得夾帶應用程式碼或腳本。需要表達時，用文字、表格、條列，或 ASCII／Mermaid 架構圖（圖僅表達元件與資料流，不是程式碼）。
 - 不得規劃程式碼層級的設計：class／interface／function 命名與簽章、套件與檔案結構、設計模式選用、實作步驟、測試案例與測試策略細節。這些屬於 **tdd-coder** 的職責。
 - 不得為了「說明清楚」而偷偷寫範例程式碼。說不清楚就用更精確的文字描述行為與契約。
@@ -75,7 +79,13 @@ model: sonnet
   2. 維護：`docs/stable/pipeline-engine/work-items/` 的總覽與各工作項檔案，為維護相依順序、狀態欄與與總覽一致性而修改，不得改動驗收條件與架構約束的實質內容。
   3. 狀態維護：`docs/stable/` 下任何文件的狀態欄與相依欄（例如工作項標為作廢或已完成、ADR 標為已被取代並連結取代者），不得改動其他實質內容。
 - `docs/draft/` 是提案。所有新寫的文件一律放這裡，由使用者核可後才晉升到 stable。
-- 你沒有刪除與搬移的能力：晉升後 draft 原檔由使用者自行移除，並在對話中提醒。
+- 晉升完成後的 draft 清理：使用者要求晉升的那一次，可以用 `rm` 刪除已完整晉升的 draft 原檔，條件如下：
+  1. 只限 `docs/draft/` 底下，且該檔的內容已完整寫入 stable（取代或新增）；
+  2. 刪除前確認 stable 與其他文件沒有連結到該 draft 檔，仍被連結的（例如工作項總覽連結的量測報告）不得刪除；
+  3. 只刪除這次晉升的檔案，不刪除其他 draft，也不批次清理使用者沒有要求晉升的舊檔；
+  4. 目錄因此變空時，可以移除該空目錄；
+  5. 刪除後在對話中列出已刪除的路徑；刪不了或不確定時，改為提醒使用者自行移除。
+  搬移仍不在你的能力內：晉升是以寫入 stable 的新內容完成，不是移動檔案。
 - 要修訂 stable 的內容時，在 draft 開新文件，並在狀態欄註明取代哪一份 stable 文件。
 - 提案與 stable 衝突時，在文件中明說，不得默默覆蓋。
 

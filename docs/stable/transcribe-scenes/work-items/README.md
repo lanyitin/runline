@@ -41,7 +41,7 @@
 | [WI-1473](WI-1473-lenient-translate-polish-answers.md) | T | 翻譯與潤飾的回答依序號寬鬆解析，取不到才以條目降級；翻譯的換人標記由 pipeline 補回 | WI-1468、WI-1471、WI-1472 | 已完成（2026-10-15），T 的 9eb335a；相關範圍 443 個測試通過（最後一次修正後未重跑整組）；截斷仍重試，留給 WI-1475；已核可 |
 | [WI-1474](WI-1474-lenient-summary-answers.md) | T | 摘要與角色表的回答寬鬆解析：標記尋找、語言碼對應、角色逐列採用、超長截斷 | WI-1458、WI-1468 | 已核可（2026-10-15），待派工（建議待 WI-1473 完成後） |
 | [WI-1475](WI-1475-retry-and-early-stop-policy.md) | T | 重試只留給服務錯誤與空手而回（每片段 1 次，不附原因）；及早止損以片段計數；角色表不為描述編譯名 | WI-1468 | 已核可（2026-10-15），待派工（建議待 WI-1474 完成後） |
-| [WI-1476](WI-1476-cancelled-run-records-its-end.md) | T | 被取消的 run 記錄結束狀態並可當續跑來源；取消盡快中止進行中的呼叫 | WI-1467 | 已核可（2026-10-15），待派工 |
+| [WI-1476](WI-1476-cancelled-run-records-its-end.md) | T | 被取消的 run 記錄結束狀態並可當續跑來源；取消盡快中止進行中的呼叫 | WI-1467 | 已完成（2026-10-15），T 的 dd354fb；取消、逾時、中斷的 run 記錄結束並寫入 `result_note = STOPPED`，被中止的階段列標為 `aborted`；取消的反應原本即時（假服務量到 3 至 7 毫秒，真實硬體未量測）；相關範圍 232 個測試，除既有的 DenoiseRecordsTest 一項失敗外通過；已核可 |
 | [WI-1477](WI-1477-retry-untranslated-entries.md) | T | 翻譯中未翻譯的條目重試一次，只重送那些條目；與 WI-1475 對「未翻譯不重試」的敘述衝突時以本項為準 | WI-1473、WI-1475 | 已核可（2026-10-15），待派工（須待 WI-1475 完成後） |
 
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。

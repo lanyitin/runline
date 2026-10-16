@@ -44,8 +44,8 @@
 | [WI-1476](WI-1476-cancelled-run-records-its-end.md) | T | 被取消的 run 記錄結束狀態並可當續跑來源；取消盡快中止進行中的呼叫 | WI-1467 | 已完成（2026-10-15），T 的 dd354fb；取消、逾時、中斷的 run 記錄結束並寫入 `result_note = STOPPED`，被中止的階段列標為 `aborted`；取消的反應原本即時（假服務量到 3 至 7 毫秒，真實硬體未量測）；相關範圍 232 個測試，除既有的 DenoiseRecordsTest 一項失敗外通過；已核可 |
 | [WI-1477](WI-1477-retry-untranslated-entries.md) | T | 翻譯中未翻譯的條目重試一次，只重送那些條目；與 WI-1475 對「未翻譯不重試」的敘述衝突時以本項為準 | WI-1473、WI-1475 | 已完成（2026-10-15），T 的 0975535，合併於 832c4f8；`UntranslatedRetryRunTest` 11 個與 `TranslateRunTest`、`ResumeFromDegradedRunTest`、`ThinJarTest` 通過；已核可 |
 | [WI-1478](WI-1478-html-run-report.md) | T | 每個 run 結束時產生 HTML 報告（參數 `htmlReport`，預設開）：播放器形式、三階段字幕、場景背景色與場景摘要 | WI-1459 | 已完成（2026-10-15），T 的 000f1a2，合併於 74bd40d；影片旁寫出 `影片檔名.report.html`；在無頭 Chrome 驗證影片同步與背景色變換，聲音與其他瀏覽器未檢查；已核可 |
-| [WI-1479](WI-1479-measure-feedback-time.md) | T | 量測一次工作回饋的完整成本（編譯、依賴、每個類別的耗時、並行利用率、端到端單價），不改測試 | 無 | 已核可（2026-10-15），待派工 |
-| [WI-1480](WI-1480-rebalance-tests.md) | T | 依量測重配測試層：行為規則下沉到純邏輯與行程內整合層，端到端縮到少量，放寬測試替身；目標日常相關測試 ≤ 3 分鐘、全套 ≤ 10 分鐘 | WI-1479 | 已核可（2026-10-15），待派工（須待 WI-1479 完成後） |
+| [WI-1479](WI-1479-measure-feedback-time.md) | T | 量測一次工作回饋的完整成本（編譯、依賴、每個類別的耗時、並行利用率、端到端單價），不改測試 | 無 | 已完成（2026-10-16），T 的 0e25a20；報告在 T 的 `docs/test-feedback-report.md`；暖快取全套 7.5 分鐘、冷快取 10 至 12 分鐘，端到端占 87.5%，一次端到端執行的 47% 是 VAD 子行程；已核可 |
+| [WI-1480](WI-1480-rebalance-tests.md) | T | 依量測重配測試層：行為規則下沉到純邏輯與行程內整合層，端到端縮到少量，放寬測試替身；目標日常相關測試 ≤ 3 分鐘、全套 ≤ 10 分鐘 | WI-1479 | 已完成（2026-10-16），T 的 f38e37d；全套暖快取 5 分 39 秒至 5 分 54 秒、冷快取 7 分 17 秒，純邏輯 2.5 秒，單一工作項（以翻譯為例）24 秒；連續 3 次結果一致；類別順序的隨機未做（建置為 JUnit 4 加 category 過濾，無此機制）；已核可 |
 
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。
 

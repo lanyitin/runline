@@ -39,10 +39,13 @@
 | [WI-1471](WI-1471-any-chinese-and-context-check.md) | T | 翻譯接受任何中文字形（取消簡體字檢查）；語境重複檢查不誤判與前文譯文相同的短句 | WI-1468 | 已完成（2026-10-15），T 的 10de292；相關範圍 489 個測試通過（唯一的 SummaryRunTest 失敗由 WI-1466 的測試資料引起，已在 T 的 618d016 修正）；已核可 |
 | [WI-1472](WI-1472-recheck-carried-units.md) | T | 續跑時以現行規則重新檢查被沿用的譯文（含假名、行數），不通過的條目重做 | WI-1470 | 已完成（2026-10-15），T 的 709032a；相關範圍測試全數通過；已核可 |
 | [WI-1473](WI-1473-lenient-translate-polish-answers.md) | T | 翻譯與潤飾的回答依序號寬鬆解析，取不到才以條目降級；翻譯的換人標記由 pipeline 補回 | WI-1468、WI-1471、WI-1472 | 已完成（2026-10-15），T 的 9eb335a；相關範圍 443 個測試通過（最後一次修正後未重跑整組）；截斷仍重試，留給 WI-1475；已核可 |
-| [WI-1474](WI-1474-lenient-summary-answers.md) | T | 摘要與角色表的回答寬鬆解析：標記尋找、語言碼對應、角色逐列採用、超長截斷 | WI-1458、WI-1468 | 已核可（2026-10-15），待派工（建議待 WI-1473 完成後） |
-| [WI-1475](WI-1475-retry-and-early-stop-policy.md) | T | 重試只留給服務錯誤與空手而回（每片段 1 次，不附原因）；及早止損以片段計數；角色表不為描述編譯名 | WI-1468 | 已核可（2026-10-15），待派工（建議待 WI-1474 完成後） |
+| [WI-1474](WI-1474-lenient-summary-answers.md) | T | 摘要與角色表的回答寬鬆解析：標記尋找、語言碼對應、角色逐列採用、超長截斷 | WI-1458、WI-1468 | 已完成（2026-10-15），T 的 1e8792e，合併於 8dcf823；相關範圍 416 個測試通過；已核可 |
+| [WI-1475](WI-1475-retry-and-early-stop-policy.md) | T | 重試只留給服務錯誤與空手而回（每片段 1 次，不附原因）；及早止損以片段計數；角色表不為描述編譯名 | WI-1468 | 已完成（2026-10-15），T 的 774ce76，合併於 832c4f8；`modelRetries` 預設改為 1（轉錄與對齊共用此參數）；已核可 |
 | [WI-1476](WI-1476-cancelled-run-records-its-end.md) | T | 被取消的 run 記錄結束狀態並可當續跑來源；取消盡快中止進行中的呼叫 | WI-1467 | 已完成（2026-10-15），T 的 dd354fb；取消、逾時、中斷的 run 記錄結束並寫入 `result_note = STOPPED`，被中止的階段列標為 `aborted`；取消的反應原本即時（假服務量到 3 至 7 毫秒，真實硬體未量測）；相關範圍 232 個測試，除既有的 DenoiseRecordsTest 一項失敗外通過；已核可 |
-| [WI-1477](WI-1477-retry-untranslated-entries.md) | T | 翻譯中未翻譯的條目重試一次，只重送那些條目；與 WI-1475 對「未翻譯不重試」的敘述衝突時以本項為準 | WI-1473、WI-1475 | 已核可（2026-10-15），待派工（須待 WI-1475 完成後） |
+| [WI-1477](WI-1477-retry-untranslated-entries.md) | T | 翻譯中未翻譯的條目重試一次，只重送那些條目；與 WI-1475 對「未翻譯不重試」的敘述衝突時以本項為準 | WI-1473、WI-1475 | 已完成（2026-10-15），T 的 0975535，合併於 832c4f8；`UntranslatedRetryRunTest` 11 個與 `TranslateRunTest`、`ResumeFromDegradedRunTest`、`ThinJarTest` 通過；已核可 |
+| [WI-1478](WI-1478-html-run-report.md) | T | 每個 run 結束時產生 HTML 報告（參數 `htmlReport`，預設開）：播放器形式、三階段字幕、場景背景色與場景摘要 | WI-1459 | 已完成（2026-10-15），T 的 000f1a2，合併於 74bd40d；影片旁寫出 `影片檔名.report.html`；在無頭 Chrome 驗證影片同步與背景色變換，聲音與其他瀏覽器未檢查；已核可 |
+| [WI-1479](WI-1479-measure-feedback-time.md) | T | 量測一次工作回饋的完整成本（編譯、依賴、每個類別的耗時、並行利用率、端到端單價），不改測試 | 無 | 已核可（2026-10-15），待派工 |
+| [WI-1480](WI-1480-rebalance-tests.md) | T | 依量測重配測試層：行為規則下沉到純邏輯與行程內整合層，端到端縮到少量，放寬測試替身；目標日常相關測試 ≤ 3 分鐘、全套 ≤ 10 分鐘 | WI-1479 | 已核可（2026-10-15），待派工（須待 WI-1479 完成後） |
 
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。
 

@@ -1,6 +1,6 @@
 # 4 部署
 
-狀態：已核可（2026-10-14）。本文回答：為了對齊與場景偵測，各主機與服務要多提供什麼。現行部署見 [stable transcribe-pipeline 04](../../stable/transcribe-pipeline/04-deployment.md) 與 `deploy/transcribe.md`；本文只寫差異。對齊的位置見 [ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)。
+狀態：已核可（2026-10-16）。本文回答：為了對齊、二次轉錄與場景偵測，各主機與服務要多提供什麼。現行部署見 [stable transcribe-pipeline 04](../../stable/transcribe-pipeline/04-deployment.md) 與 `deploy/transcribe.md`；本文只寫差異。對齊的位置見 [ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)。
 
 ## 拓撲
 
@@ -10,7 +10,7 @@ flowchart LR
     E[Engine + transcribe pipeline]
   end
   subgraph Lemonade 主機
-    G[llm-gateway :8098] --> L[Lemonade :13305]
+    G[llm-gateway :8098] --> L[Lemonade :13305：LLM、Qwen3-ASR、Kotoba-Whisper]
     G --> A[Qwen3-ForcedAligner]
     G --> D[d1-3B]
   end
@@ -29,6 +29,15 @@ flowchart LR
   - 由使用者在 Lemonade 主機維運（user 層級 systemd 服務 `llm-gateway`），不隨 runline 映像部署；
   - gateway 的健康狀態列出目前佔用 GPU 的一方，以及對齊模型是否已載入。
 - **Engine 映像**：不變，不加入 Python 與對齊模型。
+
+## 第二個轉錄模型（Lemonade）
+
+- **形態**：Lemonade 的自訂模型，名稱 `user.Kotoba-Whisper-v2.0`（顯示為 `Kotoba-Whisper-v2.0`），recipe 為 whispercpp，權重為 `kotoba-tech/kotoba-whisper-v2.0-ggml` 的 `ggml-kotoba-whisper-v2.0.bin`（約 1.5 GB），標籤含 transcription；經 gateway 以 `audio.transcriptions` 端點提供。
+- **維運**：由使用者或 homelab-deployer 在 Lemonade 主機註冊與保留；Engine 映像與 runline 不負責下載。
+- **載入**：與 llm 槽分開；冷載入加一次推理約 6 秒。
+- **Engine 資源**：音訊轉錄條目已啟用；資源的放行模型清單（`allowedModels`，若有設定）須包含此模型，否則二次轉錄以設定類失敗略過。
+- **缺少時**：主機未註冊此模型，二次轉錄在第一次呼叫失敗後於該 run 內停用，run 其餘行為不變（[ADR-075](adr/ADR-075-second-pass-default-on-with-kotoba.md)）。
+- **日語專用**：非日語的影片預設不做二次轉錄；要使用時改模型參數為多語模型（例如 Whisper-Large-v3-Turbo）並把語言加入執行清單。
 
 ## Engine 資源
 
@@ -50,6 +59,7 @@ flowchart LR
 | 項目 | 位置 | 用途 |
 |---|---|---|
 | 對齊模型名稱 | transcribe 的 pipeline 參數 | 送到音訊轉錄條目的模型名稱，須與 gateway 的設定一致 |
+| 第二個轉錄模型、執行二次轉錄的語言、run 語言、書寫系統占比門檻、幻覺句清單 | transcribe 的 pipeline 參數 | 二次轉錄的行為；模型留空即關閉 |
 | 對齊模型的 revision、裝置、切換逾時 | gateway 的環境變數 | 比照 d1 的設定方式 |
 | Engine 資源的上游位址 | Engine 的資源設定 | 指向 gateway |
 | 其他 pipeline 參數 | 見 [05](05-ipc.md) 與各 ADR；完整清單在 runline-transcribe 的 README | |
@@ -58,3 +68,4 @@ flowchart LR
 
 - gateway 無法載入對齊模型或取得 GPU 時，回覆服務不可用；pipeline 依重試、降級與止損處理（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)）。
 - 部署後，以一段短音訊經 Engine 資源呼叫對齊模型，確認可用（由 WI-1462 提供步驟）。
+- 部署後，以一段短日語音訊經 Engine 資源呼叫第二個轉錄模型，確認可用。

@@ -47,6 +47,15 @@
 | [WI-1479](WI-1479-measure-feedback-time.md) | T | 量測一次工作回饋的完整成本（編譯、依賴、每個類別的耗時、並行利用率、端到端單價），不改測試 | 無 | 已完成（2026-10-16），T 的 0e25a20；報告在 T 的 `docs/test-feedback-report.md`；暖快取全套 7.5 分鐘、冷快取 10 至 12 分鐘，端到端占 87.5%，一次端到端執行的 47% 是 VAD 子行程；已核可 |
 | [WI-1480](WI-1480-rebalance-tests.md) | T | 依量測重配測試層：行為規則下沉到純邏輯與行程內整合層，端到端縮到少量，放寬測試替身；目標日常相關測試 ≤ 3 分鐘、全套 ≤ 10 分鐘 | WI-1479 | 已完成（2026-10-16），T 的 f38e37d；全套暖快取 5 分 39 秒至 5 分 54 秒、冷快取 7 分 17 秒，純邏輯 2.5 秒，單一工作項（以翻譯為例）24 秒；連續 3 次結果一致；類別順序的隨機未做（建置為 JUnit 4 加 category 過濾，無此機制）；已核可 |
 
+Whisper 二次轉錄與移除角色表（2026-10-16 核可）：
+
+| 項目 | 儲存庫 | 目標 | 相依 | 狀態 |
+|---|---|---|---|---|
+| [WI-1481](WI-1481-whisper-second-pass.md) | T | 降級或語言不符的片段，以第二個轉錄模型在固定語言下二次轉錄；預設開啟、預設模型 Kotoba-Whisper（日語），run 語言由首次轉錄的書寫系統決定；採用規則與幻覺句處理 | WI-1463、WI-1466、WI-1467 | 已核可（2026-10-16）；決策見 [ADR-073](../adr/ADR-073-whisper-second-pass.md)、[ADR-075](../adr/ADR-075-second-pass-default-on-with-kotoba.md) |
+| [WI-1482](WI-1482-remove-character-table.md) | T、R | 移除角色表與全片摘要的出場人物；翻譯不附譯名 | WI-1474、WI-1475 | 已核可（2026-10-16）；決策見 [ADR-074](../adr/ADR-074-remove-character-table.md) |
+
+兩項沒有相依，可並行（各自在獨立的 worktree 與分支）。兩項都改 T 的摘要與轉錄附近的程式，合併時預期有衝突，由使用者決定合併順序。
+
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。
 
 派工順序：

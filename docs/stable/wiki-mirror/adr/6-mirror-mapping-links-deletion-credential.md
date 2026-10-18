@@ -1,6 +1,6 @@
 # #6：Wiki 映像的頁面對應、連結改寫、刪除同步與憑證
 
-本文回答：stable 如何對應成 Wiki 頁面、文件間連結如何處理、被刪除的文件如何反映，以及誰有權寫入 Wiki。狀態：提案中。Issue：#6。補充 [#1](../../../stable/wiki-mirror/adr/1-wiki-is-readonly-mirror.md)，不取代它。
+本文回答：stable 如何對應成 Wiki 頁面、文件間連結如何處理、被刪除的文件如何反映，以及誰有權寫入 Wiki。狀態：已核可。Issue：#6。補充 [#1](1-wiki-is-readonly-mirror.md)，不取代它。
 
 ## 背景
 

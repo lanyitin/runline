@@ -4,8 +4,8 @@
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| [WI-59](WI-59-engine-delete-impact-and-force.md) | Engine：影響預覽端點與確認後連同 run 刪除，文件同步 | 無 | 待派工 |
-| [WI-60](WI-60-console-delete-confirm.md) | Console：先預覽再確認的刪除對話框 | WI-59 | 待派工 |
+| [WI-59](WI-59-engine-delete-impact-and-force.md) | Engine：影響預覽端點與確認後連同 run 刪除，文件同步 | 無 | 已完成（2026-10-13），54b76e2；提交含 Engine 的影響預覽與刪除測試，驗收條件尚未由架構師逐條重跑 |
+| [WI-60](WI-60-console-delete-confirm.md) | Console：先預覽再確認的刪除對話框 | WI-59 | 已完成（2026-10-13），54b76e2；提交含 Console 對話框測試與 e2e，驗收條件尚未由架構師逐條重跑 |
 
 ## 全域架構約束
 

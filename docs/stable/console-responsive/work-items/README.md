@@ -4,10 +4,10 @@
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| [WI-61](WI-61-responsive-foundation.md) | 窄版面的基礎：斷點、抽屜導覽、頂列、觸控與輸入規則、手機尺寸的驗證基礎 | 無 | 待派工 |
-| [WI-62](WI-62-responsive-information-pages.md) | 查看資訊的頁面：run、log、pipeline、view、總覽 | WI-61 | 待派工 |
-| [WI-63](WI-63-responsive-admin-and-forms.md) | 管理頁、表單與對話框 | WI-61 | 待派工 |
-| [WI-64](WI-64-responsive-verification.md) | 全路由的手機尺寸驗證與文件 | WI-62、WI-63 | 待派工 |
+| [WI-61](WI-61-responsive-foundation.md) | 窄版面的基礎：斷點、抽屜導覽、頂列、觸控與輸入規則、手機尺寸的驗證基礎 | 無 | 已完成（2026-10-13），01b6130；WI-61 至 WI-64 合為一次提交，含 360、390、768px 全路由 e2e，驗收條件尚未由架構師逐條重跑 |
+| [WI-62](WI-62-responsive-information-pages.md) | 查看資訊的頁面：run、log、pipeline、view、總覽 | WI-61 | 已完成（2026-10-13），01b6130；WI-61 至 WI-64 合為一次提交，含 360、390、768px 全路由 e2e，驗收條件尚未由架構師逐條重跑 |
+| [WI-63](WI-63-responsive-admin-and-forms.md) | 管理頁、表單與對話框 | WI-61 | 已完成（2026-10-13），01b6130；WI-61 至 WI-64 合為一次提交，含 360、390、768px 全路由 e2e，驗收條件尚未由架構師逐條重跑 |
+| [WI-64](WI-64-responsive-verification.md) | 全路由的手機尺寸驗證與文件 | WI-62、WI-63 | 已完成（2026-10-13），01b6130；WI-61 至 WI-64 合為一次提交，含 360、390、768px 全路由 e2e，驗收條件尚未由架構師逐條重跑 |
 
 ```mermaid
 graph LR

@@ -56,6 +56,23 @@ Whisper 二次轉錄與移除角色表（2026-10-16 核可）：
 
 兩項沒有相依，可並行（各自在獨立的 worktree 與分支）。兩項都改 T 的摘要與轉錄附近的程式，合併時預期有衝突，由使用者決定合併順序。
 
+摘要外洩與降級（2026-10-18 核可；量測見[報告](../summary-leak-experiment-report.md)）：
+
+| 項目 | 儲存庫 | 目標 | 相依 | 狀態 |
+|---|---|---|---|---|
+| [WI-1483](WI-1483-scene-summary-answer-opening.md) | T | thinking 關閉時，場景層摘要請求的預填接上第一行標記；解析接受標記來自預填 | 無 | 已完成（2026-10-18），T 的 be5c6ff 合併；摘要相關測試 92 個通過；決策見 [ADR-077](../adr/ADR-077-scene-summary-answer-opening.md) |
+| [WI-1484](WI-1484-segment-summary-wording.md) | T | 片段摘要的提示規定稱呼自己為「片段」，不使用「場景」 | 無 | 已完成（2026-10-18），T 的 dfc1052 合併；用詞規定併入 WI-1488 的片段提示；決策見 [ADR-078](../adr/ADR-078-segment-summary-wording.md) |
+| [WI-1485](WI-1485-no-input-degradation.md) | T | 沒有素材的片段與場景不呼叫模型，直接降級並記下原因 | 無 | 已完成（2026-10-18），T 的 f212813 合併；日常套件 966 個測試，僅既有的 DenoiseRecordsTest 與偶發的 SchemaMigratorTest 失敗；新增遷移 V17；決策見 [ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 決策 1、2、5、6 |
+| [WI-1488](WI-1488-default-summary-prompts.md) | T | 場景層預設提示改為四個欄位、片段層預設提示改為一到三句且不含「scene」（內容依[參考文件](../run38-summary-prompts-reference.md)） | WI-1483、WI-1484、WI-1485 | 已完成（2026-10-18），T 的 9ed4aa4 合併；決策見 [ADR-081](../adr/ADR-081-default-summary-prompts-adopt-measured-structure.md) |
+| [WI-1486](WI-1486-scene-summary-field-block-only.md) | T | 欄位固定的層保存時只取欄位區塊，裁掉 `Ending` 之後的內容 | WI-1483、WI-1488 | 已核可（2026-10-18）；決策見 [ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 決策 3、4 |
+| [WI-1487](WI-1487-truncated-summary-flag.md) | T | 被截斷的摘要記錄為被截斷，並在下一層的輸入中標明 | WI-1486 | 已核可（2026-10-18）；決策見 [ADR-079](../adr/ADR-079-truncated-summary-is-kept-and-flagged.md) |
+
+WI-1483、WI-1484、WI-1485、WI-1488 已完成並合併進 T 的 main。接下來依序：WI-1486（相依 WI-1483、WI-1488，已滿足，可派），WI-1486 完成並驗收後再派 WI-1487。
+
+WI-1483 與 WI-1484 驗收並提交後，由 homelab-deployer 在 arr 的 Lemonade 上對 run 38 的素材做重放量測（條件見報告）：場景層看場景 30、18 與壓力場景，預期外洩為 0、回答開頭為格式；片段層看帶圖片的摘要不含「scene」的比例。量測前由架構師向使用者確認；量測結果不是使用者的核可。
+
+待確認問題：[ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 的待確認問題 1（欄位固定的層被截斷、一個完整欄位也沒有時是否降級）未決；WI-1486 在決定前維持保存殘文字。
+
 量測報告（提案中）：[WI-1451](../../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)。
 
 派工順序：

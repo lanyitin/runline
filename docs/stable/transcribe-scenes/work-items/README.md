@@ -62,7 +62,7 @@ Whisper 二次轉錄與移除角色表（2026-10-16 核可）：
 |---|---|---|---|---|
 | [WI-1483](WI-1483-scene-summary-answer-opening.md) | T | thinking 關閉時，場景層摘要請求的預填接上第一行標記；解析接受標記來自預填 | 無 | 已完成（2026-10-18），T 的 be5c6ff 合併；摘要相關測試 92 個通過；決策見 [ADR-077](../adr/ADR-077-scene-summary-answer-opening.md) |
 | [WI-1484](WI-1484-segment-summary-wording.md) | T | 片段摘要的提示規定稱呼自己為「片段」，不使用「場景」 | 無 | 已完成（2026-10-18），T 的 dfc1052 合併；用詞規定併入 WI-1488 的片段提示；決策見 [ADR-078](../adr/ADR-078-segment-summary-wording.md) |
-| [WI-1485](WI-1485-no-input-degradation.md) | T | 沒有素材的片段與場景不呼叫模型，直接降級並記下原因 | 無 | 已完成（2026-10-18），T 的 f212813 合併；日常套件 966 個測試，僅既有的 DenoiseRecordsTest 與偶發的 SchemaMigratorTest 失敗；新增遷移 V17；決策見 [ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 決策 1、2、5、6 |
+| [WI-1485](WI-1485-no-input-degradation.md) | T | 沒有素材的片段與場景不呼叫模型，直接降級並記下原因 | 無 | 已完成（2026-10-18），T 的 f212813 合併；日常套件 966 個測試，僅既有的 DenoiseRecordsTest 與偶發的 SchemaMigratorTest 失敗；新增遷移 V17；後續補上全片摘要沒有輸入的缺少原因（遷移 V18、T 的 f5115e1）與 SchemaMigrator 競爭修正；決策見 [ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 決策 1、2、5、6 |
 | [WI-1488](WI-1488-default-summary-prompts.md) | T | 場景層預設提示改為四個欄位、片段層預設提示改為一到三句且不含「scene」（內容依[參考文件](../run38-summary-prompts-reference.md)） | WI-1483、WI-1484、WI-1485 | 已完成（2026-10-18），T 的 9ed4aa4 合併；決策見 [ADR-081](../adr/ADR-081-default-summary-prompts-adopt-measured-structure.md) |
 | [WI-1486](WI-1486-scene-summary-field-block-only.md) | T | 欄位固定的層保存時只取欄位區塊，裁掉 `Ending` 之後的內容 | WI-1483、WI-1488 | 已核可（2026-10-18）；決策見 [ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 決策 3、4 |
 | [WI-1487](WI-1487-truncated-summary-flag.md) | T | 被截斷的摘要記錄為被截斷，並在下一層的輸入中標明 | WI-1486 | 已核可（2026-10-18）；決策見 [ADR-079](../adr/ADR-079-truncated-summary-is-kept-and-flagged.md) |

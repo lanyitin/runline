@@ -1,6 +1,6 @@
 # WI-1450 依約 6 秒的原則決定分段參數的預設值
 
-本文回答：分段與補掃的預設值要調成多少，以及如何以實際影片驗證。狀態：已核可（2026-10-13）。相依：WI-1448、WI-1449。決策見 [ADR-050](../adr/ADR-050-subtitle-length-and-merge.md) 決策 1。儲存庫：T（runline-transcribe）；比較在 arr 上進行（homelab-deployer 協助）。
+本文回答：分段與補掃的預設值要調成多少，以及如何以實際影片驗證。狀態：已作廢，由 [WI-1455](../../transcribe-scenes/work-items/WI-1455-long-chunks-alignment-entries.md) 取代，不派工（原已核可 2026-10-13）。相依：WI-1448、WI-1449。決策見 [ADR-050](../adr/ADR-050-subtitle-length-and-merge.md) 決策 1。儲存庫：T（runline-transcribe）；比較在 arr 上進行（homelab-deployer 協助）。
 
 ## 背景
 

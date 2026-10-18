@@ -8,9 +8,9 @@
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| [WI-1000](WI-1000-browser-feasibility.md) | 可行性關卡：以 DevTools 協定從 JVM 驅動有畫面的 Chrome，通過目標站點並能乾淨結束 | WI-1002 | 條件通過（開發機與 Linux 容器已通過，軟體渲染下三類站點 15/15；目標主機以 pi-env 既有量測代替，殘餘風險由 WI-1011 驗證） |
-| [WI-1001](WI-1001-engine-browser-deployment.md) | Docker 與 systemd 的 Engine 部署提供 Chrome、顯示、根憑證信任 | WI-1000 | 已實作（13 條中 11 條通過；第 8 條 pipeline 半部轉 WI-1006，第 10 條為文件；GPU 與 systemd 主機未驗證，步驟見 deploy/browser.md） |
-| [WI-1002](WI-1002-pipeline-skeleton.md) | pipeline 專案骨架：宣告、參數、階段 log、結果語意、取消 | 無 | 已實作；IntelliJ 實測待使用者回報 |
+| [WI-1000](WI-1000-browser-feasibility.md) | 可行性關卡：以 DevTools 協定從 JVM 驅動有畫面的 Chrome，通過目標站點並能乾淨結束 | WI-1002 | 已完成（使用者確認驗證完成，2026-10-18）；先前為條件通過：開發機與 Linux 容器已通過，軟體渲染下三類站點 15/15 |
+| [WI-1001](WI-1001-engine-browser-deployment.md) | Docker 與 systemd 的 Engine 部署提供 Chrome、顯示、根憑證信任 | WI-1000 | 已完成（使用者確認驗證完成，2026-10-18）；第 8 條 pipeline 半部轉 WI-1006，第 10 條為文件，步驟見 deploy/browser.md |
+| [WI-1002](WI-1002-pipeline-skeleton.md) | pipeline 專案骨架：宣告、參數、階段 log、結果語意、取消 | 無 | 已完成（使用者確認驗證完成，2026-10-18） |
 | [WI-1003](WI-1003-sqlite-database-kind.md) | `jdbc-pool` 新增 `sqlite` 資料庫種類（Engine 與 devkit） | 無 | 已完成（12 條驗收通過；真實瀏覽器 e2e 91 通過、安全腳本 15 通過；amd64 原生程式庫與部署風險併入 WI-1001、WI-1011） |
 | [WI-1015](WI-1015-dev-script-resource-root.md) | 開發腳本 `dev/dev.sh` 提供資源根目錄，使安全驗證腳本在乾淨環境可執行 | 無 | 已完成（乾淨 shell 下安全腳本 15 項與鎖檔檢查通過） |
 | [WI-1012](WI-1012-resource-roles-and-binding.md) | 資源角色與綁定：pipeline 註記型別與用途，開發人員與管理員選擇注入的資源（Engine、core、devkit） | 無 | 已完成（綁定以上傳者加 pipeline 名稱為鍵；12 條驗收通過，含隔離測試；e2e 91、契約 113 通過） |
@@ -25,7 +25,7 @@
 | [WI-1010](WI-1010-digest-and-marking.md) | 事實、摘要、串接、檢查、可標已讀集合與標記閘門；紀錄 DIGEST | WI-1005、WI-1007、WI-1008、WI-1009 | 已完成（602 個測試；14 種閘門關閉條件各有零標記測試；對真實 Lemonade 與 FreshRSS 未驗證，摘要 thinking 關的預填待真實模型驗證） |
 | [WI-1011](WI-1011-end-to-end-and-runbook.md) | 端到端行為等價驗證、彙整查詢驗證與管理員上線手冊 | WI-1001、WI-1010、WI-1013、WI-1018 | 已完成（618 個預設測試；端到端 41 個測試，約 21 個 run；手冊在 docs/draft/digest-rss/runbook.md 待晉升；文件不一致清單待處理；真實環境屬 WI-1017） |
 | [WI-1016](WI-1016-sqlite-first-open-race.md) | SQLite 資料庫檔第一次開啟的競爭（Engine 側缺陷修正） | WI-1003 | 已完成（根因：WAL 切換回 `SQLITE_BUSY` 而不呼叫忙碌處理；以重試修正；完整 `ktfmtCheck test` 通過） |
-| [WI-1017](WI-1017-first-real-run.md) | 真實環境的首次執行（由使用者執行；只讀契約檢查、真實模型、目標主機、`markRead=off` 的完整 run、決定是否開啟標記） | WI-1011、WI-1016 | 未開始 |
+| [WI-1017](WI-1017-first-real-run.md) | 真實環境的首次執行（由使用者執行；只讀契約檢查、真實模型、目標主機、`markRead=off` 的完整 run、決定是否開啟標記） | WI-1011、WI-1016 | 已完成（使用者確認驗證通過，2026-10-18） |
 | [WI-1018](WI-1018-parameter-revision.md) | 落實參數修訂：`condition` 必填、請求模型 id 改為參數 `readerModel` | WI-1007、WI-1010 | 已完成（610 個測試；真實 Engine 驗證缺 `condition` 時平台以 422 `invalid_parameters` 拒絕建立 run；`condition=none` 時摘要的模型 id 處理由 WI-1019 落實） |
 | [WI-1019](WI-1019-none-condition-summary.md) | `condition=none` 時摘要：有給 `readerModel` 就用於摘要，沒給只產出事實；手冊定稿 | WI-1018、WI-1011 | 已完成（`ktfmtCheck test` 與 `endToEndTest` 通過；新增 `summary_status` 值 `not_made`；手冊定稿） |
 | [WI-1020](WI-1020-runline-doc-corrections.md) | runline 側文件更正（WI-48 末節、`deploy/browser.md`） | WI-1016、WI-1011 | 已完成（WI-48 末節與 `deploy/browser.md` 更正；`deploy/browser.md` 是未追蹤檔案，需納入提交） |

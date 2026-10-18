@@ -12,7 +12,7 @@
 | [WI-1205](WI-1205-revalidation-and-user-disable.md) | 已完成（2026-10-10） | 立刻踢人：定期向 authentik 重新驗證（角色變更、撤銷）、管理員停用使用者與結束工作階段 | WI-1201、WI-1207 |
 | [WI-1206](WI-1206-console-user-management.md) | 已完成（2026-10-11） | Console 的使用者與工作階段管理頁 | WI-1202、WI-1205 |
 | [WI-1203](WI-1203-deployment-and-authentik-runbook.md) | 已完成（2026-10-11；條件 6 及條件 3、7 的 authentik 部分移交 WI-1204 條件 10 至 12） | 部署範例的 OIDC 設定、私有 CA 信任、authentik 端設定手冊 | WI-1200 |
-| [WI-1204](WI-1204-end-to-end-verification.md) | 未開始 | 以真實 OIDC 提供者的整體驗證，與文件一致性核對 | WI-1201、WI-1202、WI-1203、WI-1205、WI-1206 |
+| [WI-1204](WI-1204-end-to-end-verification.md) | 已完成（使用者確認驗證通過，2026-10-18） | 以真實 OIDC 提供者的整體驗證，與文件一致性核對 | WI-1201、WI-1202、WI-1203、WI-1205、WI-1206 |
 
 共同約束：
 

@@ -1,6 +1,6 @@
 # 7 非功能性考量與風險
 
-狀態：已核可（2026-10-16）。本文回答：新流程的處理時間是否落在目標內、超出時怎麼調、失敗時怎麼表現，以及主要風險。數字來自 [ADR-058](adr/ADR-058-measured-defaults.md) 與兩份量測報告（[WI-1451](../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)）。
+狀態：已核可（2026-10-16）；換人的風險依 [ADR-083](adr/ADR-083-entry-is-one-line.md) 修訂（2026-10-18）。本文回答：新流程的處理時間是否落在目標內、超出時怎麼調、失敗時怎麼表現，以及主要風險。數字來自 [ADR-058](adr/ADR-058-measured-defaults.md) 與兩份量測報告（[WI-1451](../../draft/transcribe-scenes/WI-1451-forced-alignment-report.md)、[WI-1452](../../draft/transcribe-scenes/WI-1452-long-chunks-and-segments-report.md)）。
 
 ## 處理時間目標
 
@@ -39,7 +39,7 @@
 | 對齊失敗 | 該片段的文字依字數比例分配到片段時間內，標為估計時間（`chunk.alignment = estimated`），計入降級與 `alignFailed` |
 | 場景偵測失敗 | 整部影片視為一個場景，計入降級並記錄原因 |
 | 影片沒有畫面 | 整部影片為一個場景，不計降級；潤飾與摘要不附圖 |
-| 潤飾、翻譯的某片段失敗 | 保留上一階段文字（翻譯則保留來源語言），該片段沒有換人標記，計入降級 |
+| 潤飾、翻譯的某片段失敗 | 保留上一階段文字（翻譯則保留來源語言），計入降級 |
 | 摘要失敗 | 對應層缺摘要，上一層以現有內容彙整，每份缺漏計一次降級 |
 | 同一階段因同一原因連續失敗（及早止損） | run 在達到 `earlyStopFailures` 時以 `EARLY_STOP` 失敗，分類指出階段與原因（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)） |
 | gateway 無法取得 GPU（503）或停止 | 對齊重試用盡後依上列降級；gateway 停止時所有 LLM 類 pipeline 都無法呼叫模型（[ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)） |
@@ -67,7 +67,7 @@
 | 第二個轉錄模型仍有幻覺句與短句重複 | 字幕出現結尾的固定句或重複句 | 幻覺句清單去除結尾固定句；重複不另行去除，成品核對時抽查 |
 | run 語言由首次轉錄的書寫系統推定，混語影片或只有漢字的日語對白會誤分 | 略過二次轉錄 | 可由語言參數明確指定；誤分的結果是不做，不會改壞文字 |
 | 場景偵測對運鏡、光線誤切或漏切 | 片段邊界不自然 | 門檻與最短場景長度可調；片段內附前一片段的語境 |
-| LLM 誤判換人 | 讀者被錯誤的破折號誤導 | 破折號可關閉（`subtitleDialogueDash`）；換人資料可查 |
+| 字幕不標換人 | 讀者看不出是對話還是獨白 | 接受：模型的換人推斷不準，錯誤的破折號比沒有更誤導（[ADR-083](adr/ADR-083-entry-is-one-line.md)） |
 | 沒有角色表，同一角色的稱呼與代名詞譯法前後不一致 | 譯文稱呼不一致 | 場景摘要與前文譯文提供語境；成品核對時抽查（[ADR-074](adr/ADR-074-remove-character-table.md)） |
 | 附圖請求耗時超出估計 | 超過 3 小時目標 | 上方的旋鈕 |
 | 長期獨佔 Lemonade | digest-rss 等候 | 沿用現行的排程建議（stable runbook 第 14 節）；每個 run 只切換 GPU 兩次 |

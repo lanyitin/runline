@@ -1,6 +1,6 @@
 # ADR-069 模型的回答能收就收：結構由 pipeline 掌握，格式問題不重試
 
-本文回答：潤飾、摘要、翻譯如何對待不守格式的模型回答，以及重試與及早止損的角色。狀態：已核可（2026-10-15）；決策 5、7 對未翻譯條目的部分已被 [ADR-070](ADR-070-untranslated-entries-are-retried.md) 取代。修改 [ADR-055](ADR-055-thinking-policy-and-early-stop.md) 決策 6、[ADR-064](ADR-064-answer-contract-violations-are-per-segment.md) 決策 1、3、4、5、[ADR-067](ADR-067-any-chinese-is-accepted.md) 決策 3，以及 WI-1457、WI-1458、WI-1459 中對應的回答檢查；延續 [ADR-060](ADR-060-times-stay-out-of-model-answers.md) 的方向。
+本文回答：潤飾、摘要、翻譯如何對待不守格式的模型回答，以及重試與及早止損的角色。狀態：已核可（2026-10-15）；決策 2 中「超過兩行併入第二行」與決策 4 已被 [ADR-083](ADR-083-entry-is-one-line.md) 取代；決策 5、7 對未翻譯條目的部分已被 [ADR-070](ADR-070-untranslated-entries-are-retried.md) 取代。修改 [ADR-055](ADR-055-thinking-policy-and-early-stop.md) 決策 6、[ADR-064](ADR-064-answer-contract-violations-are-per-segment.md) 決策 1、3、4、5、[ADR-067](ADR-067-any-chinese-is-accepted.md) 決策 3，以及 WI-1457、WI-1458、WI-1459 中對應的回答檢查；延續 [ADR-060](ADR-060-times-stay-out-of-model-answers.md) 的方向。
 
 ## 背景
 

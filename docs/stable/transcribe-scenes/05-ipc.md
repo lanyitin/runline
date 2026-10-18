@@ -1,6 +1,6 @@
 # 5 IPC 模型
 
-狀態：已核可（2026-10-16）。本文回答：pipeline 與模型服務、ffmpeg 之間傳什麼、怎麼處理失敗。所有模型呼叫都經 Engine 的 `openai-compatible` 資源（容量 1），上游為 llm-gateway（[ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)），見 [stable transcribe-pipeline 05](../../stable/transcribe-pipeline/05-ipc.md)；本文只寫差異。
+狀態：已核可（2026-10-16）；潤飾與翻譯的條目形狀依 [ADR-083](adr/ADR-083-entry-is-one-line.md) 修訂（2026-10-18）。本文回答：pipeline 與模型服務、ffmpeg 之間傳什麼、怎麼處理失敗。所有模型呼叫都經 Engine 的 `openai-compatible` 資源（容量 1），上游為 llm-gateway（[ADR-056](adr/ADR-056-alignment-on-gateway-gpu.md)），見 [stable transcribe-pipeline 05](../../stable/transcribe-pipeline/05-ipc.md)；本文只寫差異。
 
 ## 呼叫一覽
 
@@ -11,17 +11,17 @@
 | gateway：對齊 | `audio.transcriptions`（同步，multipart），模型為對齊模型 | 長片段；二次轉錄之後依序送出 | 原始音訊的片段、語言、轉錄文字（放在 `prompt`）、`response_format` 為 `verbose_json` → 全文與每個字詞的文字、起點、終點（秒） | 逾時、5xx、服務不可用、格式不符：重試；用盡則該片段改用估計時間（[ADR-051](adr/ADR-051-long-chunks-and-forced-alignment.md)），計入降級；連續失敗時止損 |
 | ffmpeg：場景偵測 | 本機子行程 | 整部影片一次 | 影片 → 場景切點與分數 | 失敗則整部影片視為一個場景，記錄並計入降級 |
 | ffmpeg：畫面 | 本機子行程（pipe） | 場景片段 | 時間點 → 圖片（只在記憶體） | 取不到畫面時，該片段不附圖照常送出 |
-| Lemonade：潤飾 | `chat.completions`，文字＋多張圖 | 場景片段 | 規則、片段的條目、畫面、前一片段的唯讀語境 → 條目（含行與換人標記） | 契約違反或截斷：重試；用盡則該片段保留轉錄文字、不標換人，計入降級 |
+| Lemonade：潤飾 | `chat.completions`，文字＋多張圖 | 場景片段 | 規則、片段的條目、畫面、前一片段的唯讀語境 → 條目（每個一行文字） | 契約違反或截斷：重試；用盡則該片段保留轉錄文字，計入降級 |
 | Lemonade：片段摘要 | 同上 | 場景片段 | 規則、潤飾後的條目、畫面 → 片段摘要 | 用盡則該片段缺摘要，計入降級 |
 | Lemonade：場景與全片摘要 | `chat.completions`，純文字 | 場景、全片 | 片段摘要 → 場景摘要；場景摘要 → 全片摘要 | 同上 |
-| Lemonade：翻譯 | `chat.completions`，純文字 | 場景片段 | 規則、場景摘要、已翻好的前文、條目（含行與換人標記）→ 繁體中文條目 | 契約違反：重試；用盡則該片段保留來源語言文字，計入降級 |
+| Lemonade：翻譯 | `chat.completions`，純文字 | 場景片段 | 規則、場景摘要、已翻好的前文、條目（序號與一行文字）→ 繁體中文條目（每個一行） | 契約違反：重試；用盡則該片段保留來源語言文字，計入降級 |
 
 Lemonade 的呼叫都經 gateway 原樣轉發。
 
 ## 契約要點
 
-- **條目不變式**：組成條目之後，任何回答都必須保留條目的數量、序號與時間；潤飾與翻譯另須保留每條的行數上限（2 行）與換人標記的位置規則（[ADR-053](adr/ADR-053-polish-with-frames-and-speaker-turns.md)）。
-- **換人在回答中的表示**：回答的每一行若是新說話者的開頭，以行首的對話破折號表示；pipeline 解析後存成資料、從文字中拿掉，輸出時才依參數畫回。
+- **條目不變式**：組成條目之後，任何回答都必須保留條目的數量、序號與時間；潤飾與翻譯後每個條目是一行文字（[ADR-083](adr/ADR-083-entry-is-one-line.md)）。
+- **不標換人**：回答中同一序號底下的多行以空格接成一行；行首的破折號是文字的一部分，不解析為換人，輸出時也不畫對話破折號（[ADR-083](adr/ADR-083-entry-is-one-line.md)）。
 - **唯讀語境**：語境只供理解，回答中出現語境內容視同契約違反。
 - **冪等**：每次呼叫只讀取資料、回傳結果，重送不會產生副作用；寫入由 pipeline 在收到合格回答後以交易完成。對齊與二次轉錄同一片段重送，結果以模型的行為為準，pipeline 只在採用時寫入。
 - **轉錄的生成上限**：

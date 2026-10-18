@@ -1,6 +1,6 @@
 # ADR-054 三層英文摘要與角色表，翻譯附角色表與場景摘要
 
-本文回答：摘要要描述什麼、用什麼語言、怎麼組織，翻譯拿什麼當語境。狀態：已核可（2026-10-14）；決策 4、5 與決策 6 中的角色表已被 [ADR-074](ADR-074-remove-character-table.md) 取代。取代現行以 VAD-A 組為單位的摘要，以及 [ADR-049](../../../stable/transcribe-pipeline/adr/ADR-049-batches-with-read-only-context.md) 中「翻譯不附全片摘要」的決定。
+本文回答：摘要要描述什麼、用什麼語言、怎麼組織，翻譯拿什麼當語境。狀態：已核可（2026-10-14）；決策 6 中「條目含行與換人標記」與「保持行數與換人標記不變」已被 [ADR-083](ADR-083-entry-is-one-line.md) 取代；決策 4、5 與決策 6 中的角色表已被 [ADR-074](ADR-074-remove-character-table.md) 取代。取代現行以 VAD-A 組為單位的摘要，以及 [ADR-049](../../../stable/transcribe-pipeline/adr/ADR-049-batches-with-read-only-context.md) 中「翻譯不附全片摘要」的決定。
 
 ## 背景
 

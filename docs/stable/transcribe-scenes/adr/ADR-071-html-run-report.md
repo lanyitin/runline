@@ -1,6 +1,6 @@
 # ADR-071 每個 run 結束時產生 HTML 報告，以播放器形式對照三階段字幕與場景
 
-本文回答：run 結束後如何讓使用者在瀏覽器裡核對 ASR、潤飾、翻譯三階段的字幕與場景摘要，以及檔案放在哪裡、由什麼參數控制。狀態：已核可（2026-10-15）。修改 [ADR-039（transcribe-pipeline）](../../transcribe-pipeline/adr/ADR-039-subtitle-files-beside-video.md) 的檔案範圍：影片旁除了兩個字幕檔，再多一個報告檔。
+本文回答：run 結束後如何讓使用者在瀏覽器裡核對 ASR、潤飾、翻譯三階段的字幕與場景摘要，以及檔案放在哪裡、由什麼參數控制。狀態：已核可（2026-10-15）；決策 5 中「換人標記照 `subtitleDialogueDash` 的呈現方式」已被 [ADR-083](ADR-083-entry-is-one-line.md) 修訂：報告不畫對話破折號。修改 [ADR-039（transcribe-pipeline）](../../transcribe-pipeline/adr/ADR-039-subtitle-files-beside-video.md) 的檔案範圍：影片旁除了兩個字幕檔，再多一個報告檔。
 
 ## 背景
 

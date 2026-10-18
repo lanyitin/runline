@@ -66,8 +66,9 @@ Whisper 二次轉錄與移除角色表（2026-10-16 核可）：
 | [WI-1488](WI-1488-default-summary-prompts.md) | T | 場景層預設提示改為四個欄位、片段層預設提示改為一到三句且不含「scene」（內容依[參考文件](../run38-summary-prompts-reference.md)） | WI-1483、WI-1484、WI-1485 | 已完成（2026-10-18），T 的 9ed4aa4 合併；決策見 [ADR-081](../adr/ADR-081-default-summary-prompts-adopt-measured-structure.md) |
 | [WI-1486](WI-1486-scene-summary-field-block-only.md) | T | 欄位固定的層保存時只取欄位區塊，裁掉 `Ending` 之後的內容 | WI-1483、WI-1488 | 已完成（2026-10-18），T 的 5caa6ee，合併於 24ce7a5；日常測試通過（既有的 DenoiseRecordsTest 除外），端到端與真實服務未跑；Ending 後沒有空行就接修稿的回答不裁剪，待真實 run 的資料；決策見 [ADR-080](../adr/ADR-080-summary-degradation-conditions.md) 決策 3、4 |
 | [WI-1487](WI-1487-truncated-summary-flag.md) | T | 被截斷的摘要記錄為被截斷，並在下一層的輸入中標明 | WI-1486 | 已完成（2026-10-18），T 的 f172e67，合併於 1abf001；schema 版本 19；日常測試通過（既有的 DenoiseRecordsTest 除外），端到端與真實服務未跑；06-data-model 的對齊待辦；決策見 [ADR-079](../adr/ADR-079-truncated-summary-is-kept-and-flagged.md) |
+| [WI-1489](WI-1489-entry-one-line.md) | T | 潤飾與翻譯不標換人、不分行，條目是一行文字；SRT 與報告不畫對話破折號，移除 `subtitleDialogueDash` | 無 | 已完成（2026-10-18），T 的 2bcb0b0，合併於 fbb9d09；實作時誤用 WI-1483／ADR-077 的編號，合併時改為本項；日常測試 1012 個通過，端到端與真實服務未跑；決策見 [ADR-083](../adr/ADR-083-entry-is-one-line.md) |
 
-WI-1483 至 WI-1488 都已完成並合併進 T 的 main。
+WI-1483 至 WI-1489 都已完成並合併進 T 的 main。
 
 WI-1483 與 WI-1484 驗收並提交後，由 homelab-deployer 在 arr 的 Lemonade 上對 run 38 的素材做重放量測（條件見報告）：場景層看場景 30、18 與壓力場景，預期外洩為 0、回答開頭為格式；片段層看帶圖片的摘要不含「scene」的比例。量測前由架構師向使用者確認；量測結果不是使用者的核可。
 

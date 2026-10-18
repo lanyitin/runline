@@ -1,6 +1,6 @@
 # #1：Wiki 是 stable 的唯讀映像
 
-本文回答：Forgejo Wiki 與 `docs/stable/` 的關係，以及為何採單向同步。狀態：提案中。Issue：#1。
+本文回答：Forgejo Wiki 與 `docs/stable/` 的關係，以及為何採單向同步。狀態：已核可。Issue：#1。
 
 ## 背景
 

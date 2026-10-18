@@ -1,6 +1,6 @@
 # wiki-mirror：Forgejo Wiki 作為 stable 文件映像
 
-本主題回答：`docs/stable/` 如何自動呈現在 Forgejo Wiki，而 Wiki 不成為第二份事實來源。狀態：提案中。
+本主題回答：`docs/stable/` 如何自動呈現在 Forgejo Wiki，而 Wiki 不成為第二份事實來源。狀態：已核可。
 
 ## 目標與範圍
 
@@ -11,10 +11,10 @@
 
 | 項目 | 結論 | 細節 |
 |---|---|---|
-| Wiki 的角色 | `docs/stable/` 的唯讀映像，單向同步 | [#1](adr/1-wiki-is-readonly-mirror.md) |
+| Wiki 的角色 | `docs/stable/` 的唯讀映像，單向同步 | [#1](adr/1-wiki-is-readonly-mirror.md)（已核可） |
 | 觸發 | `main` 上 `docs/stable/` 有變動 | 同上 |
 | 目錄結構對應 | 保留主題階層，不攤平 | 同上 |
-| 實作 | Forgejo Actions 工作流與首頁目錄產生器，交給 tdd-coder | [工作項](work-items/README.md) |
+| 實作 | Forgejo Actions 工作流與首頁目錄產生器，交給 tdd-coder | [工作項](work-items/README.md)（已核可，待確認問題解決前不派工） |
 
 ## 元件關係
 

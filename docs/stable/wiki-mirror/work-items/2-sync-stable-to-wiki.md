@@ -1,6 +1,6 @@
 # #2：stable 合併後同步到 Wiki
 
-本項回答：要讓 Wiki 成為 stable 的映像，須達成什麼行為。狀態：提案中。Issue：#2。相依：決策 #1 核可，以及 [README 的待確認問題](../README.md)。
+本項回答：要讓 Wiki 成為 stable 的映像，須達成什麼行為。狀態：已核可，尚未完成。Issue：#2。相依：[README 的待確認問題](../README.md) 解決後才可派工。
 
 ## 目標
 

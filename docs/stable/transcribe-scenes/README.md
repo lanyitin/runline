@@ -1,6 +1,6 @@
 # transcribe：長片段轉錄與場景單位處理（入口文件）
 
-狀態：已核可（2026-10-16）。本頁回答：transcribe pipeline 要如何改成「長片段轉錄加強制對齊、以場景為單位潤飾與摘要」，關鍵決策是什麼，細節在哪裡。本主題修訂已核可的 [transcribe pipeline](../../stable/transcribe-pipeline/README.md)，取代範圍見下方「與 stable 的關係」。
+狀態：已核可（2026-10-18）。本頁回答：transcribe pipeline 要如何改成「長片段轉錄加強制對齊、以場景為單位潤飾與摘要」，關鍵決策是什麼，細節在哪裡。本主題修訂已核可的 [transcribe pipeline](../../stable/transcribe-pipeline/README.md)，取代範圍見下方「與 stable 的關係」。
 
 ## 目標
 
@@ -21,6 +21,7 @@
 | 摘要與翻譯 | 片段、場景、全片三層英文摘要，全片摘要依主題組織；翻譯附場景摘要與前文，不附角色表 | [ADR-054](adr/ADR-054-scene-summaries-and-translation-context.md)、[ADR-074](adr/ADR-074-remove-character-table.md) |
 | 摘要的回答開頭、用詞與降級 | 場景層摘要在 thinking 關閉時以預填固定回答開頭；片段摘要稱呼自己為「片段」；被截斷的摘要照常保存並告知下一層；沒有素材的片段與場景直接降級，欄位固定的層保存時只取欄位區塊（[量測報告](summary-leak-experiment-report.md)） | [ADR-077](adr/ADR-077-scene-summary-answer-opening.md)、[ADR-078](adr/ADR-078-segment-summary-wording.md)、[ADR-079](adr/ADR-079-truncated-summary-is-kept-and-flagged.md)、[ADR-080](adr/ADR-080-summary-degradation-conditions.md)、[ADR-082](adr/ADR-082-truncated-with-no-complete-field-is-kept.md)、[ADR-081](adr/ADR-081-default-summary-prompts-adopt-measured-structure.md)（預設提示採用量測驗證過的結構，[原文](run38-summary-prompts-reference.md)） |
 | thinking、生成上限與止損 | thinking 預設關閉；開啟時用專屬的取樣參數與推理額度；轉錄請求帶生成上限；截斷不拆批，同一原因連續失敗時及早停止 | [ADR-058](adr/ADR-058-measured-defaults.md)（量測後核定的預設值）、[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)、[ADR-057](adr/ADR-057-asr-endpoints-and-alignment-word-timing.md)（上限只適用 chat 端點；對齊回應固定含字詞時間） |
+| 小模型的特徵與對策 | 轉錄模型與對話模型的行為特徵、為此做的工作項、放棄的做法，彙整成一份文件 | [小模型的行為特徵與對應的工作項](small-llm-traits-and-countermeasures.md) |
 
 ## 處理階段
 
@@ -66,4 +67,9 @@ flowchart LR
 | [05 IPC](05-ipc.md) | 與模型服務、ffmpeg 之間的契約 | 已核可（2026-10-16） |
 | [06 資料模型](06-data-model.md) | 新增哪些實體，如何與舊資料並存 | 已核可（2026-10-16） |
 | [07 非功能與風險](07-nfr-risks.md) | 容量、處理時間目標、失敗模式與風險 | 已核可（2026-10-16）；數字為實測推算 |
+| [小模型的行為特徵與對應的工作項](small-llm-traits-and-countermeasures.md) | 轉錄模型與對話模型有哪些行為特徵，各以哪些工作項對付，哪些做法已放棄 | 已核可（2026-10-18） |
 | [工作項總覽](work-items/README.md) | 要交給 tdd-coder 的工作與順序 | 已核可 |
+
+### 處理 LLM 相關問題時
+
+任何與 LLM 行為有關的問題（轉錄模型或對話模型的失控生成、重複、格式不符、語言錯誤、幻覺、外洩、降級、重試與止損規則、提示詞、取樣參數、換模型或換服務），在分析或動手前先讀[小模型的行為特徵與對應的工作項](small-llm-traits-and-countermeasures.md)，避免重走已放棄的做法；處理完成後，若出現新的特徵、新的對策或新放棄的做法，同步更新該文件（在 draft 開修訂稿，核可後晉升）。

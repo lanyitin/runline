@@ -4,7 +4,7 @@
 
 ## 目標與範圍
 
-- 範圍內：`docs/stable/` 合併進 `main` 後，Wiki 自動更新為其映像，並有可瀏覽的首頁目錄。
+- 範圍內：`docs/stable/` 合併進 `main` 後，Wiki 自動更新為其映像，文件間連結可用，並有首頁目錄與側邊欄。
 - 範圍外：Wiki 的人工編輯、`docs/draft/` 的呈現、文件內容本身的改寫。
 
 ## 關鍵決策
@@ -12,22 +12,24 @@
 | 項目 | 結論 | 細節 |
 |---|---|---|
 | Wiki 的角色 | `docs/stable/` 的唯讀映像，單向同步 | [#1](adr/1-wiki-is-readonly-mirror.md)（已核可） |
-| 觸發 | `main` 上 `docs/stable/` 有變動 | 同上 |
-| 目錄結構對應 | 保留主題階層，不攤平 | 同上 |
-| 實作 | Forgejo Actions 工作流與首頁目錄產生器，交給 tdd-coder | [工作項](work-items/README.md)（已核可，待確認問題解決前不派工） |
+| 頁面對應 | 路徑即頁名，可逆、無碰撞 | [#6](adr/6-mirror-mapping-links-deletion-credential.md)（已核可） |
+| 連結 | 改寫成 Wiki 連結，儲存庫內其他檔案指向 `main` | 同上 |
+| 刪除 | 每次完整重新產生，刪除與改名同步反映 | 同上 |
+| 憑證 | 專用 secret，最小權限，由使用者提供 | 同上 |
+| 實作 | Forgejo Actions 工作流，交給 tdd-coder | [工作項](work-items/README.md)（已核可，待使用者提供憑證） |
 
 ## 元件關係
 
 ```mermaid
 flowchart LR
   A[docs/stable on main] -->|push 觸發| B[Forgejo Actions]
-  B -->|依階層映射並產生首頁目錄| C[Wiki repo]
+  S[(secret: Wiki 寫入 token)] --> B
+  B -->|路徑即頁名、改寫連結、產生目錄| C[Wiki repo]
   C --> D[讀者瀏覽]
 ```
 
 ## 待確認問題
 
-- Wiki 頁面名稱無法承載多層目錄時，採用哪種階層對應（路徑轉為頁名前綴，或建立子目錄）？影響連結改寫規則。
-- 映像中 stable 內的相對連結是否需要改寫成 Wiki 連結？不改寫則文件間連結在 Wiki 失效。
-- 被刪除或改名的 stable 檔案，Wiki 是否同步刪除？預設建議同步，使映像與 stable 一致。
-- 同步所需的 Wiki 寫入憑證由誰提供、存放位置（Forgejo secrets）。
+- Wiki 功能是否已啟用？Forgejo 對頁名中路徑分隔的支援情形為何？決定頁名規則的最終形式；由 [#2](work-items/2-sync-stable-to-wiki.md) 的先決確認回報。
+- Actions 內建 token 是否能寫入 Wiki？不能時，使用者須提供專用 token。
+- 指向其他儲存庫的連結（例如 `runline-digest-rss`）是否要補上對應網址？目前的處理是保留文字、移除連結。

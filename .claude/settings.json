@@ -6,8 +6,29 @@
 			"Edit(/docs/stable/**)",
 			"Edit(/.claude/**)",
 			"Edit(/CLAUDE.md)",
-			"Agent(tdd-coder)"
+			"Agent(tdd-coder)",
+			"Bash(git checkout main)",
+			"Bash(git pull --ff-only origin main)",
+			"Bash(git checkout -b adr-task-*)",
+			"Bash(git push -u origin adr-task-*)",
+			"Bash(fj issue search *)",
+			"Bash(fj issue view *)",
+			"Bash(fj issue create *)",
+			"Bash(fj issue comment *)",
+			"Bash(fj issue close *)",
+			"Bash(fj issue edit * labels *)",
+			"Bash(fj issue assign *)",
+			"Bash(fj repo labels runline/runline view)",
+			"Bash(fj repo labels runline/runline create in-progress *)",
+			"Bash(fj pr search *)",
+			"Bash(fj pr view *)",
+			"Bash(fj pr status *)",
+			"Bash(fj pr create *)",
+			"Bash(fj pr comment *)"
 		],
-		"deny": []
+		"deny": [
+			"Bash(fj pr merge *)",
+			"Bash(fj pr close *)"
+		]
 	}
 }

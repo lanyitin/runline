@@ -16,6 +16,7 @@ model: sonnet
   - `git push`：只推目前分支到其追蹤的遠端，不得使用強制選項，不得刪除遠端分支或標籤；
   - `git tag`：只建立標籤（輕量或註解皆可），不得刪除或移動既有標籤；
   - 不得 reset、rebase 或 amend。
+  - 立項流程（見 5.5）所需的指令，僅限該流程使用：`git checkout main`、`git pull --ff-only origin main`、`git checkout -b adr-task-<issue編號>`、`git push -u origin adr-task-<issue編號>`；以及 `fj issue search/view/create/comment/close`、`fj issue edit <n> labels`、`fj issue assign`、`fj pr search/view/status/create/comment`。不得執行 `fj pr merge`、`fj pr close`，合併由使用者進行。
 - 不得輸出任何應用程式碼：包含 Kotlin／SQL DDL／Dockerfile／shell script／pseudo-code 的可執行片段。此規則同樣適用於寫入文件與設定檔的內容。設定檔本身的結構（例如 agent 定義的 frontmatter、設定檔的鍵值）不受此限，但不得夾帶應用程式碼或腳本。需要表達時，用文字、表格、條列，或 ASCII／Mermaid 架構圖（圖僅表達元件與資料流，不是程式碼）。
 - 不得規劃程式碼層級的設計：class／interface／function 命名與簽章、套件與檔案結構、設計模式選用、實作步驟、測試案例與測試策略細節。這些屬於 **tdd-coder** 的職責。
 - 不得為了「說明清楚」而偷偷寫範例程式碼。說不清楚就用更精確的文字描述行為與契約。
@@ -116,6 +117,19 @@ model: sonnet
 5. 設定檔的歷史由 git 負責，檔案內不寫變更紀錄。
 6. 設定類變更直接生效，不走 draft 與 stable 的核可流程。
 7. 設定類檔案同樣遵守 5.3 的風格規則，並保持簡短、單一主題。
+
+**5.5 立項與查重流程（Forgejo）**
+適用於即將在 `docs/draft/` 產出新文件（ADR、工作項、新主題）的需求。純設定類變更不適用。
+1. 同步：與使用者討論需求前，先切到 `main` 並以 fast-forward 拉取最新內容；不能 fast-forward 時停下回報。
+2. 查重：討論出關鍵字後，搜尋 Issue（含已關閉）與 PR（含已關閉），並比對 `docs/stable/` 與 `docs/draft/` 的既有工作項與 ADR。任何一處有相似項目就停止，向使用者回報相似項目並等待確認，不自行判斷是否重複。
+3. 立項：無重複時建立 Issue，加上 `in-progress` 標籤並指派給使用者本人；取得 Issue 編號。標籤不存在時先建立（一次性）。使用者的 Forgejo 帳號名稱以使用者告知為準，不自行猜測（目前的 token 無法查詢帳號）。
+4. 分支：從 `main` 開 `adr-task-<Issue編號>` 分支，文件都在此分支撰寫。
+5. 文件：仍寫入 `docs/draft/`，沿用本檔 5.1～5.3 的結構與風格；檔名不另訂日期規則。新的 ADR 與工作項以 Forgejo Issue 編號作為唯一編號（引用寫作 `#<編號>`），一個 Issue 對應一份 ADR 或一個工作項。既有的 WI-／ADR- 編號凍結保留，不改名；新舊編號靠 `#` 與 `WI-`／`ADR-` 前綴區分，不互相重用。
+6. 提交：`git add`、`git commit`、推分支、建立 PR；PR 描述連結 Issue。合併由使用者進行。
+7. 結案：使用者確認 PR 已合併後，才關閉 Issue。
+8. 與現行流程衝突（例如要求直接推 `main`、與 5.1 晉升規則不一致）時停下，向使用者回報並討論，不自行取捨。
+9. `fj` 的實際用法（已實測）：`fj issue create` 沒有標籤與指派旗標，建立後以 `fj issue edit <n> labels --add <標籤>` 與 `fj issue assign <n> <帳號>` 補上；PR 查詢用 `fj pr search`，Issue 查詢用 `fj issue search --state all`；標籤管理用 `fj repo labels <owner/repo> view|create`；`fj whoami` 因 token 範圍不足不可用。分支尚未設定追蹤時，`fj issue` 指令要加 `-R origin` 才能辨識儲存庫（有 `github` 與 `origin` 兩個 remote）；`fj pr create` 不接受 `-R`，推送分支並設定追蹤後再建立。無結果時輸出「0 issues」。
+10. Forgejo Wiki 是 `docs/stable/` 的唯讀映像，只由 CI 同步，不得直接編輯 Wiki。
 
 ## 6. 輸出格式
 

@@ -1,0 +1,50 @@
+# Mirrors docs/stable into the Forgejo Wiki when a change to it reaches main
+# (docs/stable/wiki-mirror/work-items/2-sync-stable-to-wiki.md, ADR 1 and 6 of docs/stable/wiki-mirror).
+#
+# The Wiki is a read-only image of docs/stable: every run rebuilds all the pages from the checked-out
+# stable and overwrites the Wiki with them (so deleted and renamed documents leave it, and a run on
+# unchanged content makes no commit). The rules of the mapping, the links and the push are those of
+# deploy/wiki-mirror; this file only gives it a checkout, a Node and the credential. A failed run leaves
+# the Wiki as the last good run left it.
+#
+# Configuration: none to set. The credential is the automatic token of the run (github.token), not a
+# secret of its own; the workflow asks for the permissions below and no others. The runner must trust the
+# Forgejo server's certificate (it does, for forgejo.dev.lan); nothing here turns verification off.
+name: sync-wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/stable/**"
+
+# One sync at a time; a run that finds another waits rather than racing it to the Wiki.
+concurrency:
+  group: sync-wiki
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Reading the repository to check it out, and writing the Wiki repository. Nothing else.
+    permissions:
+      contents: write
+    steps:
+      # Actions are pinned to a commit id (ADR-032); the comment names the version. Update: deploy/browser.md.
+      - uses: https://data.forgejo.org/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # The Node pinned in .node-version, as the image build uses.
+      - uses: https://data.forgejo.org/actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Mirror docs/stable into the Wiki
+        env:
+          MIRROR_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          WIKI_TOKEN: ${{ github.token }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: node deploy/wiki-mirror/sync.mjs

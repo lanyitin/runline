@@ -1,6 +1,6 @@
 # #35：ffmpeg 靜態檔改用 BtbN GitHub release
 
-本項回答：建置 `browser-transcribe` 映像時，如何從新來源取得並驗證 ffmpeg 與 ffprobe。狀態：已核可（2026-10-19）。Issue：#35。相依：[ADR-36](../adr/ADR-36-ffmpeg-source-btbn.md)（已核可）。儲存庫：runline。入口：[README](../README.md)。
+本項回答：建置 `browser-transcribe` 映像時，如何從新來源取得並驗證 ffmpeg 與 ffprobe。狀態：已核可（2026-10-19），已完成（2026-10-19）。Issue：#35。相依：[ADR-36](../adr/ADR-36-ffmpeg-source-btbn.md)（已核可）。儲存庫：runline。入口：[README](../README.md)。
 
 ## 目標
 

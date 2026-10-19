@@ -1,6 +1,6 @@
 # 轉錄執行環境部署手冊
 
-本文回答：要讓 Engine 為 transcribe pipeline（[ADR-037](../docs/stable/transcribe-pipeline/adr/ADR-037-unsafe-pipeline-and-intake-root.md)）運作，Docker 與 systemd 兩種部署各要提供什麼、怎麼設定、怎麼驗證。需求來源是 [04 部署架構](../docs/stable/transcribe-pipeline/04-deployment.md) 與 [WI-1402](../docs/stable/transcribe-pipeline/work-items/WI-1402-host-runtime-deployment.md)。作法同[瀏覽器覆蓋層](browser.md)：選配，不使用時原部署完全不變。這裡只安裝並驗證執行環境；pipeline 由專案 `runline-transcribe` 交付，VAD 工具 jar 由其 WI-1407 交付，**目前尚不存在**。
+本文回答：要讓 Engine 為 transcribe pipeline（[ADR-037](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/adr/ADR-037-unsafe-pipeline-and-intake-root.md)）運作，Docker 與 systemd 兩種部署各要提供什麼、怎麼設定、怎麼驗證。需求來源是 [04 部署架構](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/04-deployment.md) 與 [WI-1402](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/work-items/WI-1402-host-runtime-deployment.md)。作法同[瀏覽器覆蓋層](browser.md)：選配，不使用時原部署完全不變。這裡只安裝並驗證執行環境；pipeline 由專案 `runline-transcribe` 交付，VAD 工具 jar 由其 WI-1407 交付，**目前尚不存在**。
 
 ## 檔案一覽
 
@@ -33,7 +33,7 @@
 | `RUNLINE_DENOISE_BINARY` | `/opt/runline/bin/deep-filter` | 本部署層的設定，只被 `bin/runline-denoise` 與檢查腳本讀：deep-filter 執行檔的位置 |
 | `RUNLINE_VAD_MODEL_SHA256` | 未設定；改讀 `<模型檔>.sha256` | 檢查時與模型檔比對的雜湊 |
 | `RUNLINE_TRANSCRIBE_MIN_FREE_MB` | `1024` | 只用於檢查：工作目錄的可用空間下限 |
-| `TRANSCRIBE_INTAKE_HOST_DIR`（僅 Docker，必填） | 無 | 宿主上放影片的目錄，可寫掛載為 `TRANSCRIBE_INTAKE_ROOT`（pipeline 在影片旁寫字幕檔，權限與擁有者見 [04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
+| `TRANSCRIBE_INTAKE_HOST_DIR`（僅 Docker，必填） | 無 | 宿主上放影片的目錄，可寫掛載為 `TRANSCRIBE_INTAKE_ROOT`（pipeline 在影片旁寫字幕檔，權限與擁有者見 [04](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/04-deployment.md)） |
 | `TRANSCRIBE_VAD_HOST_DIR`（僅 Docker） | `./transcribe-vad`（相對於疊加檔） | 宿主上放 `runline-vad.jar` 的目錄，唯讀掛載到 `/opt/runline/vad` |
 
 沒有機密：映像與疊加檔不含密碼、金鑰或 URL 憑證；模型檔與 ffmpeg 都是公開的下載。
@@ -66,7 +66,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe
 | 映像 | `Dockerfile` 的 `transcribe` 階段，建在 `engine` 階段之上。單獨使用時是 `transcribe` 映像（沒有 Chrome）；與瀏覽器疊加檔並用時是 `browser-transcribe` 映像（見「與瀏覽器並用」） |
 | 平台 | `linux/amd64` 與 `linux/arm64` 皆可（靜態 ffmpeg 兩者都有），不像瀏覽器疊加檔限 amd64 |
 | 帳號 | 與 Engine 相同：預設 `runline`（uid 10001），可由 `user:` 改為其他 uid:gid，包括 `/etc/passwd` 沒有項目的 uid（ADR-041）。ffmpeg、ffprobe、VAD 工具都由 Engine 啟動，以該 uid 執行；映像沒有以 root 執行任何這些工具。工作目錄是 `/tmp`（1777），對任何 uid 可寫 |
-| 收件根目錄 | 宿主目錄以綁定掛載（不加 `read_only`），是疊加檔唯一可寫的掛載。Engine 帳號能不能**讀寫**由宿主的檔案權限決定：影片檔要對 other 可讀（`chmod o+r`、目錄 `o+rx`），影片所在目錄要讓 **Engine 執行的 uid** 可寫（預設 10001，`user:` 可改）。**擁有者規則：收件目錄的擁有者必須等於 Engine 執行的 uid，或目錄對該 uid 可寫**（群組或 `o+w`）；例如影片樹歸 1000:1000（目錄 0755）時，Engine 以 `user: "1000:1000"` 執行即可寫字幕檔，以預設 10001 執行則寫不進去。檢查會告訴你讀不到或寫不進去（`not writable by uid <uid>`）。以「新檔出現」觸發 webhook 的呼叫端有忽略特定檔案的責任（[04](../docs/stable/transcribe-pipeline/04-deployment.md)） |
+| 收件根目錄 | 宿主目錄以綁定掛載（不加 `read_only`），是疊加檔唯一可寫的掛載。Engine 帳號能不能**讀寫**由宿主的檔案權限決定：影片檔要對 other 可讀（`chmod o+r`、目錄 `o+rx`），影片所在目錄要讓 **Engine 執行的 uid** 可寫（預設 10001，`user:` 可改）。**擁有者規則：收件目錄的擁有者必須等於 Engine 執行的 uid，或目錄對該 uid 可寫**（群組或 `o+w`）；例如影片樹歸 1000:1000（目錄 0755）時，Engine 以 `user: "1000:1000"` 執行即可寫字幕檔，以預設 10001 執行則寫不進去。檢查會告訴你讀不到或寫不進去（`not writable by uid <uid>`）。以「新檔出現」觸發 webhook 的呼叫端有忽略特定檔案的責任（[04](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/04-deployment.md)） |
 | VAD 工具目錄 | 宿主目錄（可先是空的）唯讀掛載到 `/opt/runline/vad`；把 `runline-vad.jar` 放進去，重新啟動容器不需重建映像 |
 | 模型檔 | 建置時由 `runline-transcribe-fetch` 驗證雜湊後放進映像（見「版本固定」）；root 擁有，Engine 帳號不能改 |
 | 工作目錄 | 容器的 `/tmp`（可寫層），pipeline 為每個 run 建立專屬目錄並在結束時刪除。要把它放在別處，設 `TRANSCRIBE_WORK_DIR` 並提供該路徑的 volume（`tmpfs` 會佔記憶體，不建議放長影片） |
@@ -79,7 +79,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.transcribe
 1. 執行 `bin/runline-transcribe-fetch <暫存目錄>`：下載並驗證雜湊，把 `ffmpeg`、`ffprobe` 裝到 `/usr/local/bin`，把模型檔與其 `.sha256` 裝到 `/opt/runline/models`，把 `deep-filter` 裝到 `/opt/runline/bin`（只有 amd64 主機取得它）；把 `runline-vad`、`runline-denoise` 與檢查腳本裝到 `/opt/runline/bin`。
 2. 安裝 drop-in 為 `/etc/systemd/system/runline-engine.service.d/transcribe.conf`，`systemctl daemon-reload`。
 3. 把 `runline-vad.jar` 放到 `/opt/runline/vad/`（`root` 擁有、Engine 帳號可讀、不可寫）。
-4. 在 `/etc/runline/runline.env` 設 `TRANSCRIBE_INTAKE_ROOT`。收件根目錄須「Engine 帳號可讀、可寫」，例如目錄 `runline:runline 0755`、影片檔 `0644`；drop-in 不對它設 `ReadOnlyPaths=`（權限與擁有者見 [04](../docs/stable/transcribe-pipeline/04-deployment.md)）。
+4. 在 `/etc/runline/runline.env` 設 `TRANSCRIBE_INTAKE_ROOT`。收件根目錄須「Engine 帳號可讀、可寫」，例如目錄 `runline:runline 0755`、影片檔 `0644`；drop-in 不對它設 `ReadOnlyPaths=`（權限與擁有者見 [04](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/04-deployment.md)）。
 5. `systemctl restart runline-engine`，然後執行檢查。
 
 drop-in 只設預設值（`PATH`、`RUNLINE_VAD_*`、`TRANSCRIBE_WORK_DIR` 與 `CacheDirectory=runline-transcribe`），`runline.env` 的同名變數會取代它們；與瀏覽器 drop-in 可同時安裝（見「與瀏覽器並用」）。
@@ -129,7 +129,7 @@ docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.ya
 
 ## 降噪工具
 
-`denoise=true`（pipeline 的預設）的 run 需要降噪工具（[WI-1440](../docs/stable/transcribe-pipeline/work-items/WI-1440-denoise-before-vad.md)、[ADR-046](../docs/stable/transcribe-pipeline/adr/ADR-046-denoise-before-vad.md)、交付見 [WI-1444](../docs/stable/transcribe-pipeline/work-items/WI-1444-denoise-tool-delivery.md)）。本節是交付方式的唯一寫處，runbook 與 04 連到這裡。
+`denoise=true`（pipeline 的預設）的 run 需要降噪工具（[WI-1440](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/work-items/WI-1440-denoise-before-vad.md)、[ADR-046](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/adr/ADR-046-denoise-before-vad.md)、交付見 [WI-1444](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/work-items/WI-1444-denoise-tool-delivery.md)）。本節是交付方式的唯一寫處，runbook 與 04 連到這裡。
 
 | 項目 | 內容 |
 |---|---|
@@ -195,7 +195,7 @@ sudo -u runline env $(grep -v '^#' /etc/runline/runline.env | xargs) /opt/runlin
 
 ### 待 WI-1407 對齊
 
-[05](../docs/stable/transcribe-pipeline/05-ipc.md) 只規定行為（輸入 WAV 與模型檔位置、標準輸出為每視窗機率、結束碼），沒有規定命令列旗標、模型位置如何傳給工具、以及輸出的逐行格式。檢查腳本暫時採 `--model <模型檔> <wav>` 與每行一個機率；WI-1407 定案後若不同，只需改 `bin/runline-transcribe-check` 的 `check_vad_output`（與其測試），其餘不受影響。同樣，「模型位置來自組態」的環境變數名稱（本文暫用 `RUNLINE_VAD_MODEL`，屬部署層）須與 pipeline 的組態一致。
+[05](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/05-ipc.md) 只規定行為（輸入 WAV 與模型檔位置、標準輸出為每視窗機率、結束碼），沒有規定命令列旗標、模型位置如何傳給工具、以及輸出的逐行格式。檢查腳本暫時採 `--model <模型檔> <wav>` 與每行一個機率；WI-1407 定案後若不同，只需改 `bin/runline-transcribe-check` 的 `check_vad_output`（與其測試），其餘不受影響。同樣，「模型位置來自組態」的環境變數名稱（本文暫用 `RUNLINE_VAD_MODEL`，屬部署層）須與 pipeline 的組態一致。
 
 ## 版本固定（ADR-032）
 

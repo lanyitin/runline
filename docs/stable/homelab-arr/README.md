@@ -6,7 +6,7 @@
 
 - 目標：Engine、PostgreSQL 與 Console 在 arr 上運作，筆電瀏覽器以 `https://runline.app.lan` 開啟 Console 並呼叫 API。
 - 範圍內：映像檔的建置與發佈路徑、arr 上的服務拓撲、路由與 TLS、持久資料的位置與備份、密鑰來源。
-- 範圍外：Terraform／Incus／Traefik／DNS 的實際變更（由 homelab-deployer 在 homelab 的基礎設施儲存庫執行）、多實例、digest-rss 的上線（見其 [runbook](../digest-rss/runbook.md)）。
+- 範圍外：Terraform／Incus／Traefik／DNS 的實際變更（由 homelab-deployer 在 homelab 的基礎設施儲存庫執行）、多實例、digest-rss 的上線（見其 [runbook](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/runbook.md)）。
 
 ## 關鍵決策結論
 

@@ -2,7 +2,7 @@
 
 本文回答：管理員如何把一個資料庫定義為共享的連線池資源，pipeline 如何以窄 SQL 存取使用它，以及如何在不改契約的前提下擴充到其他 JDBC 資料庫。狀態：已核可（2026-10-06）；已實作（2026-10-07，見「實作結果」；只對真實 PostgreSQL 驗證，沒有對其他資料庫驗證）。相依：WI-41、WI-43（含檢查端點）、WI-46（別名解析機制已於該項驗證）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 4 點「`jdbc-pool`」。
 
-**擴充（2026-10-08）：** 資料庫種類新增 `sqlite`（第二份資料庫設定檔，資源根目錄之下的一個檔案），見 [WI-1003](../../digest-rss/work-items/WI-1003-sqlite-database-kind.md) 與 [ADR-024](../../digest-rss/adr/ADR-024-sqlite-run-store.md)；本文條文以 PostgreSQL 為準，SQLite 的差異與實作結果見本文末「擴充：`sqlite` 種類」。
+**擴充（2026-10-08）：** 資料庫種類新增 `sqlite`（第二份資料庫設定檔，資源根目錄之下的一個檔案），見 [WI-1003](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1003-sqlite-database-kind.md) 與 [ADR-024](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-024-sqlite-run-store.md)；本文條文以 PostgreSQL 為準，SQLite 的差異與實作結果見本文末「擴充：`sqlite` 種類」。
 
 ## 背景
 
@@ -69,15 +69,15 @@
 
 驗證：真實 PostgreSQL（Testcontainers）涵蓋型別對應、方言語法、交易、錯誤類別、逾時、列數與大小上限、連線額度與併發、世代、強制釋放與取消、清理、不外洩、檢查與可觀測；Engine 與開發入口跑同一組 `JdbcBehaviorSuite`；「第二份設定檔」在測試原始碼中是以 `PostgresProfile` 為底、規則不同的設定檔（`JdbcSettingsTest`），機制以資料庫種類選用。
 
-**尚未驗證**：真實的非 PostgreSQL 資料庫（本節撰寫時沒有第二個真實資料庫的設定檔；SQLite 已由 [WI-1003](../../digest-rss/work-items/WI-1003-sqlite-database-kind.md) 補上，見末節）；TLS 到資料庫（WI-52；PostgreSQL 驅動預設的 `sslmode=prefer` 不驗證憑證，管理員無法改，也無法關閉）；相依漏洞檢查（專案目前沒有這項檢查）；可重現建置只因驅動在既有的 Engine 相依之內而沿用（未另行量測）；對遠端網路中斷的語意只以會凍結的 TCP 轉送器模擬。
+**尚未驗證**：真實的非 PostgreSQL 資料庫（本節撰寫時沒有第二個真實資料庫的設定檔；SQLite 已由 [WI-1003](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1003-sqlite-database-kind.md) 補上，見末節）；TLS 到資料庫（WI-52；PostgreSQL 驅動預設的 `sslmode=prefer` 不驗證憑證，管理員無法改，也無法關閉）；相依漏洞檢查（專案目前沒有這項檢查）；可重現建置只因驅動在既有的 Engine 相依之內而沿用（未另行量測）；對遠端網路中斷的語意只以會凍結的 TCP 轉送器模擬。
 
 ## 擴充：`sqlite` 種類（WI-1003，2026-10-08）
 
-行為與驗收見 [WI-1003](../../digest-rss/work-items/WI-1003-sqlite-database-kind.md)，使用者可見的規則在 08-api 的「`sqlite` 種類」。本項的機制（資料庫設定檔、世代、取消、存取端契約）沒有改變；為了讓第二份設定檔不改資源模型、API 欄位結構與存取端契約，設定檔介面做了以下擴充（`PostgresProfile` 的行為不變；`JdbcSettingsTest` 只改了讀取位址欄位的斷言與「第二份設定檔」案例所覆寫的成員，其餘原有的測試未修改）：
+行為與驗收見 [WI-1003](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1003-sqlite-database-kind.md)，使用者可見的規則在 08-api 的「`sqlite` 種類」。本項的機制（資料庫設定檔、世代、取消、存取端契約）沒有改變；為了讓第二份設定檔不改資源模型、API 欄位結構與存取端契約，設定檔介面做了以下擴充（`PostgresProfile` 的行為不變；`JdbcSettingsTest` 只改了讀取位址欄位的斷言與「第二份設定檔」案例所覆寫的成員，其餘原有的測試未修改）：
 
 - **位址欄位屬於設定檔：** `JdbcProfile` 以 `locationMembers` 與 `locationOf(settings)` 宣告並讀取自己的位址欄位（PostgreSQL 的 `host`、`port`、`database`、`username`；SQLite 的 `path`），結果是 `JdbcLocation`（`Network` 或 `LocalFile`）或被拒絕的 `problem`（新增 `path_outside_root`）；`JdbcSettings` 以 `location` 取代原本固定的四個欄位。`networked`（預設 `true`）為 `false` 的種類不接受密碼別名與憑證別名。目錄端點的每個資料庫多一個 `fields`。
 - **連線與清理：** `keepsConnections`（預設 `true`）為 `false` 的種類，連線在 run 結束時回滾後關閉，不重用；`interruptsStatements` 為 `true` 的種類，語句被取消或逾時時，執行它的執行緒也被中斷（SQLite 的鎖等待只看這個）；`inspect(location)` 讓設定檔在連線之前以檔案系統檢查檔案（檢查端點用它區分根目錄、路徑、目錄與權限）。`startStatements` 改為接收整份設定。
-- **SQLite 設定檔的重點：** 驅動 `org.xerial:sqlite-jdbc` 在 `accessors` 的 `implementation`（版本在 version catalog），以 `org.sqlite.JDBC().connect` 直接建立連線；開啟時固定可同時讀取的日誌模式與外鍵，鎖等待是自訂的可中斷等待（取消、強制釋放與語句逾時都會結束它），顯式交易在 `begin` 取得寫入鎖，連線不允許附加資料庫（擋下 `ATTACH` 與 `VACUUM INTO`）；SQLite 的錯誤碼對應到既有的錯誤類別與 SQLState。 [WI-1016](../../digest-rss/work-items/WI-1016-sqlite-first-open-race.md) 之後，WAL 日誌模式在連線建立時以重試方式設定（遇 `SQLITE_BUSY` 才重試，間隔 1 至 20 毫秒，遇中斷或最多 30 秒後放棄），SQLite 設定檔的啟動語句只剩啟用外鍵。
+- **SQLite 設定檔的重點：** 驅動 `org.xerial:sqlite-jdbc` 在 `accessors` 的 `implementation`（版本在 version catalog），以 `org.sqlite.JDBC().connect` 直接建立連線；開啟時固定可同時讀取的日誌模式與外鍵，鎖等待是自訂的可中斷等待（取消、強制釋放與語句逾時都會結束它），顯式交易在 `begin` 取得寫入鎖，連線不允許附加資料庫（擋下 `ATTACH` 與 `VACUUM INTO`）；SQLite 的錯誤碼對應到既有的錯誤類別與 SQLState。 [WI-1016](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1016-sqlite-first-open-race.md) 之後，WAL 日誌模式在連線建立時以重試方式設定（遇 `SQLITE_BUSY` 才重試，間隔 1 至 20 毫秒，遇中斷或最多 30 秒後放棄），SQLite 設定檔的啟動語句只剩啟用外鍵。
 - **Console：** 資源表單依目錄的 `fields` 顯示位址欄位（SQLite 只有路徑，沒有主機、埠、資料庫名、帳號、密碼別名與憑證別名）；Fake Engine 的目錄與設定規則同步，契約測試（對 Fake 與對真實打包的 Engine 的 113 個）涵蓋。
 - **開發入口：** `LocalResources` 與 Engine 用同一份設定檔（根目錄為 `RUNLINE_RESOURCE_ROOT`），專案內的設定檔寫同一份 `settings`（`{"kind":"sqlite","path":"digest.db"}`）。
 

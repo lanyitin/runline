@@ -1,6 +1,6 @@
 #!/bin/bash
 # Reports which WebGL renderer the Chrome of this machine gets, and applies the rule for hardware
-# rendering (docs/stable/digest-rss/04-deployment.md, WI-1001). It starts the Chrome the pipelines
+# rendering (https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md, WI-1001). It starts the Chrome the pipelines
 # start (CHROME_BIN with CHROME_ARGS, on DISPLAY), has it read its own renderer in a page, and ends it.
 #
 #   runline-browser-probe              prints the renderer; exit 3 if hardware rendering is required

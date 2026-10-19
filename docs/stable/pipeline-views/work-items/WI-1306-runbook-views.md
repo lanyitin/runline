@@ -4,7 +4,7 @@
 
 ## 背景
 
-WI-1303 已在 digest-rss 宣告四個 view：`downloads`、`not-downloaded`、`runs`、`run-articles`，並新增資料庫結構版本 8（一個索引，於下一次 run 開始時套用）。手冊 `docs/stable/digest-rss/runbook.md` 尚未提到它們。
+WI-1303 已在 digest-rss 宣告四個 view：`downloads`、`not-downloaded`、`runs`、`run-articles`，並新增資料庫結構版本 8（一個索引，於下一次 run 開始時套用）。手冊 `https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/runbook.md` 尚未提到它們。
 
 ## 行為與驗收條件
 

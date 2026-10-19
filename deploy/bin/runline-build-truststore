@@ -1,6 +1,6 @@
 #!/bin/bash
 # Makes a JVM truststore of the CA certificates of the JDK plus the certificates found in a
-# directory (docs/stable/digest-rss/04-deployment.md, WI-1001). The JVM trusts that file instead of
+# directory (https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md, WI-1001). The JVM trusts that file instead of
 # the JDK's own, through -Djavax.net.ssl.trustStore, so the operator's root certificates are trusted
 # by the whole JVM and the public ones still are.
 #

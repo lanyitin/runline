@@ -9,7 +9,7 @@ Trigger 只有 cron 與 webhook。需決定它們屬於 pipeline 作者還是營
 - Pipeline metadata 不含 trigger。
 - 管理員在 Engine 端建立 trigger，綁定到特定版本的 pipeline 定義。綁定不跟隨最新版：換版本時管理員更新綁定。新版本的 unsafe 設定本就不繼承（[ADR-006](ADR-006-unsafe-policy.md)），綁定與其一致，由管理員重新確認。
 - 每個 trigger 有管理員指定、唯一的名稱，用於網址與 run 的來源名稱。
-- 觸發時使用的參數由 trigger 持有：建立或修改 trigger 時帶入一組固定參數，並依該 pipeline 定義的 metadata 驗證（缺少必填、未宣告的參數即拒絕）。參數以管理員提供的原樣保存，預設值由單一建立流程套用，使重新綁定時能重新驗證管理員給的值。Webhook 請求的內容預設不影響參數，只作為觸發訊號；[ADR-036](../../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md) 取代這一句，允許 webhook trigger 明列「呼叫端提供的參數」，由請求本文傳入。清單為空的 webhook 仍維持本條：本文不讀取，也不影響參數。
+- 觸發時使用的參數由 trigger 持有：建立或修改 trigger 時帶入一組固定參數，並依該 pipeline 定義的 metadata 驗證（缺少必填、未宣告的參數即拒絕）。參數以管理員提供的原樣保存，預設值由單一建立流程套用，使重新綁定時能重新驗證管理員給的值。Webhook 請求的內容預設不影響參數，只作為觸發訊號；[ADR-036](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md) 取代這一句，允許 webhook trigger 明列「呼叫端提供的參數」，由請求本文傳入。清單為空的 webhook 仍維持本條：本文不讀取，也不影響參數。
 
 ### Cron
 - 以標準五欄表達式描述，每個 trigger 可指定 IANA 時區，預設為 UTC。
@@ -43,6 +43,6 @@ Trigger 只有 cron 與 webhook。需決定它們屬於 pipeline 作者還是營
 - Trigger 的資料表以「拒絕刪除」的方式參照 pipeline 定義（[06](../06-data-model.md)）。
 - 觸發紀錄隨保留期限清理；縮短保留期限等於縮短去重視窗。
 - 排程器與啟動時的「標記為中斷」步驟假設單實例；多實例前需先處理排程重複與他實例進行中觸發被誤標的問題（[07](../07-nfr-risks.md)）。
-- 需要由 webhook 內容決定參數時，已由 [ADR-036](../../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md) 修訂：先驗證密鑰與投遞識別，再讀取本文並依 pipeline 的參數宣告驗證。
+- 需要由 webhook 內容決定參數時，已由 [ADR-036](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md) 修訂：先驗證密鑰與投遞識別，再讀取本文並依 pipeline 的參數宣告驗證。
 - 需要「跟隨最新版」時，另開 ADR 修訂本決策，並一併處理其與 unsafe 設定不繼承的關係。
 - 需要更換 cron 函式庫時，替換單一類別並維持上述時間語意。

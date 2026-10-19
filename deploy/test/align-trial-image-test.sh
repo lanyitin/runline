@@ -1,5 +1,5 @@
 #!/bin/bash
-# Checks the trial image of the aligner (WI-1451, docs/stable/transcribe-scenes/04-deployment.md):
+# Checks the trial image of the aligner (WI-1451, https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-scenes/04-deployment.md):
 # deploy/docker/Dockerfile.align-trial, built on the `transcribe` stage with the aligner of
 # runline-transcribe (its align/ directory). It builds both images with the real Docker daemon and runs
 # the real tool in them; nothing is stubbed.

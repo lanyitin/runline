@@ -11,9 +11,9 @@
 | 管理員 | 白名單管理 | 新增／修改／刪除條目；變更前可預覽影響；變更與重判為單一原子操作 |
 | 管理員 | pipeline 的 unsafe 執行設定 | 逐 pipeline 開關 |
 | 管理員 | 共享資源管理 | 定義資源（型別、容量與型別專屬設定）；查看持有者與等待者；修改、刪除（無持有者與等待者時）、檢查實體、強制釋放（[ADR-019](adr/ADR-019-typed-shared-resources.md)） |
-| 開發人員、管理員 | 資源角色綁定 | 查看 pipeline 每個資源角色的型別、用途與綁定，把角色綁定到既有的資源或解除（只能選既有資源，不能建立；[ADR-025](../digest-rss/adr/ADR-025-resource-roles-and-binding.md)） |
+| 開發人員、管理員 | 資源角色綁定 | 查看 pipeline 每個資源角色的型別、用途與綁定，把角色綁定到既有的資源或解除（只能選既有資源，不能建立；[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)） |
 | 管理員 | 機密管理 | 唯讀列出金鑰庫別名與引用者、重載金鑰庫；不接受機密值 |
-| 外部系統 | webhook 入口 | 驗證密鑰後立即回 accepted，run 非同步執行；以呼叫端提供的 delivery 識別碼去重；trigger 明列呼叫端提供的參數時，密鑰與識別碼通過後才讀取本文（[ADR-036](../transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md)） |
+| 外部系統 | webhook 入口 | 驗證密鑰後立即回 accepted，run 非同步執行；以呼叫端提供的 delivery 識別碼去重；trigger 明列呼叫端提供的參數時，密鑰與識別碼通過後才讀取本文（[ADR-036](https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/adr/ADR-036-webhook-caller-parameters.md)） |
 | 任何已授權者 | run 查詢 | 狀態、結果、log |
 | 任何已授權者 | run log 串流 | 以 WebSocket 或 SSE 推送；客戶端中斷不影響 run（背壓：緩衝有上限，超過則丟棄舊 log 並標記） |
 | 任何已授權者 | 取消 run | 協作式取消（見 [07](07-nfr-risks.md)） |
@@ -35,7 +35,7 @@ Engine 與 run 位於同一 JVM，但分屬不同 class loader。邊界契約如
 ## 共享資源的取得
 
 - 取得發生在 run 的初始化階段，由 Engine 在建立 run 後、啟動 pipeline 本體前處理，不經由 pipeline 程式碼呼叫。
-- Engine 依 metadata 宣告的資源角色整體取得：先把每個角色解析到實際資源（綁定的資源，沒有綁定時是同名資源，[ADR-025](../digest-rss/adr/ADR-025-resource-roles-and-binding.md)），再依資源取得，多個角色解析到同一個資源時只取得一次容量；結果為成功、等待逾時、被取消、資源不存在（含未綁定且沒有同名資源）或已停用。
+- Engine 依 metadata 宣告的資源角色整體取得：先把每個角色解析到實際資源（綁定的資源，沒有綁定時是同名資源，[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)），再依資源取得，多個角色解析到同一個資源時只取得一次容量；結果為成功、等待逾時、被取消、資源不存在（含未綁定且沒有同名資源）或已停用。
 - 釋放由 Engine 在 run 終止時執行，不依賴 run 自行釋放；管理員強制釋放走管理 API。
 - 等待與持有的狀態變化以事件記錄。
 
@@ -45,7 +45,7 @@ Engine 與 run 位於同一 JVM，但分屬不同 class loader。邊界契約如
 
 - 實體（檔案路徑、連線池、HTTP 用戶端）與機密由 Engine 持有，操作在 Engine 側執行；run 只拿到受控的存取端。存取端的契約由 core 定義。
 - 存取端跨越邊界時只使用 JDK 內建型別（字串、數字、位元組、集合）；機密、驅動物件與 Engine 內部型別不穿過邊界。
-- 取得容量成功後，Engine 為「宣告了型別」的角色備妥存取端；pipeline 只能依角色名稱取用自己宣告且已持有者，沒有執行中取得資源的操作。只宣告名稱的角色只取得容量。角色與資源是兩個識別：邊界上的呼叫只帶角色名稱（`resource` 鍵的值是角色名稱），pipeline 看不到實際的資源名稱，邊界只傳 JDK 內建型別；Engine 側把角色對回資源，同一資源的多個角色共用一個存取端綁定（一起失效、一起關閉），Engine 的 span、metric 與 log 記錄資源名稱而不是角色名稱（[ADR-025](../digest-rss/adr/ADR-025-resource-roles-and-binding.md)）。
+- 取得容量成功後，Engine 為「宣告了型別」的角色備妥存取端；pipeline 只能依角色名稱取用自己宣告且已持有者，沒有執行中取得資源的操作。只宣告名稱的角色只取得容量。角色與資源是兩個識別：邊界上的呼叫只帶角色名稱（`resource` 鍵的值是角色名稱），pipeline 看不到實際的資源名稱，邊界只傳 JDK 內建型別；Engine 側把角色對回資源，同一資源的多個角色共用一個存取端綁定（一起失效、一起關閉），Engine 的 span、metric 與 log 記錄資源名稱而不是角色名稱（[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)）。
 - 存取端綁定該 run 與取得當下的資源設定；run 終止或管理員強制釋放時失效，之後的操作失敗並註明原因，Engine 回收其佔用的實體。
 - 回傳給 run 的實體錯誤只含錯誤類別，不含連線字串與驅動訊息原文；原文寫入 Engine log，以 `errorId` 對應。經 HTTP 的型別（`openai-compatible`）另附服務回的狀態碼（`ResourceAccessException.status`）；服務回的訊息與本文不傳給 run，4xx 的錯誤說明只有 `error.type` 與 `error.message` 兩個有上限、已遮蔽的欄位（`upstreamType`、`upstreamMessage`，缺漏視為空），規則見 [ADR-043](adr/ADR-043-upstream-error-detail.md)。
 - 進行中的長時間操作（HTTP 請求、查詢）可以被取消：存取端失效時 Engine 先要求綁定中止正在做的事（`ResourceBinding.abort`），再等待它結束；因此強制釋放、run 取消與終止立即中斷進行中的請求，不必等它自己結束。

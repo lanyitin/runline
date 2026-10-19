@@ -58,7 +58,7 @@ VOLUME /var/lib/runline/shared /var/lib/runline/resources
 # WI-1419): without it the JVM of a uid with no passwd entry takes "/" as the home.
 ENTRYPOINT ["java", "-Duser.home=/home/runline", "-jar", "/app/engine.jar"]
 
-# The Engine for pipelines that drive a browser (WI-1001, docs/stable/digest-rss/04-deployment.md):
+# The Engine for pipelines that drive a browser (WI-1001, https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md):
 # the same image plus a real Google Chrome, a virtual display and the scripts that start them.
 # Google ships Chrome for linux/amd64 only, so this stage builds only for that platform (on an arm64
 # host the Docker VM must emulate amd64 with Rosetta). Chrome is installed from Google's package at
@@ -98,7 +98,7 @@ USER runline
 ENTRYPOINT ["/usr/local/bin/runline-entrypoint"]
 CMD ["java", "-Duser.home=/home/runline", "-jar", "/app/engine.jar"]
 
-# The Engine for the transcribe pipeline (WI-1402, docs/stable/transcribe-pipeline/04-deployment.md):
+# The Engine for the transcribe pipeline (WI-1402, https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/04-deployment.md):
 # the same image plus ffmpeg and ffprobe, the silero-vad model, the denoising tool (runline-denoise and the
 # pinned deep-filter, WI-1444) and the places for the VAD tool. No Python.
 # The inputs are fetched in a throw-away stage by deploy/bin/runline-transcribe-fetch, which holds their

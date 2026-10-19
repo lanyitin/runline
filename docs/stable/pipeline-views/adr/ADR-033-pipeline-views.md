@@ -1,11 +1,11 @@
 # ADR-033 Pipeline view：宣告式、唯讀、由 Engine 執行並由 Console 通用呈現
 
-狀態：已核可（2026-10-11）。補充 [ADR-003](../../pipeline-engine/adr/ADR-003-jar-and-discovery.md)（metadata 新增 view 宣告）、[ADR-015](../../pipeline-engine/adr/ADR-015-console-frontend.md)（Console 新增通用頁面）、[ADR-025](../../digest-rss/adr/ADR-025-resource-roles-and-binding.md)（view 掛在資源角色上）。回答：pipeline 如何在 Console 顯示自己的資料，以及這條讀取路徑的安全邊界。
+狀態：已核可（2026-10-11）。補充 [ADR-003](../../pipeline-engine/adr/ADR-003-jar-and-discovery.md)（metadata 新增 view 宣告）、[ADR-015](../../pipeline-engine/adr/ADR-015-console-frontend.md)（Console 新增通用頁面）、[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)（view 掛在資源角色上）。回答：pipeline 如何在 Console 顯示自己的資料，以及這條讀取路徑的安全邊界。
 
 ## 背景
 
 - pipeline 是 run 內的一條 thread，run 結束即消失（ADR-008），不能自己提供網頁。
-- digest-rss 的資料在 SQLite，經 `jdbc-pool` 資源存取（ADR-024）；目前只能用資料庫工具查（`docs/stable/digest-rss/06-data-model.md`「存取」）。
+- digest-rss 的資料在 SQLite，經 `jdbc-pool` 資源存取（ADR-024）；目前只能用資料庫工具查（`https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/06-data-model.md`「存取」）。
 - Console 是同源 SPA，只呼叫 Bearer／工作階段 API，CSP 禁止第三方腳本（ADR-015、ADR-017）。
 - 資料庫資源的 `readOnly` 屬性不可靠，唯一保護是帳號權限（`08-api.md`）；SQLite 沒有帳號。
 
@@ -31,7 +31,7 @@
 
 - Engine 依 run 相同的解析規則（上傳者加 pipeline 名稱的綁定，ADR-025）取得角色的資源；解析失敗回報與 run 相同的 `problem`（如 `unbound`）。
 - 一個 view 只能執行單一讀取語句；Engine 必須保證執行過程不能修改資料，即使查詢文字企圖寫入也不得成功。保證不得依賴資料庫帳號權限或 pipeline 的自律，並由真實 PostgreSQL 與真實 SQLite 驗證。
-- SQLite 的唯讀方式不得使「沒有 run 進行時無法開啟」（`docs/stable/digest-rss/runbook.md` 第 8 節記載的限制）。
+- SQLite 的唯讀方式不得使「沒有 run 進行時無法開啟」（`https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/runbook.md` 第 8 節記載的限制）。
 - view 查詢走獨立的讀取路徑：不占用 run 的資源容量（ADR-007），有自己的並行上限；套用資源既有的逾時、列數與回應大小上限，並加上分頁。
 - 執行失敗（逾時、結構不符）回報明確的錯誤碼，不是 500；查詢文字與參數值不出現在回應與 log。
 

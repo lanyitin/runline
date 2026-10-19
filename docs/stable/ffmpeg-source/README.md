@@ -1,6 +1,6 @@
 # ffmpeg-source：ffmpeg 靜態檔的下載來源
 
-本主題回答：`browser-transcribe` 映像建置所需的 ffmpeg 與 ffprobe 從哪裡取得，以及如何固定。狀態：提案中。Issue：#35（工作項）、#36（ADR）。補充 [ADR-032](../../stable/homelab-arr/adr/ADR-032-pin-build-inputs-by-hash.md) 的固定方式，不修訂任何 stable 決策。
+本主題回答：`browser-transcribe` 映像建置所需的 ffmpeg 與 ffprobe 從哪裡取得，以及如何固定。狀態：已核可（2026-10-19）。Issue：#35（工作項）、#36（ADR）。補充 [ADR-032](../homelab-arr/adr/ADR-032-pin-build-inputs-by-hash.md) 的固定方式，不修訂任何 stable 決策。
 
 ## 結論
 
@@ -23,8 +23,8 @@ flowchart LR
 
 | 文件 | 內容 | 狀態 |
 |---|---|---|
-| [ADR-36](adr/ADR-36-ffmpeg-source-btbn.md) | 來源選擇、取捨與後果 | 提案中 |
-| [#35](work-items/35-ffmpeg-source.md) | 工作項：行為與驗收條件 | 提案中 |
+| [ADR-36](adr/ADR-36-ffmpeg-source-btbn.md) | 來源選擇、取捨與後果 | 已核可 |
+| [#35](work-items/35-ffmpeg-source.md) | 工作項：行為與驗收條件 | 已核可 |
 
 ## 待確認問題
 

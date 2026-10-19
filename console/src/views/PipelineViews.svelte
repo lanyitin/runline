@@ -6,6 +6,7 @@
   import { useApp } from '../app/context';
   import { pipelineHref } from '../app/links';
   import ApiErrorNotice from '../ui/ApiErrorNotice.svelte';
+  import Dialog from '../ui/Dialog.svelte';
   import Link from '../ui/Link.svelte';
   import PlainText from '../ui/PlainText.svelte';
   import ViewFailure from './ViewFailure.svelte';
@@ -14,7 +15,9 @@
   import { invalidParameters, readViewState, viewHref, type ViewState } from './view-state';
 
   // The data of a pipeline (ADR-033, WI-1302): the views its version declares, and, for the one
-  // chosen, its inputs, a table, paging and the drill into another view. The view is read-only and
+  // chosen, its inputs, a table, paging and the drill into another view. The page keeps the list;
+  // the chosen view is in a large popup (#29) that is open exactly when the address names a view:
+  // nothing else says whether it is. The view is read-only and
   // the Engine runs it; this only asks and shows. Which view, the values and the page are in the
   // address, so that a reload, a link and the back button of the browser find the same table, and
   // coming back from a drill finds the view as it was left. The title, the labels and the cells are
@@ -176,8 +179,7 @@
   <section class="rl-card views" aria-labelledby="views-title">
     <h2 id="views-title">{i18n.t('views.title')}</h2>
 
-    {#if shown.view === null}
-      <p class="rl-help">{i18n.t('views.intro')}</p>
+    <p class="rl-help">{i18n.t('views.intro')}</p>
       <ul class="view-list">
         {#each list.views as view (view.id)}
           <li class="view" data-view={view.id}>
@@ -202,15 +204,15 @@
           </li>
         {/each}
       </ul>
-    {:else}
-      <div class="nav">
-        <button class="rl-btn small close" type="button" onclick={close}>{i18n.t('views.close')}</button>
-        {#if cameFrom !== null}
+    {#if shown.view !== null}
+     <Dialog size="wide" title={current?.title ?? i18n.t('views.title')} onclose={close}>
+      {#if cameFrom !== null}
+        <div class="nav">
           <button class="rl-btn small back" type="button" onclick={back}>
             {i18n.t('views.back', { title: cameFromTitle })}
           </button>
-        {/if}
-      </div>
+        </div>
+      {/if}
 
       {#if undeclared}
         <ViewFailure failure={new ApiFailure(404, { error: 'view_not_found' })} {roleHref} />
@@ -251,6 +253,7 @@
           <p class="muted" role="status" aria-busy="true">{i18n.t('common.loading')}</p>
         {/if}
       {/if}
+     </Dialog>
     {/if}
   </section>
 {/if}

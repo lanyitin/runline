@@ -968,7 +968,6 @@
   "views.problem.other": "角色 {role} 無法使用。",
   "views.problem.fix": "為 {role} 選擇共享資源",
   "views.open": "查看",
-  "views.close": "所有 view",
   "views.back": "回到 {title}",
   "views.drill": "查看 {title}",
   "views.params": "只顯示",

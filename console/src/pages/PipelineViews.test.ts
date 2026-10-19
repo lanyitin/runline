@@ -701,3 +701,97 @@ describe('the table of a view on a narrow screen', () => {
     expect(table.closest('.rl-table-wrap')).not.toBeNull();
   });
 });
+
+describe('the popup of a view (#29)', () => {
+  const dialog = (view: HTMLElement) => view.querySelector<HTMLElement>('[role="dialog"]');
+  const nameOf = (view: HTMLElement) =>
+    text(document.getElementById(dialog(view)!.getAttribute('aria-labelledby')!));
+  const escape = (target: Element) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+
+  test('is not there while no view is chosen, and no table is shown', async () => {
+    const view = await page();
+    await vi.waitFor(() => expect(section(view).querySelectorAll('li.view').length).toBe(2));
+
+    expect(dialog(view)).toBeNull();
+    expect(section(view).querySelector('table')).toBeNull();
+  });
+
+  test('opens when a view is chosen: named by the title of the view, with the list kept behind and the page not scrolling', async () => {
+    const view = await page();
+    await vi.waitFor(() => expect(section(view).querySelector('li.view button.open')).not.toBeNull());
+
+    await press(section(view), 'li.view[data-view="orders"] button.open');
+
+    await vi.waitFor(() => expect(dialog(view)).not.toBeNull());
+    expect(nameOf(view)).toBe('Orders');
+    expect(dialog(view)!.querySelector('form.view-params')).not.toBeNull();
+    expect(section(view).querySelectorAll('li.view').length).toBe(2);
+    expect(document.body.classList.contains('rl-modal-open')).toBe(true);
+    expect(dialog(view)!.contains(document.activeElement)).toBe(true);
+  });
+
+  test('is open with its table when the address already names the view', async () => {
+    const view = await page({ extra: 'view=orders' });
+    await waitForTable(view);
+
+    expect(dialog(view)).not.toBeNull();
+    expect(dialog(view)!.querySelector('table')).not.toBeNull();
+  });
+
+  test('is closed by Escape: the address loses the view and the keyboard returns to the item that opened it', async () => {
+    const view = await page();
+    await vi.waitFor(() => expect(section(view).querySelector('li.view button.open')).not.toBeNull());
+    const opener = section(view).querySelector<HTMLButtonElement>('li.view[data-view="orders"] button.open')!;
+    opener.focus();
+    opener.click();
+    await vi.waitFor(() => expect(dialog(view)).not.toBeNull());
+
+    escape(dialog(view)!);
+
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+    expect(search().get('view')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(document.body.classList.contains('rl-modal-open')).toBe(false);
+  });
+
+  test('is closed by its close button, from a view that a drill reached', async () => {
+    const view = await page({ extra: 'view=orders' });
+    await waitForTable(view);
+    await press(rows(view)[0], 'button.drill');
+    await vi.waitFor(() => expect(search().get('view')).toBe('history'));
+    expect(dialog(view)).not.toBeNull();
+
+    await press(dialog(view)!, 'button.close');
+
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+    expect(search().get('view')).toBeNull();
+    expect(search().get('param.customer')).toBeNull();
+  });
+
+  test('stays one popup through a drill and its return, its name following the view', async () => {
+    const view = await page({ extra: 'view=orders' });
+    await waitForTable(view);
+    const first = dialog(view)!;
+
+    await press(rows(view)[0], 'button.drill');
+    await vi.waitFor(() => expect(nameOf(view)).toBe('History of a customer'));
+    expect(dialog(view)).toBe(first);
+    await press(dialog(view)!, 'button.back');
+
+    await vi.waitFor(() => expect(nameOf(view)).toBe('Orders'));
+    expect(dialog(view)).toBe(first);
+  });
+
+  test('is closed by the back button of the browser, and opened again by forward', async () => {
+    const view = await page();
+    await vi.waitFor(() => expect(section(view).querySelector('li.view button.open')).not.toBeNull());
+    await press(section(view), 'li.view[data-view="orders"] button.open');
+    await vi.waitFor(() => expect(dialog(view)).not.toBeNull());
+
+    history.back();
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+    history.forward();
+    await vi.waitFor(() => expect(dialog(view)).not.toBeNull());
+  });
+});

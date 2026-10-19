@@ -8,15 +8,17 @@
   // the close button close it, unless it is not `dismissible`: a dialog that has to be answered with
   // one of its own buttons (the secret of a webhook is shown once and must be copied). The page
   // behind cannot scroll. The first thing marked `data-autofocus` is the one that gets the keyboard;
-  // without one, the first thing that can be used.
+  // without one, the first thing that can be used. A `wide` dialog is for content that needs room (a
+  // table): about 95% of the window both ways, and the whole screen on a narrow one (ADR-048).
   interface Props {
     title: string;
+    size?: 'wide';
     dismissible?: boolean;
     onclose?: () => void;
     children: Snippet;
     footer?: Snippet;
   }
-  let { title, dismissible = true, onclose, children, footer }: Props = $props();
+  let { title, size, dismissible = true, onclose, children, footer }: Props = $props();
 
   const { i18n } = useApp();
   const titleId = $props.id();
@@ -65,10 +67,11 @@
   }
 </script>
 
-<div class="overlay">
+<div class="overlay" class:wide={size === 'wide'}>
   <div
     bind:this={dialog}
     class="dialog"
+    class:wide={size === 'wide'}
     role="dialog"
     aria-modal="true"
     aria-labelledby={titleId}
@@ -113,6 +116,19 @@
     border-radius: var(--radius-lg);
     background: var(--surface);
     box-shadow: var(--shadow-popover);
+  }
+  .overlay.wide {
+    padding: 0;
+  }
+  .dialog.wide {
+    width: min(95vw, 100%);
+    height: 95vh;
+    max-height: none;
+  }
+  .dialog.wide .body {
+    flex: 1;
+    min-height: 0;
+    align-content: start;
   }
   .dialog:focus {
     outline: none;

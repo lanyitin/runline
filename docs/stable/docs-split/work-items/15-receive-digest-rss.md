@@ -1,6 +1,6 @@
 # #15：runline-digest-rss 接收 digest-rss 文件並設定 agent
 
-本項回答：`runline-digest-rss` 要達成什麼狀態。狀態：提案中。Issue：#15。相依：[#13](../adr/13-docs-split.md) 核可。
+本項回答：`runline-digest-rss` 要達成什麼狀態。狀態：已核可，未開始。Issue：#15。相依：[#13](../adr/13-docs-split.md)（已核可）。
 
 ## 目標
 

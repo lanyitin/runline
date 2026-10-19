@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fetches the build inputs of the transcribe runtime, each verified by the sha256 pinned here (ADR-032,
-# WI-1402): ffmpeg and ffprobe (the static build of johnvansickle.com), the silero-vad ONNX model and, for
+# WI-1402): ffmpeg and ffprobe (the static LGPL build of BtbN/FFmpeg-Builds), the silero-vad ONNX model and, for
 # amd64, deep-filter (the denoising executable of bin/runline-denoise, WI-1444).
 # This file is the one place the versions and hashes are defined: the Dockerfile's `transcribe` stage
 # runs it, and so does an operator preparing a systemd host. Nothing reaches the destination unless
@@ -15,14 +15,16 @@
 # the upstream addresses (the hashes still apply). bin/runline-denoise pins the same deep-filter version and
 # hash to verify the executable when it runs; test/transcribe-fetch-test.sh fails if the two differ.
 #
-# To update: take the new release from upstream, download it once, compute its sha256 yourself
-# (the upstream publishes no sha256 for these files), change the version and the hashes below and read
+# To update: take the new monthly autobuild tag of BtbN/FFmpeg-Builds, download it once, compute its sha256 yourself
+# (for ffmpeg the release page lists a sha256 per file to compare with), change the version and the hashes below and read
 # deploy/transcribe.md "Updating the pinned inputs".
 set -euo pipefail
 
-ffmpeg_version=7.0.2
-ffmpeg_sha256_amd64=abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67
-ffmpeg_sha256_arm64=f4149bb2b0784e30e99bdda85471c9b5930d3402014e934a5098b41d0f7201b1
+ffmpeg_release=autobuild-2026-09-30-13-08
+ffmpeg_build=n8.1.3-9-g29e619e767
+ffmpeg_line=8.1
+ffmpeg_sha256_amd64=dfa863a00ca81f1bdf58a372b18cff4820f0017e55de32778de8ecd8ed92a02e
+ffmpeg_sha256_arm64=8463881ca7a25015ca6e00f5c91dd2f1637eb73d33c8230413cb74db760a86b3
 silero_vad_version=v5.1.2
 deep_filter_version=0.5.6
 deep_filter_sha256_amd64=70775e251eee44c0f2451a1e833326cf8bcbbe304d3e7cd12851e6fce72ef7da
@@ -38,8 +40,8 @@ if [ -z "$arch" ]; then
   case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; *) arch="$(uname -m)" ;; esac
 fi
 case "$arch" in
-  amd64) ffmpeg_sha256="$ffmpeg_sha256_amd64" ;;
-  arm64) ffmpeg_sha256="$ffmpeg_sha256_arm64" ;;
+  amd64) ffmpeg_sha256="$ffmpeg_sha256_amd64"; ffmpeg_platform=linux64 ;;
+  arm64) ffmpeg_sha256="$ffmpeg_sha256_arm64"; ffmpeg_platform=linuxarm64 ;;
   *) die "no pinned ffmpeg for architecture '$arch' (amd64 and arm64 only)" ;;
 esac
 
@@ -53,10 +55,10 @@ download() { # what, url, file, expected sha256
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-ffmpeg_base="${RUNLINE_FFMPEG_BASE_URL:-https://johnvansickle.com/ffmpeg/releases}"
+ffmpeg_base="${RUNLINE_FFMPEG_BASE_URL:-https://github.com/BtbN/FFmpeg-Builds/releases/download/${ffmpeg_release}}"
 silero_url="${RUNLINE_SILERO_VAD_URL:-https://raw.githubusercontent.com/snakers4/silero-vad/${silero_vad_version}/src/silero_vad/data/silero_vad.onnx}"
 deep_filter_url="${RUNLINE_DEEP_FILTER_URL:-https://github.com/Rikorose/DeepFilterNet/releases/download/v${deep_filter_version}/deep-filter-${deep_filter_version}-x86_64-unknown-linux-musl}"
-name="ffmpeg-${ffmpeg_version}-${arch}-static"
+name="ffmpeg-${ffmpeg_build}-${ffmpeg_platform}-lgpl-${ffmpeg_line}"
 
 if [ "$arch" = amd64 ]; then
   download deep-filter "$deep_filter_url" "$tmp/deep-filter" "$deep_filter_sha256_amd64"
@@ -66,7 +68,7 @@ fi
 download ffmpeg "$ffmpeg_base/$name.tar.xz" "$tmp/ffmpeg.tar.xz" "$ffmpeg_sha256"
 download "silero-vad model" "$silero_url" "$tmp/silero_vad.onnx" "$silero_vad_sha256"
 mkdir "$tmp/unpacked"
-tar -xJf "$tmp/ffmpeg.tar.xz" -C "$tmp/unpacked" --strip-components=1 "$name/ffmpeg" "$name/ffprobe"
+tar -xJf "$tmp/ffmpeg.tar.xz" -C "$tmp/unpacked" --strip-components=2 "$name/bin/ffmpeg" "$name/bin/ffprobe"
 
 mkdir -p "$dest"
 install -m 0755 "$tmp/unpacked/ffmpeg" "$tmp/unpacked/ffprobe" "$dest/"
@@ -74,4 +76,4 @@ install -m 0644 "$tmp/silero_vad.onnx" "$dest/silero_vad.onnx"
 [ ! -f "$tmp/deep-filter" ] || install -m 0755 "$tmp/deep-filter" "$dest/deep-filter"
 # The pinned hash beside the model, for runline-transcribe-check to compare the file in place with.
 printf '%s  silero_vad.onnx\n' "$silero_vad_sha256" >"$dest/silero_vad.onnx.sha256"
-echo "runline-transcribe-fetch: ffmpeg $ffmpeg_version ($arch), ffprobe, silero-vad $silero_vad_version$([ -f "$tmp/deep-filter" ] && echo ", deep-filter $deep_filter_version") verified and written to $dest"
+echo "runline-transcribe-fetch: ffmpeg $ffmpeg_line ($ffmpeg_build, $arch), ffprobe, silero-vad $silero_vad_version$([ -f "$tmp/deep-filter" ] && echo ", deep-filter $deep_filter_version") verified and written to $dest"

@@ -1,6 +1,6 @@
 # ADR-053 潤飾附畫面並記錄換人，SRT 依參數畫出對話破折號；刪除畫面核對
 
-本文回答：潤飾要做什麼、換人如何記錄與呈現、畫面核對為何刪除。狀態：已核可（2026-10-14）。修訂 stable 入口文件的範圍外「說話者辨識」；取代畫面核對階段（[ADR-038](../../../stable/transcribe-pipeline/adr/ADR-038-segment-model-and-stage-invariants.md) 決策 4、5 中與核對相關的部分）。
+本文回答：潤飾要做什麼、換人如何記錄與呈現、畫面核對為何刪除。狀態：已核可（2026-10-14）；決策 1 中的分行與換人、決策 2 至 4，以及決策 5 中「不標換人」已被 [ADR-083](ADR-083-entry-is-one-line.md) 取代（條目是一行文字，不畫對話破折號）。修訂 stable 入口文件的範圍外「說話者辨識」；取代畫面核對階段（[ADR-038](../../../stable/transcribe-pipeline/adr/ADR-038-segment-model-and-stage-invariants.md) 決策 4、5 中與核對相關的部分）。
 
 ## 背景
 

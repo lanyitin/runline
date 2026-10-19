@@ -44,6 +44,6 @@ run 8：Engine run `4d94dfa0-7d1e-473b-9927-614c1e4e6a3c`，cron 觸發，影片
 ## 對本提案的影響
 
 - 長片段解決「只聽 1 秒」與補掃逾時兩個問題（[ADR-051](adr/ADR-051-long-chunks-and-forced-alignment.md)）。
-- 換人無法在 VAD 層解決，改由潤飾依文字與畫面標出（[ADR-053](adr/ADR-053-polish-with-frames-and-speaker-turns.md)）。
+- 換人無法在 VAD 層解決，改由潤飾依文字與畫面標出（[ADR-053](adr/ADR-053-polish-with-frames-and-speaker-turns.md)）；後由 [ADR-083](adr/ADR-083-entry-is-one-line.md) 撤回，不再標換人。
 - thinking 的取樣與止損是架構需求，不只是設定（[ADR-055](adr/ADR-055-thinking-policy-and-early-stop.md)）。
 - 紀錄要包含推理內容與上游錯誤狀態，否則無法診斷。

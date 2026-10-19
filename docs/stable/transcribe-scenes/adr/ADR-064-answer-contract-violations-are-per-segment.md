@@ -1,6 +1,6 @@
 # ADR-064 回答契約違反以片段為單位處理
 
-本文回答：潤飾、摘要、翻譯的回答違反契約（行數、簡體字、格式）時，如何重試、保留可用部分，以及何時才算服務故障而及早止損。狀態：已核可（2026-10-15）。修改 [ADR-055](ADR-055-thinking-policy-and-early-stop.md) 決策 6 的「每次呼叫失敗都累計」，僅限回答契約違反；補充 [WI-1459](../work-items/WI-1459-translation-with-context.md) 條件 3。
+本文回答：潤飾、摘要、翻譯的回答違反契約（行數、簡體字、格式）時，如何重試、保留可用部分，以及何時才算服務故障而及早止損。狀態：已核可（2026-10-15）；決策 2 已被 [ADR-083](ADR-083-entry-is-one-line.md) 取代。修改 [ADR-055](ADR-055-thinking-policy-and-early-stop.md) 決策 6 的「每次呼叫失敗都累計」，僅限回答契約違反；補充 [WI-1459](../work-items/WI-1459-translation-with-context.md) 條件 3。
 
 ## 背景
 

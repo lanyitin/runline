@@ -201,18 +201,20 @@ sudo -u runline env $(grep -v '^#' /etc/runline/runline.env | xargs) /opt/runlin
 
 | 輸入 | 版本與雜湊 | 定義處 |
 |---|---|---|
-| ffmpeg、ffprobe | johnvansickle.com 靜態建置 7.0.2；amd64 `abda8d77…cf67`、arm64 `f4149bb2…01b1`（tar.xz 的 sha256） | `bin/runline-transcribe-fetch` |
+| ffmpeg、ffprobe | BtbN/FFmpeg-Builds 月度發佈標籤 `autobuild-2026-09-30-13-08`，ffmpeg `n8.1.3-9-g29e619e767`（版本線 8.1），靜態 LGPL 變體（`linux64-lgpl`、`linuxarm64-lgpl`）；amd64 `dfa863a0…2e`、arm64 `8463881c…b3`（tar.xz 的 sha256） | `bin/runline-transcribe-fetch` |
 | silero-vad 模型 | snakers4/silero-vad `v5.1.2` 的 `silero_vad.onnx`；`2623a295…788f` | 同上 |
 | deep-filter | DeepFilterNet 釋出 `v0.5.6` 的 `deep-filter-0.5.6-x86_64-unknown-linux-musl`（僅 amd64）；`70775e25…7da`（執行檔本身的 sha256，上游釋出頁面的檔案，由本專案計算） | `bin/runline-transcribe-fetch`（取得時）與 `bin/runline-denoise`（執行時） |
 | 基底映像 | 沿用 `engine` 階段的雜湊 | `docker/Dockerfile` 的第一個 `FROM` |
 
 下載後先比對雜湊，不符就不寫出任何檔案，`docker build` 也隨之失敗（`test/transcribe-fetch-test.sh` 以真實的 HTTP 伺服器提供非固定內容，驗證拒絕且目的地不留檔案）。雜湊只定義在 `runline-transcribe-fetch` 一處；Dockerfile 與主機安裝都執行它。
 
-**限度**：上游不發佈這些檔案的 sha256（ffmpeg 靜態建置的頁面只提供 md5；本專案沒有找到上游發佈的 sha256），所以這些雜湊是首次下載時**由本專案自己計算**的，防的是之後上游內容被換掉或下載被竄改，不是首次下載時的來源真偽。apt 套件不在其中，映像不含額外的 apt 套件（下載工具只在丟棄的 `transcribe-fetch` 階段）。
+**ffmpeg 的選擇**：標籤取月度（月底）發佈而非滾動的 `latest`，只有月度標籤長期保留。版本線取 8.1：該標籤同時提供 8.1 與 9.0 兩條穩定線，8.1 是較舊的一條，與原先的 7.x 差距較小；同一標籤的 `N-` 開頭建置是 master 快照，不用。授權取 LGPL：本專案只以 ffmpeg 解碼音訊並產生測試用的正弦波與 PCM（`runline-transcribe-check`、`runline-denoise`），不需要 GPL 才有的編碼器（如 x264）；LGPL 變體的授權義務較少。不取 `-shared` 變體，因為映像與主機只複製 `ffmpeg` 與 `ffprobe` 兩個檔案，函式庫須已併入執行檔；執行檔仍動態連結 glibc（最低 2.28），基底映像（eclipse-temurin，Ubuntu）符合。
+
+**限度**：deep-filter 與 silero-vad 模型的上游不發佈 sha256，這些雜湊是首次下載時**由本專案自己計算**的；ffmpeg 的 GitHub release 為每個檔案列出 sha256，上述兩個雜湊與該清單相符。這些雜湊防的是之後上游內容被換掉或下載被竄改，不是首次下載時的來源真偽。apt 套件不在其中，映像不含額外的 apt 套件（下載工具只在丟棄的 `transcribe-fetch` 階段）。
 
 ### 更新固定的輸入
 
-1. 從上游取得新版本（ffmpeg：`https://johnvansickle.com/ffmpeg/release-source/` 對應的 `releases/ffmpeg-<版本>-<amd64|arm64>-static.tar.xz`；模型：silero-vad 的版本標籤），下載後以 `shasum -a 256` 自行計算。
+1. 從上游取得新版本（ffmpeg：BtbN/FFmpeg-Builds 的月度 `autobuild-<日期>` 發佈標籤，取 `ffmpeg-n<版本>-<建置>-<linux64|linuxarm64>-lgpl-<版本線>.tar.xz`，並與發佈頁列出的 sha256 對照；模型：silero-vad 的版本標籤），下載後以 `shasum -a 256` 自行計算。標籤、建置與版本線三者（`ffmpeg_release`、`ffmpeg_build`、`ffmpeg_line`）須一起改。
 2. 只改 `bin/runline-transcribe-fetch` 開頭的版本與雜湊（deep-filter 另須同步改 `bin/runline-denoise` 的 `VERSION` 與 `Linux-x86_64` 的雜湊；測試會檢查兩處一致）。模型升級須同時確認 VAD 工具（WI-1407）支援該模型版本（07 風險表：模型版本的狀態介面不同），視為新決策。
 3. 重新驗證：`deploy/test/transcribe-fetch-test.sh`、重建 `transcribe` 階段（兩個平台都建一次可確認兩個雜湊）、`runline-transcribe-check`。
 

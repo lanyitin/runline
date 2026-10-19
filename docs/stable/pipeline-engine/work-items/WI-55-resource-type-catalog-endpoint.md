@@ -13,7 +13,7 @@ Console 的資源表單目前內含端點目錄、請求參數清單與資料庫
   - 封閉的型別集合。
   - `openai-compatible` 端點目錄的每個條目：識別名稱、群組、方法、路徑樣板、請求與回應種類、是否可串流、是否預設啟用、是否有狀態。
   - `openai-compatible` 可設定預設、鎖定或上限的請求參數：名稱、值的種類、是否可設上限。
-  - `jdbc-pool` 每個資料庫設定檔的種類，以及其允許的連線屬性與值規則（另有各種類接受的位址欄位 `fields`，隨 [WI-1003](../../digest-rss/work-items/WI-1003-sqlite-database-kind.md) 加入）。
+  - `jdbc-pool` 每個資料庫設定檔的種類，以及其允許的連線屬性與值規則（另有各種類接受的位址欄位 `fields`，隨 [WI-1003](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1003-sqlite-database-kind.md) 加入）。
 - 開發人員取得 403，沒有 token 取得 401。
 - 回應不含任何資源的設定、使用量、機密別名或機密值，也不含 Engine 組態值。以含獨特標記的真實 PKCS12 金鑰庫驗證：標記不出現在回應中。
 - **與驗證一致**：

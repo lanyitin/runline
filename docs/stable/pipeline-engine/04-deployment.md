@@ -64,7 +64,7 @@ v1 單實例。Cron 排程、run 並行上限、run 排程佇列與共享資源�
 
 - PostgreSQL 定期備份，包含 jar 與 pipeline 定義。
 - Pipeline 共享目錄所在的磁碟區是否備份，由營運者依資料重要性決定；預設視為可重建的快取。
-- 資源根目錄（`file` 資源的檔案，以及 `jdbc-pool` 的 `sqlite` 種類的資料庫檔，見 [WI-1003](../digest-rss/work-items/WI-1003-sqlite-database-kind.md)）所在的磁碟區視為資料：備份與還原由營運者負責，Engine 不備份它，刪除資源也不刪除其檔案。SQLite 的資料庫檔旁有 `-wal`、`-shm` 檔，備份須用 SQLite 的備份指令或在 Engine 停止時複製整組檔案；其驅動第一次載入時把原生程式庫解開到 JVM 暫存目錄（`java.io.tmpdir`），該目錄須可寫入且允許載入執行檔，否則以 `-Dorg.sqlite.tmpdir` 指向另一個目錄（失敗時的錯誤與設定見[瀏覽器部署手冊](../../../deploy/browser.md)「SQLite 的原生程式庫」）。`engine.jar` 的 manifest 宣告 `Enable-Native-Access: ALL-UNNAMED`（Netty 與 SQLite 驅動載入原生程式庫），所以 `java -jar engine.jar` 不需要 `--enable-native-access`。
+- 資源根目錄（`file` 資源的檔案，以及 `jdbc-pool` 的 `sqlite` 種類的資料庫檔，見 [WI-1003](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1003-sqlite-database-kind.md)）所在的磁碟區視為資料：備份與還原由營運者負責，Engine 不備份它，刪除資源也不刪除其檔案。SQLite 的資料庫檔旁有 `-wal`、`-shm` 檔，備份須用 SQLite 的備份指令或在 Engine 停止時複製整組檔案；其驅動第一次載入時把原生程式庫解開到 JVM 暫存目錄（`java.io.tmpdir`），該目錄須可寫入且允許載入執行檔，否則以 `-Dorg.sqlite.tmpdir` 指向另一個目錄（失敗時的錯誤與設定見[瀏覽器部署手冊](../../../deploy/browser.md)「SQLite 的原生程式庫」）。`engine.jar` 的 manifest 宣告 `Enable-Native-Access: ALL-UNNAMED`（Netty 與 SQLite 驅動載入原生程式庫），所以 `java -jar engine.jar` 不需要 `--enable-native-access`。
 - Engine 重啟時，狀態為進行中的 run 一律標記為「中斷」，不自動重跑。
 
 ## 優雅關閉

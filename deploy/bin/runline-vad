@@ -1,5 +1,5 @@
 #!/bin/bash
-# The command name of the VAD tool (docs/stable/transcribe-pipeline/05-ipc.md): runs the jar of the
+# The command name of the VAD tool (https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/05-ipc.md): runs the jar of the
 # tool, which is delivered apart from the runtime (WI-1407, project runline-transcribe) and put at
 # RUNLINE_VAD_JAR. All arguments go to the tool unchanged. Without the jar it says so and exits 127.
 #

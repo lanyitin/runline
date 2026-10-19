@@ -1,5 +1,5 @@
 # The Engine with a real Google Chrome and a virtual display, for pipelines that drive a browser
-# (docs/stable/digest-rss/04-deployment.md, WI-1001). An overlay on compose.yaml:
+# (https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md, WI-1001). An overlay on compose.yaml:
 #
 #   docker compose -f deploy/docker/compose.yaml -f deploy/docker/compose.browser.yaml up --build -d
 #   (or COMPOSE_FILE=compose.yaml:compose.browser.yaml in .env)

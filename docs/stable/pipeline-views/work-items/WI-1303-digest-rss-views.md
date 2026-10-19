@@ -4,7 +4,7 @@
 
 ## 背景
 
-使用者要在 Console 看到「目前為止下載了哪些」與「哪些沒下載、原因為何」。資料已由 `docs/stable/digest-rss/06-data-model.md` 的 RUN_POST、VERDICT、DOWNLOAD 記錄；runbook 第 8 節已有對應的 SQLite 查詢，可作為行為參考，不是要複製的內容。
+使用者要在 Console 看到「目前為止下載了哪些」與「哪些沒下載、原因為何」。資料已由 `https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/06-data-model.md` 的 RUN_POST、VERDICT、DOWNLOAD 記錄；runbook 第 8 節已有對應的 SQLite 查詢，可作為行為參考，不是要複製的內容。
 
 ## 行為與驗收條件
 

@@ -1,4 +1,4 @@
-# Hands the host's GPU to the Engine's container (docs/stable/digest-rss/04-deployment.md, WI-1001).
+# Hands the host's GPU to the Engine's container (https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md, WI-1001).
 # An overlay on compose.yaml and compose.browser.yaml; without it Chrome renders in software
 # (llvmpipe) and the container says so in its log.
 #

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Checks the runtime of the transcribe pipeline (docs/stable/transcribe-pipeline/04-deployment.md,
+# Checks the runtime of the transcribe pipeline (https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-pipeline/04-deployment.md,
 # WI-1402), in a container or on a host, as the account the Engine runs as:
 #
 #   runline-transcribe-check [--skip-vad] [--skip-denoise]

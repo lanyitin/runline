@@ -1,4 +1,4 @@
-# The trial image of the aligner (WI-1451, docs/stable/transcribe-scenes/04-deployment.md): an image of
+# The trial image of the aligner (WI-1451, https://forgejo.dev.lan/runline/runline-transcribe/src/branch/main/docs/stable/transcribe-scenes/04-deployment.md): an image of
 # the `transcribe` stage (deploy/docker/Dockerfile) plus the aligner of runline-transcribe, for the
 # feasibility measurement on a real host. It is built apart from the production images, on top of one
 # of them, and changes nothing of them: no stage of deploy/docker/Dockerfile names this file, and

@@ -36,4 +36,4 @@ flowchart LR
 
 - 現況觀察：寫在 ADR-033 的背景。
 - 部署架構：不適用。不新增行程、容器或組態；仍是「一個 Engine 加一個 PostgreSQL」，Console 隨 Engine 發佈（ADR-015）。
-- 資料模型：不適用於 Engine。Engine 不保存 view 的結果；宣告隨 artifact 的 metadata 保存（ADR-003）。digest-rss 的資料模型見 `docs/stable/digest-rss/06-data-model.md`，view 不改動它的實體；WI-1303 僅新增一個索引（資料庫結構版本 8）。
+- 資料模型：不適用於 Engine。Engine 不保存 view 的結果；宣告隨 artifact 的 metadata 保存（ADR-003）。digest-rss 的資料模型見 `https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/06-data-model.md`，view 不改動它的實體；WI-1303 僅新增一個索引（資料庫結構版本 8）。

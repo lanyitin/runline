@@ -47,8 +47,11 @@ dependencies {
 // The Engine loads native libraries (Netty's transport, the SQLite driver's). Since JDK 24 the JVM
 // warns at the first load, and a future release blocks it, unless native access is enabled for the
 // caller. The artifact declares it, so that `java -jar engine.jar` needs no flag wherever it starts
-// (WI-1001, docs/stable/digest-rss/04-deployment.md). The scope is the one of the command-line flag
-// --enable-native-access=ALL-UNNAMED: no narrower form exists for code on the class path.
+// (WI-1001,
+// https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md).
+// The scope is the one of the command-line flag --enable-native-access=ALL-UNNAMED: no narrower
+// form
+// exists for code on the class path.
 tasks.named<Jar>("shadowJar") { manifest { attributes("Enable-Native-Access" to "ALL-UNNAMED") } }
 
 // What the Engine knows about its own build, in a resource of the jar (WI-28). The release flag is

@@ -1,6 +1,6 @@
 # 瀏覽器部署手冊
 
-本文回答：要讓 Engine 為「驅動有畫面的 Chrome 的 pipeline」（digest-rss，[ADR-022](../docs/stable/digest-rss/adr/ADR-022-unsafe-pipeline-with-local-browser.md)）運作，Docker 與 systemd 兩種部署各要提供什麼、怎麼設定、怎麼驗證，以及 SQLite 原生程式庫在部署環境的條件。需求來源是 [digest-rss 的 04](../docs/stable/digest-rss/04-deployment.md) 與 [WI-1001](../docs/stable/digest-rss/work-items/WI-1001-engine-browser-deployment.md)；Engine 平台共通的部分見 [Docker](../docs/stable/pipeline-engine/04-deployment-docker.md) 與 [systemd](../docs/stable/pipeline-engine/04-deployment-systemd.md) 指南。
+本文回答：要讓 Engine 為「驅動有畫面的 Chrome 的 pipeline」（digest-rss，[ADR-022](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-022-unsafe-pipeline-with-local-browser.md)）運作，Docker 與 systemd 兩種部署各要提供什麼、怎麼設定、怎麼驗證，以及 SQLite 原生程式庫在部署環境的條件。需求來源是 [digest-rss 的 04](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md) 與 [WI-1001](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1001-engine-browser-deployment.md)；Engine 平台共通的部分見 [Docker](../docs/stable/pipeline-engine/04-deployment-docker.md) 與 [systemd](../docs/stable/pipeline-engine/04-deployment-systemd.md) 指南。
 
 本文標明每一項是「實測」（在本專案的開發機上實際執行過）還是「未實測」及原因。實測環境：macOS arm64、Colima（`vmType: vz`、Rosetta，2 CPU、4 GiB）上的 `linux/amd64` 容器、Google Chrome 155.0.8059.39、沒有 `/dev/dri`。**沒有在有 GPU 的主機或 systemd 主機上實測**。
 
@@ -237,7 +237,7 @@ Engine 的服務帳號（`runline`）要能開 `/dev/dri/renderD128`：把帳號
 | 角色 | 做什麼 | 狀態 |
 |---|---|---|
 | 部署 | 把該變數原樣交給 Engine 的行程環境（Docker：`.env`；systemd：`runline.env`）；啟動時報告渲染器，要求硬體而渲染器為軟體時多一行警告；提供 `runline-browser-probe` 作為部署時的預檢（要求硬體而為軟體渲染時結束代碼 3，讀不到渲染器為 2） | 實測（Docker，軟體渲染情形） |
-| pipeline | 已實作（[WI-1006](../docs/stable/digest-rss/work-items/WI-1006-page-capture.md) 第 11 條，程式在 `runline-digest-rss`）。有文章要擷取的 run 在擷取前，以 pipeline 自己啟動的 Chrome 讀出 WebGL 渲染器（log `BROWSER renderer=…`，同時記入 `run.browser_renderer`）；`CHROME_REQUIRE_HARDWARE_RENDERING=true` 且渲染器為軟體或讀不到時，run 以明確原因失敗（`BROWSER REFUSED: …`、`HardwareRenderingRequiredException`），不擷取任何頁面、不標記；未啟用時只記錄、不影響執行 | 已在 `runline-digest-rss` 以軟體渲染的環境驗證（Linux 容器，渲染器為 llvmpipe）；本儲存庫不含此程式 |
+| pipeline | 已實作（[WI-1006](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/work-items/WI-1006-page-capture.md) 第 11 條，程式在 `runline-digest-rss`）。有文章要擷取的 run 在擷取前，以 pipeline 自己啟動的 Chrome 讀出 WebGL 渲染器（log `BROWSER renderer=…`，同時記入 `run.browser_renderer`）；`CHROME_REQUIRE_HARDWARE_RENDERING=true` 且渲染器為軟體或讀不到時，run 以明確原因失敗（`BROWSER REFUSED: …`、`HardwareRenderingRequiredException`），不擷取任何頁面、不標記；未啟用時只記錄、不影響執行 | 已在 `runline-digest-rss` 以軟體渲染的環境驗證（Linux 容器，渲染器為 llvmpipe）；本儲存庫不含此程式 |
 
 預檢與 pipeline 用同一條判定規則：渲染器字串含 `swiftshader`、`llvmpipe`、`software`、`microsoft basic`（不分大小寫），或沒有渲染器，即為軟體渲染。
 

@@ -311,8 +311,10 @@ internal object SqliteValues : JdbcValues {
 /**
  * Reading a SQLite file for a view (WI-1301). The file is opened the way the runs open it, not with
  * the driver's read-only mode: that mode cannot make the `-wal` and `-shm` files of the log when no
- * run has the file open, and fails (docs/stable/digest-rss/runbook.md section 8). What keeps the
- * read from writing is the text (one statement inside a `SELECT`) and `query_only`.
+ * run has the file open, and fails
+ * (https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/runbook.md
+ * section 8). What keeps the read from writing is the text (one statement inside a `SELECT`) and
+ * `query_only`.
  */
 internal object SqliteReading : ReadDialect {
   override val syntax = SqlSyntax.SQLITE

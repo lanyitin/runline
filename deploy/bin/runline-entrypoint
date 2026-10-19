@@ -1,5 +1,5 @@
 #!/bin/bash
-# How the Engine starts in the browser image (docs/stable/digest-rss/04-deployment.md, WI-1001).
+# How the Engine starts in the browser image (https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/04-deployment.md, WI-1001).
 # Everything here is configuration from environment variables; the last line is the Engine itself
 # (the command this script is given), started in this process so that it receives the signals.
 #

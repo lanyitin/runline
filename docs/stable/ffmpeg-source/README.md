@@ -24,7 +24,7 @@ flowchart LR
 | 文件 | 內容 | 狀態 |
 |---|---|---|
 | [ADR-36](adr/ADR-36-ffmpeg-source-btbn.md) | 來源選擇、取捨與後果 | 已核可 |
-| [#35](work-items/35-ffmpeg-source.md) | 工作項：行為與驗收條件 | 已核可 |
+| [#35](work-items/35-ffmpeg-source.md) | 工作項：行為與驗收條件 | 已核可，已完成 |
 
 ## 待確認問題
 

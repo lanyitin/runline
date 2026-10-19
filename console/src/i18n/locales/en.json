@@ -968,7 +968,6 @@
   "views.problem.other": "The role {role} cannot be used.",
   "views.problem.fix": "Choose a shared resource for {role}",
   "views.open": "Show",
-  "views.close": "All views",
   "views.back": "Back to {title}",
   "views.drill": "Show {title}",
   "views.params": "Show only",

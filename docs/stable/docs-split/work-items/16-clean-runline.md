@@ -1,6 +1,6 @@
 # #16：runline 移除已搬走的文件並修正引用
 
-本項回答：搬走之後，runline 要達成什麼狀態。狀態：已核可，未開始。Issue：#16。相依：[#14](14-receive-transcribe.md)、[#15](15-receive-digest-rss.md) 都已驗收並由使用者合併。
+本項回答：搬走之後，runline 要達成什麼狀態。狀態：已核可，已完成。Issue：#16。相依：[#14](14-receive-transcribe.md)、[#15](15-receive-digest-rss.md) 都已驗收並由使用者合併。
 
 ## 目標
 

@@ -1,6 +1,6 @@
 # #23：更正 runline-transcribe 文件中過時的位置敘述
 
-本項回答：搬移之後，`runline-transcribe` 的文件中哪些敘述要更正。狀態：已核可，未開始。Issue：#23。相依：無。
+本項回答：搬移之後，`runline-transcribe` 的文件中哪些敘述要更正。狀態：已核可，已完成。Issue：#23。相依：無。
 
 ## 目標
 

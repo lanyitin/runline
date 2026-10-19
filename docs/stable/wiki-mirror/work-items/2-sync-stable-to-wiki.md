@@ -1,15 +1,12 @@
 # #2：stable 合併後同步到 Wiki
 
-本項回答：要讓 Wiki 成為 stable 的映像，須達成什麼行為。狀態：已核可，未開始。Issue：#2。相依：[#6](../adr/6-mirror-mapping-links-deletion-credential.md)（已核可），以及使用者提供寫入憑證。
+本項回答：要讓 Wiki 成為 stable 的映像，須達成什麼行為。狀態：已核可，已完成。Issue：#2。相依：[#6](../adr/6-mirror-mapping-links-deletion-credential.md)（已核可）。
 
 ## 目標
 
 `docs/stable/` 在 `main` 上有變動時，Forgejo Wiki 自動更新為與 stable 一致，文件間連結可點擊，並有依主題列出的首頁目錄與側邊欄。
 
 ## 驗收條件
-
-**先決確認**
-- 在實作前確認 Wiki 功能已啟用、Forgejo 對頁名中路徑分隔的支援情形，以及 Actions 內建 token 是否能寫入 Wiki。結果與選用的頁名規則依 #6 回報；無法滿足 #6 的前提時停下回報，不自行改變規則。
 
 **同步**
 - 只有 `docs/stable/` 的變動會觸發；其他路徑的變動不觸發。
@@ -26,11 +23,13 @@
 **目錄**
 - 首頁目錄與側邊欄依主題階層列出各入口文件，順序穩定，每次同步重新產生。
 
-**憑證**
-- 憑證只從 Forgejo secrets 讀取，不出現在儲存庫與日誌；權限限於寫入 Wiki 所需。
+**憑證與安全**
+- 使用 Actions 內建 token，並宣告最小權限；不建立專用 secret。
+- 憑證不出現在儲存庫與日誌；不關閉 TLS 驗證。
 
 ## 架構約束
 
 - 單向：只由 stable 寫入 Wiki，不從 Wiki 讀回。
-- 以 Forgejo Actions 執行，沿用 `.forgejo/workflows/` 現有慣例（action 以 commit id 釘版、組態與 secrets 在檔頭說明）。
+- 以 Forgejo Actions 執行，沿用 `.forgejo/workflows/` 現有慣例（action 以 commit id 釘版、組態在檔頭說明）。
 - 遵循 [#1](../adr/1-wiki-is-readonly-mirror.md) 與 #6。
+- 內建 token 在實作環境不可寫入 Wiki 時，停下回報，不自行改用其他憑證。

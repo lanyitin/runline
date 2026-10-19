@@ -1,6 +1,6 @@
 # #29：pipeline view 以大型 popup 呈現
 
-本項回答：Console 如何把 pipeline view 放進約 95% viewport 的 popup。狀態：已核可（2026-10-19），未開始。Issue：#29。相依：無（WI-1302 已完成）。儲存庫：runline。入口：[README](../README.md)。
+本項回答：Console 如何把 pipeline view 放進約 95% viewport 的 popup。狀態：已核可（2026-10-19），已完成（2026-10-19）。Issue：#29。相依：無（WI-1302 已完成）。儲存庫：runline。入口：[README](../README.md)。
 
 ## 目標
 

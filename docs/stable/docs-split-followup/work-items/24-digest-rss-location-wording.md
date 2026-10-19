@@ -1,6 +1,6 @@
 # #24：更正 runline-digest-rss 文件中過時的位置敘述
 
-本項回答：搬移之後，`runline-digest-rss` 的文件中哪些敘述要更正。狀態：提案中。Issue：#24。相依：無。
+本項回答：搬移之後，`runline-digest-rss` 的文件中哪些敘述要更正。狀態：已核可，未開始。Issue：#24。相依：無。
 
 ## 目標
 

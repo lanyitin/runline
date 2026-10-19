@@ -1,6 +1,6 @@
 # docs-split-followup：文件拆分與 Wiki 映像之後的收尾
 
-本主題回答：docs-split 與 wiki-mirror 完成後，還有哪些遺留資源要清理、哪些文件敘述要更正。狀態：提案中。
+本主題回答：docs-split 與 wiki-mirror 完成後，還有哪些遺留資源要清理、哪些文件敘述要更正。狀態：已核可。
 
 ## 範圍
 

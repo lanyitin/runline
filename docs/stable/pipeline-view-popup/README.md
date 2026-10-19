@@ -1,6 +1,6 @@
 # pipeline-view-popup：pipeline view 以大型 popup 呈現
 
-本主題回答：Console 的 pipeline view（資料區）如何擁有足夠的顯示面積。狀態：提案中。Issue：#29。補充 [ADR-033](../../stable/pipeline-views/adr/ADR-033-pipeline-views.md) 與 [WI-1302](../../stable/pipeline-views/work-items/WI-1302-console-views.md) 的呈現方式，不修訂任何 stable 決策。
+本主題回答：Console 的 pipeline view（資料區）如何擁有足夠的顯示面積。狀態：已核可（2026-10-19）。Issue：#29。補充 [ADR-033](../pipeline-views/adr/ADR-033-pipeline-views.md) 與 [WI-1302](../pipeline-views/work-items/WI-1302-console-views.md) 的呈現方式，不修訂任何 stable 決策。
 
 ## 結論
 
@@ -32,7 +32,7 @@ flowchart LR
 
 | 主題 | 文件 | 狀態 |
 |---|---|---|
-| 工作項 #29：view 的大型 popup 呈現 | [work-items/29-view-popup.md](work-items/29-view-popup.md) | 提案中 |
+| 工作項 #29：view 的大型 popup 呈現 | [work-items/29-view-popup.md](work-items/29-view-popup.md) | 已核可 |
 
 ## 範圍
 

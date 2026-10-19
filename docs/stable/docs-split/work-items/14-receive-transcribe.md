@@ -1,6 +1,6 @@
 # #14：runline-transcribe 接收 transcribe 文件並設定 agent
 
-本項回答：`runline-transcribe` 要達成什麼狀態。狀態：已核可，未開始。Issue：#14。相依：[#13](../adr/13-docs-split.md)（已核可）。
+本項回答：`runline-transcribe` 要達成什麼狀態。狀態：已核可，已完成。Issue：#14。相依：[#13](../adr/13-docs-split.md)（已核可）。
 
 ## 目標
 

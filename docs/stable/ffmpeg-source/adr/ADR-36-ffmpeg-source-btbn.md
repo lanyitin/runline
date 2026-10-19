@@ -1,6 +1,6 @@
 # ADR-36 ffmpeg 靜態檔改用 BtbN GitHub release
 
-狀態：提案中。Issue：#36。補充 [ADR-032](../../../stable/homelab-arr/adr/ADR-032-pin-build-inputs-by-hash.md)，不取代。回答：johnvansickle.com 無法連線時，ffmpeg 與 ffprobe 改從哪裡取得。
+狀態：已核可（2026-10-19）。Issue：#36。補充 [ADR-032](../../homelab-arr/adr/ADR-032-pin-build-inputs-by-hash.md)，不取代。回答：johnvansickle.com 無法連線時，ffmpeg 與 ffprobe 改從哪裡取得。
 
 ## 背景
 

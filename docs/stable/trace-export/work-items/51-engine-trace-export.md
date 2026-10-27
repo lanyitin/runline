@@ -1,6 +1,6 @@
 # #51 Engine 的 trace-export 型別、匯出器與緩衝
 
-本文回答：Engine 側要達成什麼行為、如何驗收。狀態：提案中（2026-10-27）。Issue：#51。決策見 [ADR-46](../../../stable/trace-export/adr/ADR-46-trace-export-resource.md)。相依：#50。
+本文回答：Engine 側要達成什麼行為、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#51。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：#50。
 
 ## 行為
 
@@ -14,7 +14,7 @@
 8. 資源未啟用或 pipeline 未綁定時，不匯出。
 9. 容量為接近無限的固定值，取得容量永遠立即成功；容量不可由管理員編輯。
 10. 丟棄、匯出成功與失敗、截斷的計數成為可觀測指標。
-11. 08-api 與型別目錄資料（[ADR-021](../../../stable/pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md)）同步更新。
+11. 08-api 與型別目錄資料（[ADR-021](../../pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md)）同步更新。
 
 ## 驗收條件
 
@@ -32,6 +32,6 @@
 
 - OpenTelemetry 的 SDK 與匯出器只在 Engine 的 class loader；run 不載入 OpenTelemetry 類別。
 - 不共用 Engine 自身遙測的全域設定。
-- 機密只在金鑰庫，不進入資料庫、API、metadata、log、trace、錯誤與邊界（[ADR-019](../../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md)）；型別集合維持封閉。
+- 機密只在金鑰庫，不進入資料庫、API、metadata、log、trace、錯誤與邊界（[ADR-019](../../pipeline-engine/adr/ADR-019-typed-shared-resources.md)）；型別集合維持封閉。
 - 端點的 TLS 信任沿用 ADR-019 決策 12 的機制。
 - 測試的外部系統用真實或簡易真實實作，不用 Stub 或 Mock。

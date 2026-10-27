@@ -31,14 +31,14 @@ flowchart LR
 |---|---|---|
 | [ADR-46](adr/ADR-46-trace-export-resource.md) | 方案比較、決策、取捨與後果 | 已核可 |
 
-工作項（Issue 編號即工作項編號；詳細文件核可前在 `docs/draft/trace-export/work-items/`）：
+工作項（Issue 編號即工作項編號）：
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| #50 A | core span 契約與 devkit 實作 | 無 | 提案中 |
-| #51 B | Engine 型別、匯出器與緩衝 | #50 | 提案中 |
-| #52 C | Console 與型別目錄 | #51 | 提案中 |
-| #53 D | 整體驗證 | #50、#51、#52 | 提案中 |
+| [#50](work-items/50-core-span-contract.md) | core span 契約與 devkit 實作 | 無 | 已核可，待派工 |
+| [#51](work-items/51-engine-trace-export.md) | Engine 型別、匯出器與緩衝 | #50 | 已核可，待派工 |
+| [#52](work-items/52-console-trace-export.md) | Console 與型別目錄 | #51 | 已核可，待派工 |
+| [#53](work-items/53-trace-export-verification.md) | 整體驗證 | #50、#51、#52 | 已核可，待派工 |
 
 順序：#50 → #51 → #52 → #53，一次派一項。
 

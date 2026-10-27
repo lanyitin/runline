@@ -12,7 +12,7 @@
 
 | 文件 | 內容 | 狀態 |
 |---|---|---|
-| [#64](work-items/64-engine-metrics-export.md) | 工作項：行為與驗收條件 | 已核可，待派工 |
+| [#64](work-items/64-engine-metrics-export.md) | 工作項：行為與驗收條件 | 已完成（2026-10-27；PR #68） |
 
 ## 待確認問題
 

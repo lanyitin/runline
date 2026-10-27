@@ -1600,6 +1600,44 @@ export function describeAdminContract(name: string, setup: PipelinesContractSetu
       expect([unlimited.status, unlimited.body.settings.timeouts.totalMs]).toEqual([201, undefined]);
     });
 
+    test('a trace-export is defined with its endpoint and service name, as given, and the alias of its credentials, which it must have; its capacity is the Engine\'s', async () => {
+      const { fixedCapacity } = (await call(root(), 'GET', '/api/v1/resource-types')).body.types.find((t: any) => t.type === 'trace-export');
+      const settings = { endpoint: 'HTTPS://trace.example/api/public/otel/v1/traces', serviceName: 'runline' };
+      const export_ = (extra: Record<string, unknown>) =>
+        defined({ name: fresh('trace'), type: 'trace-export', capacity: fixedCapacity, settings, ...extra });
+
+      await refused(export_({}), 'invalid_secret_alias');
+      const answer = await export_({ secretAlias: 'Trace-Key' });
+      expect(answer.status).toBe(201);
+      expect(answer.body).toMatchObject({
+        type: 'trace-export',
+        capacity: fixedCapacity,
+        settings: { endpoint: 'https://trace.example/api/public/otel/v1/traces', serviceName: 'runline' },
+        secretAlias: 'trace-key',
+        usage: null,
+      });
+      const resourceName = answer.body.name as string;
+      const renamed = await change(resourceName, { settings: { ...settings, serviceName: 'runline-prod' } });
+      expect([renamed.status, renamed.body.settings.serviceName, renamed.body.capacity]).toEqual([200, 'runline-prod', fixedCapacity]);
+      await refused(change(resourceName, { capacity: fixedCapacity - 1 }), 'capacity');
+    });
+
+    test('a trace-export says what it refuses: the endpoint, the service name, certificates for an address that is not https, any other field', async () => {
+      const { fixedCapacity } = (await call(root(), 'GET', '/api/v1/resource-types')).body.types.find((t: any) => t.type === 'trace-export');
+      const exporter = (settings: Record<string, unknown>) =>
+        defined({ name: fresh('trace'), type: 'trace-export', capacity: fixedCapacity, settings, secretAlias: 'trace-key' });
+      const at = { endpoint: 'http://127.0.0.1:9/v1/traces', serviceName: 'runline' };
+      for (const endpoint of ['ftp://trace/v1', 'http://user:pw@trace/v1', 'http://trace/v1?x=1', 'trace/v1']) {
+        await refused(exporter({ ...at, endpoint }), 'invalid_base_url');
+      }
+      await refused(exporter({ endpoint: at.endpoint }), 'invalid_settings');
+      await refused(exporter({ ...at, serviceName: '' }), 'invalid_settings');
+      await refused(exporter({ ...at, serviceName: 'x'.repeat(101) }), 'invalid_settings');
+      await refused(exporter({ ...at, authorization: 'Basic x' }), 'invalid_settings');
+      await refused(exporter({ ...at, trustAliases: ['corporate-ca'] }), 'invalid_settings');
+      expect((await exporter({ ...at, endpoint: 'https://trace.example/v1/traces', trustAliases: ['corporate-ca'] })).status).toBe(201);
+    });
+
     test('the settings are changed as a whole and written out again, which forgets the last check; the alias is changed to another; who changed it is the one who did', async () => {
       const resourceName = fresh('db');
       await defined({ name: resourceName, type: 'jdbc-pool', capacity: 2, settings: database, secretAlias: 'old-pass' });

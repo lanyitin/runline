@@ -1021,5 +1021,16 @@
   "admin.version.impact.jarRemoved": "jar 也會一併移除，因為沒有其他版本有相同內容。",
   "admin.version.impact.jarStays": "jar 會保留，因為另一個版本有相同內容。",
   "admin.version.effect.withRuns": "這些 run 與其 log 會隨版本一併刪除，且無法復原。",
-  "admin.version.effect.noRuns": "這個版本沒有 run，只會刪除版本。"
+  "admin.version.effect.noRuns": "這個版本沒有 run，只會刪除版本。",
+  "resourceType.trace-export": "追蹤匯出（OTLP）",
+  "resources.setting.endpoint": "匯出端點",
+  "resources.setting.serviceName": "服務名稱",
+  "resources.form.trace.endpoint.help": "OTLP/HTTP traces 端點的完整位址，例如 https://cloud.langfuse.com/api/public/otel/v1/traces。Engine 不會再附加路徑，也不跟隨轉址。位址不可含使用者資訊、查詢或片段。",
+  "resources.form.trace.serviceName.help": "此資源匯出的 span 所屬的 service.name，最長 100 個字元。",
+  "resources.form.capacity.fixed": "容量由 Engine 固定（近乎無限，run 不會因此等待），無法修改。",
+  "resources.form.secret.trace-export": "認證值：整串 Authorization 值在金鑰庫中的別名",
+  "resources.form.certificates.help.trace-export": "只適用於 https 端點。設定了受信任憑證就只信任它們，不再信任 JVM 預設；沒有設定時使用 JVM 預設信任。主機名稱一律驗證。",
+  "resources.problem.invalid_settings.trace-export": "Engine 拒絕了設定：缺少端點或服務名稱、服務名稱超過 100 個字元，或為非 https 的位址設定了憑證。",
+  "resources.problem.invalid_secret_alias.trace-export": "請選擇金鑰庫中認證值的別名：這個型別必須有一個。",
+  "resources.fixedCapacity": "沒有容量限制：run 不會因它而等待，也不持有它。"
 }

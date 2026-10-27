@@ -232,6 +232,7 @@ describe('the type of a resource in its form', () => {
       ['file', 'File'],
       ['jdbc-pool', 'Database pool (JDBC)'],
       ['openai-compatible', 'OpenAI-compatible service'],
+      ['trace-export', 'Trace export (OTLP)'],
     ]);
     expect(dialog(view).querySelector('#resource-name')).toBeNull();
     expect(dialog(view).querySelector('#resource-capacity')).toBeNull();
@@ -286,7 +287,7 @@ describe('the type of a resource in its form', () => {
   test('never asks for a secret value: of any type, a secret is chosen by its alias, and nothing else is about a secret', async () => {
     const { view } = await page({ seed: typed });
     await loaded(view);
-    for (const option of ['counter', 'file', 'jdbc-pool', 'openai-compatible']) {
+    for (const option of ['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export']) {
       button(view, 'Define a resource').click();
       await tick();
       choose(dialog(view).querySelector('#resource-type')!, option);
@@ -295,7 +296,7 @@ describe('the type of a resource in its form', () => {
       const secretFields = [...dialog(view).querySelectorAll<HTMLElement>('input, select')].filter((e) => /secret|key|password/i.test(e.id));
       expect([option, secretFields.map((e) => `${e.tagName}#${e.id}`)]).toEqual([
         option,
-        option === 'jdbc-pool' || option === 'openai-compatible' ? ['SELECT#resource-secret'] : [],
+        ['jdbc-pool', 'openai-compatible', 'trace-export'].includes(option) ? ['SELECT#resource-secret'] : [],
       ]);
       button(dialog(view), 'Cancel').click();
       await tick();
@@ -1071,6 +1072,171 @@ describe('the form of an openai-compatible service', () => {
   });
 });
 
+describe('the form of a trace-export', () => {
+  const FIXED = 1000000;
+  const secretPicked = async (view: HTMLElement, alias: string) => {
+    await vi.waitFor(() => expect(dialog(view).querySelectorAll('#resource-secret option').length).toBeGreaterThan(1));
+    choose(dialog(view).querySelector('#resource-secret')!, alias);
+  };
+
+  test('is a type of the form, in the Engine order, with the fields the catalog gives it', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    button(view, 'Define a resource').click();
+    await tick();
+
+    expect([...dialog(view).querySelectorAll<HTMLOptionElement>('#resource-type option')].map((o) => o.value)).toEqual([
+      '',
+      'counter',
+      'file',
+      'jdbc-pool',
+      'openai-compatible',
+      'trace-export',
+    ]);
+    choose(dialog(view).querySelector('#resource-type')!, 'trace-export');
+    await tick();
+    expect(dialog(view).querySelector('#resource-capacity')).not.toBeNull();
+    expect(field(view, 'trace-endpoint')).not.toBeNull();
+    expect(field(view, 'trace-service-name')).not.toBeNull();
+    expect(dialog(view).querySelector('#resource-secret')).not.toBeNull();
+  });
+
+  test('shows the capacity the Engine fixes and does not let it be edited; it is sent as it is', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'trace-export', 'langfuse');
+    const capacity = field(view, 'resource-capacity');
+
+    expect(capacity.value).toBe(String(FIXED));
+    expect(capacity.readOnly || capacity.disabled).toBe(true);
+    expect(dialog(view).textContent).toContain('fixed by the Engine');
+  });
+
+  test('defines it with its endpoint, service name and the alias of its credentials; the card shows them, never a value', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'trace-export', 'langfuse');
+    type(field(view, 'trace-endpoint'), 'http://trace.internal:4318/v1/traces');
+    type(field(view, 'trace-service-name'), 'runline');
+    await secretPicked(view, 'llm-key');
+
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(cards(view)).toHaveLength(1));
+    expect(sent('POST')).toEqual({
+      name: 'langfuse',
+      type: 'trace-export',
+      capacity: FIXED,
+      settings: { endpoint: 'http://trace.internal:4318/v1/traces', serviceName: 'runline' },
+      secretAlias: 'llm-key',
+    });
+    const made = card(view, 'langfuse');
+    expect(made.querySelector('.type')!.textContent).toBe('Trace export (OTLP)');
+    expect([...made.querySelectorAll('.settings dd')].map((d) => d.textContent)).toEqual([
+      'http://trace.internal:4318/v1/traces',
+      'runline',
+    ]);
+    expect(made.querySelector('.secret .alias')!.textContent).toBe('llm-key');
+  });
+
+  test('asks for the certificates only for an https endpoint', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'trace-export', 'langfuse');
+
+    type(field(view, 'trace-endpoint'), 'http://trace.internal/v1/traces');
+    await tick();
+    expect(dialog(view).querySelector('#resource-certificates')).toBeNull();
+
+    type(field(view, 'trace-endpoint'), 'https://cloud.example/api/public/otel/v1/traces');
+    await tick();
+    expect(dialog(view).querySelector('#resource-certificates')).not.toBeNull();
+  });
+
+  test('asks for the endpoint and the service name before it asks the Engine, and says what the Engine refused at the field; the credentials are needed', async () => {
+    const { view } = await page({ seed: keystore });
+    await loaded(view);
+    await defineForm(view, 'trace-export', 'langfuse');
+    button(dialog(view), 'Define').click();
+    await tick();
+    expect(errorAt(view, 'trace-endpoint')).toBe('Fill this in.');
+    expect(errorAt(view, 'trace-service-name')).toBe('Fill this in.');
+
+    type(field(view, 'trace-endpoint'), 'ftp://x');
+    type(field(view, 'trace-service-name'), 'runline');
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(errorAt(view, 'trace-endpoint')).toContain('http or https'));
+    expect(dialog(view).querySelector('[role="alert"]')).toBeNull();
+
+    type(field(view, 'trace-endpoint'), 'http://trace.internal/v1/traces');
+    button(dialog(view), 'Define').click();
+
+    await vi.waitFor(() => expect(errorAt(view, 'resource-secret')).toContain('Choose the alias of the credentials'));
+  });
+
+  test('is changed with the capacity as it is: only the settings are sent', async () => {
+    const seeded = (backend: TestApp['engine']['backend']) => {
+      keystore(backend);
+      backend.resources.define('langfuse', {
+        type: 'trace-export',
+        capacity: FIXED,
+        settings: { endpoint: 'http://trace.internal/v1/traces', serviceName: 'runline' },
+        secretAlias: 'llm-key',
+      });
+    };
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+    button(card(view, 'langfuse'), 'Change').click();
+    await tick();
+    expect(field(view, 'resource-capacity').value).toBe(String(FIXED));
+    expect(field(view, 'resource-capacity').readOnly || field(view, 'resource-capacity').disabled).toBe(true);
+    type(field(view, 'trace-service-name'), 'runline-prod');
+
+    button(dialog(view), 'Save').click();
+
+    await vi.waitFor(() => expect(sent('PATCH')).toBeDefined());
+    expect(sent('PATCH')).toEqual({ settings: { endpoint: 'http://trace.internal/v1/traces', serviceName: 'runline-prod' } });
+    await vi.waitFor(() => expect(dialog(view)).toBeNull());
+  });
+
+  test('on its card there is no meter of holders: it has no capacity to wait for, and it says so', async () => {
+    const seeded = (backend: TestApp['engine']['backend']) => {
+      backend.resources.define('langfuse', {
+        type: 'trace-export',
+        capacity: FIXED,
+        settings: { endpoint: 'http://trace.internal/v1/traces', serviceName: 'runline' },
+      });
+    };
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+    const made = card(view, 'langfuse');
+
+    expect(made.querySelector('progress')).toBeNull();
+    expect(made.querySelector('.holders, .waiters')).toBeNull();
+    expect(made.textContent).toContain('never wait');
+  });
+
+  test('a check that finds no alias in the keystore says so in words', async () => {
+    const seeded = (backend: TestApp['engine']['backend']) => {
+      keystore(backend);
+      backend.resources.define('langfuse', {
+        type: 'trace-export',
+        capacity: FIXED,
+        settings: { endpoint: 'http://trace.internal/v1/traces', serviceName: 'runline' },
+        secretAlias: 'gone-key',
+      });
+    };
+    const { view } = await page({ seed: seeded });
+    await loaded(view);
+
+    button(card(view, 'langfuse'), 'Check').click();
+
+    await vi.waitFor(() => expect(card(view, 'langfuse').querySelector('.last-check .outcome')!.textContent).toContain('secret alias is not in the keystore'));
+    expect(card(view, 'langfuse').querySelector('.secret-status')!.textContent).toMatch(/not in the keystore|missing/i);
+  });
+});
+
 describe('the alias of a secret in the form', () => {
   test('is chosen among the secrets of the keystore, with whether each can be used; certificates are not offered; none is the default', async () => {
     const { view } = await page({ seed: keystore });
@@ -1510,7 +1676,7 @@ describe('the choices of the forms are what the Engine tells (WI-55)', () => {
     button(view, 'Define a resource').click();
     await tick();
     const options = [...dialog(view).querySelectorAll<HTMLOptionElement>('#resource-type option')];
-    expect(options.filter((o) => o.disabled).map((o) => o.value)).toEqual(['jdbc-pool', 'openai-compatible']);
+    expect(options.filter((o) => o.disabled).map((o) => o.value)).toEqual(['jdbc-pool', 'openai-compatible', 'trace-export']);
     expect(options.find((o) => o.value === 'openai-compatible')!.textContent).toContain('not available');
   });
 

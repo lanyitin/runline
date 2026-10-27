@@ -79,11 +79,29 @@ export function describeResourceTypesContract(name: string, setup: PipelinesCont
     test('it is the closed set of types in the Engine order; counter and file have nothing more', async () => {
       const types = await catalog();
 
-      expect(types.map((t) => t.type)).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible']);
+      expect(types.map((t) => t.type)).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export']);
       expect(types[0]).toEqual({ type: 'counter' });
       expect(types[1]).toEqual({ type: 'file' });
       expect(Object.keys(types[2]).sort()).toEqual(['databases', 'type']);
       expect(Object.keys(types[3]).sort()).toEqual(['endpoints', 'requestParameters', 'type']);
+      expect(Object.keys(types[4]).sort()).toEqual(['fixedCapacity', 'type']);
+    });
+
+    test('trace-export tells the capacity it is fixed to: a whole number of one or more, which is the only capacity it takes', async () => {
+      const { fixedCapacity } = await typeNamed('trace-export');
+
+      expect(Number.isInteger(fixedCapacity) && fixedCapacity >= 1).toBe(true);
+      const settings = { endpoint: 'http://127.0.0.1:9/v1/traces', serviceName: 'runline' };
+      const create = (capacity: number) =>
+        call(root(), 'POST', '/api/v1/resources', { name: fresh('rt'), capacity, type: 'trace-export', settings, secretAlias: 'trace-key' });
+
+      const other = await create(fixedCapacity + 1);
+      expect([other.status, other.body?.error, other.body?.problem]).toEqual([422, 'invalid_resource', 'capacity']);
+      const accepted = await create(fixedCapacity);
+      if (accepted.status === 201) made.push(accepted.body.name);
+      expect([accepted.status, accepted.body?.capacity]).toEqual([201, fixedCapacity]);
+      const changed = await call(root(), 'PATCH', `/api/v1/resources/${accepted.body.name}`, { capacity: fixedCapacity - 1 });
+      expect([changed.status, changed.body?.problem]).toEqual([422, 'capacity']);
     });
 
     test('each endpoint of openai-compatible says its group, method, path, request and response, whether it streams, is enabled by default and is stateful', async () => {

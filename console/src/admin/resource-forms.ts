@@ -6,8 +6,9 @@
 // said here, the rest is the Engine's to refuse, and its `problem` is said at the field it is about.
 // Settings the form has no field for are kept as they are when a resource is changed (`kept`).
 // The choices of `jdbc-pool` and `openai-compatible` (database kinds, endpoint entries, request
-// parameters) are what the Engine tells (`GET /api/v1/resource-types`, ADR-021): without that
-// catalog those two types have no form, and the Console has no list of its own to fall back on.
+// parameters) and the capacity that `trace-export` is fixed to are what the Engine tells
+// (`GET /api/v1/resource-types`, ADR-021): without that catalog those types have no form, and the
+// Console has no list or number of its own to fall back on.
 
 import type { CatalogDatabase, CatalogParameter, ResourceTypeCatalog } from '../api/admin-model';
 
@@ -25,6 +26,11 @@ export interface TypeForm<F> {
    * is the secret) and certificates; absent: they always are. A database that is a file has neither.
    */
   networked?(fields: F): boolean;
+  /**
+   * The capacity the Engine fixes for the type, which the admin neither sets nor changes (the
+   * catalog's `fixedCapacity`); absent: the admin chooses it.
+   */
+  fixedCapacity?: number;
   /** The fields of a new resource. */
   empty(): F;
   /** The fields of an existing resource, from its settings as the Engine wrote them. */
@@ -443,9 +449,44 @@ const openAiCompatible = ({
     })[problem],
 });
 
+export interface TraceExportFields extends CertificateFields {
+  /** The full address of the OTLP/HTTP traces signal; the Engine adds no path. */
+  endpoint: string;
+  /** The `service.name` of the exported spans. */
+  serviceName: string;
+}
+
+/** Certificates are for TLS: only an https endpoint has a handshake to use them in. */
+export const isHttps = (address: string): boolean => /^https:\/\//i.test(address.trim());
+
+/** The form of `trace-export` (ADR-46), whose capacity is the [capacity] the Engine fixes. */
+const traceExport = (capacity: number): TypeForm<TraceExportFields> => ({
+  takesSecret: true,
+  fixedCapacity: capacity,
+  empty: () => ({ endpoint: '', serviceName: '', trustAliases: [], clientCertAlias: '' }),
+  fromSettings: (settings) => ({
+    endpoint: text(settings.endpoint),
+    serviceName: text(settings.serviceName),
+    ...certificatesOf(settings),
+  }),
+  toSettings: (fields, stored) => {
+    const out = new Collected(stored, ['endpoint', 'serviceName', ...CERTIFICATE_MEMBERS]);
+    out.required('trace-endpoint', 'endpoint', fields.endpoint);
+    out.required('trace-service-name', 'serviceName', fields.serviceName);
+    if (isHttps(fields.endpoint)) writeCertificates(out, fields);
+    return out.result();
+  },
+  fieldOf: (problem) =>
+    ({
+      invalid_base_url: 'trace-endpoint',
+      invalid_settings: 'trace-settings',
+      alias_wrong_type: 'resource-certificates',
+    })[problem],
+});
+
 /**
  * The form of [type], with the choices [catalog] tells; undefined for a type the Console has no
- * form for, and for `jdbc-pool` and `openai-compatible` when there is no catalog (it could not be
+ * form for, and for `jdbc-pool`, `openai-compatible` and `trace-export` when there is no catalog (it could not be
  * read) or it tells nothing of them.
  */
 export function formOf(type: string, catalog: ResourceTypeCatalog | null): TypeForm<any> | undefined {
@@ -458,6 +499,8 @@ export function formOf(type: string, catalog: ResourceTypeCatalog | null): TypeF
       return catalog?.jdbc ? jdbcPool(catalog.jdbc.databases) : undefined;
     case 'openai-compatible':
       return catalog?.openAi ? openAiCompatible(catalog.openAi) : undefined;
+    case 'trace-export':
+      return catalog?.traceExport ? traceExport(catalog.traceExport.fixedCapacity) : undefined;
     default:
       return undefined;
   }

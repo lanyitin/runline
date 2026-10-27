@@ -6,7 +6,8 @@
   import FileFields from './FileFields.svelte';
   import JdbcPoolFields from './JdbcPoolFields.svelte';
   import OpenAiFields from './OpenAiFields.svelte';
-  import { formOf } from './resource-forms';
+  import TraceExportFields from './TraceExportFields.svelte';
+  import { formOf, isHttps } from './resource-forms';
   import { formTypes } from './resource-types';
   import CertificateAliasesField from './CertificateAliasesField.svelte';
   import SecretAliasField from './SecretAliasField.svelte';
@@ -52,6 +53,8 @@
   // svelte-ignore state_referenced_locally
   let secretAlias = $state(resource?.secretAlias ?? '');
   const form = $derived(formOf(type, catalog));
+  /** The capacity the Engine fixes for the type (the catalog's); the admin neither sets nor changes it. */
+  const fixedCapacity = $derived(form?.fixedCapacity);
   /** A type the Console has a form for, which has none now: the Engine's catalog could not be read. */
   const unavailable = $derived(type !== '' && formTypes.includes(type) && form === undefined);
   /** The fields of the type, as typed; they start again when another type is chosen. */
@@ -117,7 +120,7 @@
       return;
     }
     if (!editing && name.trim() === '') found['resource-name'] = i18n.t('resources.form.name.required');
-    const count = /^\d+$/.test(capacity.trim()) ? Number(capacity.trim()) : NaN;
+    const count = fixedCapacity ?? (/^\d+$/.test(capacity.trim()) ? Number(capacity.trim()) : NaN);
     if (!Number.isInteger(count) || count < 1) {
       found['resource-capacity'] = i18n.t('resources.form.capacity.invalid');
     }
@@ -244,21 +247,26 @@
 
       <div class="rl-field">
         <label for="resource-capacity">{i18n.t('resources.form.capacity')}</label>
-        <input
-          id="resource-capacity"
-          class="rl-input mono"
-          type="text"
-          inputmode="numeric"
-          autocomplete="off"
-          data-autofocus={editing ? true : undefined}
-          aria-invalid={errors['resource-capacity'] ? 'true' : undefined}
-          bind:value={capacity}
-          oninput={() => {
-            delete errors['resource-capacity'];
-            delete errors['resource-form'];
-          }}
-        />
-        <span class="rl-help">{i18n.t('resources.form.capacity.help')}</span>
+        {#if fixedCapacity !== undefined}
+          <input id="resource-capacity" class="rl-input mono" type="text" readonly aria-readonly="true" value={fixedCapacity} />
+          <span class="rl-help">{i18n.t('resources.form.capacity.fixed')}</span>
+        {:else}
+          <input
+            id="resource-capacity"
+            class="rl-input mono"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            data-autofocus={editing ? true : undefined}
+            aria-invalid={errors['resource-capacity'] ? 'true' : undefined}
+            bind:value={capacity}
+            oninput={() => {
+              delete errors['resource-capacity'];
+              delete errors['resource-form'];
+            }}
+          />
+          <span class="rl-help">{i18n.t('resources.form.capacity.help')}</span>
+        {/if}
         {#if errors['resource-capacity']}<span class="rl-field-error">{errors['resource-capacity']}</span>{/if}
       </div>
 
@@ -269,6 +277,8 @@
           <JdbcPoolFields bind:fields databases={catalog!.jdbc!.databases} {errors} {capacity} onchange={cleared} />
         {:else if type === 'openai-compatible'}
           <OpenAiFields bind:fields catalog={catalog!.openAi!} {errors} {capacity} onchange={cleared} />
+        {:else if type === 'trace-export'}
+          <TraceExportFields bind:fields {errors} onchange={cleared} />
         {/if}
       {/if}
       {#if usesSecret}
@@ -280,7 +290,7 @@
           onchange={() => cleared('resource-secret')}
         />
       {/if}
-      {#if fields !== undefined && (type === 'jdbc-pool' || type === 'openai-compatible') && (form?.networked?.(fields) ?? true)}
+      {#if fields !== undefined && (type === 'jdbc-pool' || type === 'openai-compatible' || (type === 'trace-export' && isHttps(fields.endpoint))) && (form?.networked?.(fields) ?? true)}
         <CertificateAliasesField
           bind:trustAliases={fields.trustAliases}
           bind:clientCertAlias={fields.clientCertAlias}

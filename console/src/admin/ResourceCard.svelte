@@ -21,13 +21,18 @@
   // deleting and releasing a holder are the page's, which asks first.
   interface Props {
     resource: Resource;
+    /**
+     * The capacity the Engine fixes for the type (its catalog's), which is no limit that anyone
+     * waits for: the card then shows no meter of holders, and says so. Null for the other types.
+     */
+    fixedCapacity?: number | null;
     onchange: () => void;
     ondelete: () => void;
     onrelease: (holder: Holder) => void;
     /** A check was made: the resource, read again, has it as its last check. */
     onchecked: () => void;
   }
-  let { resource, onchange, ondelete, onrelease, onchecked }: Props = $props();
+  let { resource, fixedCapacity = null, onchange, ondelete, onrelease, onchecked }: Props = $props();
 
   const { i18n, api } = useApp();
   const summary = $derived(settingsSummary(resource.type, resource.settings));
@@ -104,62 +109,66 @@
     <ApiErrorNotice failure={checkFailure} />
   {/if}
 
-  <div class="meter">
-    <progress value={resource.holders.length} max={resource.capacity}></progress>
-    <span class="usage rl-mono">{i18n.t('resources.usage', { held: resource.holders.length, capacity: resource.capacity })}</span>
-  </div>
-  {#each usage as line (line.measure)}
-    <p class="type-usage rl-mono">{usageText(line)}</p>
-  {/each}
-  {#if resource.holders.length > resource.capacity}
-    <p class="rl-help over">{i18n.t('resources.overCapacity')}</p>
+  {#if fixedCapacity !== null}
+    <p class="rl-help fixed-capacity">{i18n.t('resources.fixedCapacity')}</p>
+  {:else}
+    <div class="meter">
+      <progress value={resource.holders.length} max={resource.capacity}></progress>
+      <span class="usage rl-mono">{i18n.t('resources.usage', { held: resource.holders.length, capacity: resource.capacity })}</span>
+    </div>
+    {#each usage as line (line.measure)}
+      <p class="type-usage rl-mono">{usageText(line)}</p>
+    {/each}
+    {#if resource.holders.length > resource.capacity}
+      <p class="rl-help over">{i18n.t('resources.overCapacity')}</p>
+    {/if}
+
+    <section class="holders">
+      <h3>{i18n.t('resources.holders')}</h3>
+      {#if resource.holders.length === 0}
+        <p class="rl-help">{i18n.t('resources.nobodyHolds')}</p>
+      {:else}
+        <ul>
+          {#each resource.holders as holder (holder.runId)}
+            <li>
+              <Link href={runHref(holder.runId)} class="rl-mono">{holder.runId.slice(0, 8)}</Link>
+              <span class="pipeline"><PlainText value={holder.pipeline} mono /></span>
+              <span class="rl-help">
+                <Timestamp iso={holder.heldSince} />,
+                {i18n.t('resources.heldFor', { duration: duration(holder.heldSeconds) })}
+              </span>
+              <button class="rl-btn small danger" type="button" onclick={() => onrelease(holder)}>
+                {i18n.t('resources.release')}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section class="waiters">
+      <h3>{i18n.t('resources.waiters')}</h3>
+      {#if resource.waiters.length === 0}
+        <p class="rl-help">{i18n.t('resources.nobodyWaits')}</p>
+      {:else}
+        <ol>
+          {#each resource.waiters as waiter, index (waiter.runId)}
+            <li>
+              <span class="position rl-mono">{index + 1}</span>
+              <Link href={runHref(waiter.runId)} class="rl-mono">{waiter.runId.slice(0, 8)}</Link>
+              <span class="pipeline"><PlainText value={waiter.pipeline} mono /></span>
+              <span class="rl-help">
+                {i18n.t('resources.waitedFor', {
+                  duration: duration(waiter.waitedSeconds),
+                  names: waiter.waitingFor.join(', '),
+                })}
+              </span>
+            </li>
+          {/each}
+        </ol>
+      {/if}
+    </section>
   {/if}
-
-  <section class="holders">
-    <h3>{i18n.t('resources.holders')}</h3>
-    {#if resource.holders.length === 0}
-      <p class="rl-help">{i18n.t('resources.nobodyHolds')}</p>
-    {:else}
-      <ul>
-        {#each resource.holders as holder (holder.runId)}
-          <li>
-            <Link href={runHref(holder.runId)} class="rl-mono">{holder.runId.slice(0, 8)}</Link>
-            <span class="pipeline"><PlainText value={holder.pipeline} mono /></span>
-            <span class="rl-help">
-              <Timestamp iso={holder.heldSince} />,
-              {i18n.t('resources.heldFor', { duration: duration(holder.heldSeconds) })}
-            </span>
-            <button class="rl-btn small danger" type="button" onclick={() => onrelease(holder)}>
-              {i18n.t('resources.release')}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-
-  <section class="waiters">
-    <h3>{i18n.t('resources.waiters')}</h3>
-    {#if resource.waiters.length === 0}
-      <p class="rl-help">{i18n.t('resources.nobodyWaits')}</p>
-    {:else}
-      <ol>
-        {#each resource.waiters as waiter, index (waiter.runId)}
-          <li>
-            <span class="position rl-mono">{index + 1}</span>
-            <Link href={runHref(waiter.runId)} class="rl-mono">{waiter.runId.slice(0, 8)}</Link>
-            <span class="pipeline"><PlainText value={waiter.pipeline} mono /></span>
-            <span class="rl-help">
-              {i18n.t('resources.waitedFor', {
-                duration: duration(waiter.waitedSeconds),
-                names: waiter.waitingFor.join(', '),
-              })}
-            </span>
-          </li>
-        {/each}
-      </ol>
-    {/if}
-  </section>
 
   <section class="declared">
     <h3>{i18n.t('resources.declaredBy')}</h3>

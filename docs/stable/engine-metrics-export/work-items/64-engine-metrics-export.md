@@ -1,6 +1,6 @@
 # #64 Engine 指標匯出與 trace-export 佇列滿警告進 Engine log
 
-本文回答：要達成什麼行為、如何驗收。狀態：提案中（2026-10-27）。Issue：#64。背景見 [README](../README.md)，上游決策見 [ADR-46](../../../stable/trace-export/adr/ADR-46-trace-export-resource.md)。相依：無（#50 至 #53 已完成）。
+本文回答：要達成什麼行為、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#64。背景見 [README](../README.md)，上游決策見 [ADR-46](../../trace-export/adr/ADR-46-trace-export-resource.md)。相依：無（#50 至 #53 已完成）。
 
 ## 行為
 
@@ -23,7 +23,7 @@
 
 ## 架構約束
 
-- 不改變 trace-export 的資料路徑、緩衝與丟棄語意（[ADR-46](../../../stable/trace-export/adr/ADR-46-trace-export-resource.md) 決策 4）。
+- 不改變 trace-export 的資料路徑、緩衝與丟棄語意（[ADR-46](../../trace-export/adr/ADR-46-trace-export-resource.md) 決策 4）。
 - 機密只在金鑰庫；不新增任何會外洩金鑰或屬性內容的輸出。
 - 預設行為不變（不匯出指標）。
 - 測試的外部系統用真實或簡易真實實作，不用 Stub 或 Mock。

@@ -64,9 +64,10 @@ internal class LocalResources(
     // The pools of this run's `jdbc-pool` resources: a development run is alone, so they are its
     // own and are closed with it.
     val pools = JdbcPools(jdbcProfiles)
+    val traces = LinkedHashMap<String, LocalTraceExport>()
     val host =
         try {
-          bind(metadata, pools)
+          bind(metadata, pools, traces)
         } catch (e: Throwable) {
           pools.close()
           throw e
@@ -87,13 +88,27 @@ internal class LocalResources(
     } finally {
       host?.invalidateAll(Invalidation.RUN_ENDED)
       pools.close()
+      traces.forEach { (role, trace) ->
+        out.println(
+            "[resources] $role (trace-export): ${trace.count} span(s) accepted, not exported"
+        )
+      }
       out.println("[resources] released: ${declared.joinToString()}")
     }
   }
 
-  private fun bind(metadata: PipelineMetadata, pools: JdbcPools): BoundResources? {
+  private fun bind(
+      metadata: PipelineMetadata,
+      pools: JdbcPools,
+      traces: MutableMap<String, LocalTraceExport>,
+  ): BoundResources? {
     val bindings = LinkedHashMap<String, ResourceBinding>()
     for ((name, type) in metadata.resourceTypes) {
+      if (type == ResourceTypes.TRACE_EXPORT) {
+        // Needs no definition: the local one takes the spans and exports nothing.
+        bindings[name] = LocalTraceExport().also { traces[name] = it }
+        continue
+      }
       // The key of RUNLINE_RESOURCES is the role: the name the pipeline uses (ADR-025). The
       // purpose, when the pipeline wrote one, tells what the role is meant to be defined as.
       val purpose = metadata.resourcePurposes[name]?.let { " (purpose: $it)" }.orEmpty()

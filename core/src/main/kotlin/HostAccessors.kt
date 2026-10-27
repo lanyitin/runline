@@ -22,14 +22,28 @@ internal class HostAccessors(
   override fun openAiCompatible(name: String): OpenAiAccessor =
       HostOpenAi(name, linkFor(name, ResourceTypes.OPENAI_COMPATIBLE), recorder, scopes)
 
+  override fun traceExport(name: String): TraceExportAccessor {
+    checkDeclared(name, ResourceTypes.TRACE_EXPORT)
+    // Not provided is not a refusal for this type: the accessor then drops what it is given.
+    return HostTraceExport(
+        name,
+        link?.takeIf { it.provided[name] == ResourceTypes.TRACE_EXPORT },
+    )
+  }
+
   /** The host's link, once the pipeline has the right to an accessor of [type] for [name]. */
   private fun linkFor(name: String, type: String): ResourceLink {
-    if (name !in metadata.resources) refuse(name, ResourceFailure.NOT_DECLARED)
-    val declared = metadata.resourceTypes[name] ?: refuse(name, ResourceFailure.NO_TYPE_DECLARED)
-    if (declared != type) refuse(name, ResourceFailure.TYPE_MISMATCH)
+    checkDeclared(name, type)
     val provided = link?.provided?.get(name)
     if (link == null || provided != type) refuse(name, ResourceFailure.NOT_PROVIDED)
     return link
+  }
+
+  /** Refuses unless the pipeline declared [name] with exactly [type]. */
+  private fun checkDeclared(name: String, type: String) {
+    if (name !in metadata.resources) refuse(name, ResourceFailure.NOT_DECLARED)
+    val declared = metadata.resourceTypes[name] ?: refuse(name, ResourceFailure.NO_TYPE_DECLARED)
+    if (declared != type) refuse(name, ResourceFailure.TYPE_MISMATCH)
   }
 
   private fun refuse(name: String, failure: ResourceFailure): Nothing =

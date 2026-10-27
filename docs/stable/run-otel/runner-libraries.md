@@ -1,6 +1,6 @@
 # Runner 提供的函式庫
 
-本文回答：pipeline 作者不必自己打包哪些依賴、版本為何。這是 Runner 提供函式庫的唯一公告處；run 執行期目錄的實際內容必須與本表一致（驗證見 [#43](work-items/43-run-provides-opentelemetry.md)）。狀態：提案中（2026-10-27）。
+本文回答：pipeline 作者不必自己打包哪些依賴、版本為何。這是 Runner 提供函式庫的唯一公告處；run 執行期目錄的實際內容必須與本表一致（驗證見 [#43](work-items/43-run-provides-opentelemetry.md)）。狀態：已核可（2026-10-27）。
 
 | 函式庫 | 版本 | 用途 |
 |---|---|---|

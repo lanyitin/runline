@@ -1,6 +1,6 @@
 # run-otel：run 類別載入器提供 OpenTelemetry
 
-本主題回答：pipeline 要在 run 內使用 OpenTelemetry（trace 匯出）時，Runner 提供什麼、版本誰決定、run 之間如何隔離。狀態：提案中（2026-10-27）。Issue：#42（ADR）、#43（工作項）。來源：runline-transcribe 的 ADR-23（該儲存庫 Issue #23，已核可）。修訂 [ADR-001](../../stable/pipeline-engine/adr/ADR-001-isolated-classloader.md) 中「run 的 class loader 只含 Runner、core 與 Kotlin 標準函式庫」的內容；隔離原則本身不變。
+本主題回答：pipeline 要在 run 內使用 OpenTelemetry（trace 匯出）時，Runner 提供什麼、版本誰決定、run 之間如何隔離。狀態：已核可（2026-10-27）。Issue：#42（ADR）、#43（工作項）。來源：runline-transcribe 的 ADR-23（該儲存庫 Issue #23，已核可）。修訂 [ADR-001](../pipeline-engine/adr/ADR-001-isolated-classloader.md) 中「run 的 class loader 只含 Runner、core 與 Kotlin 標準函式庫」的內容；隔離原則本身不變。
 
 ## 結論
 
@@ -34,9 +34,9 @@ flowchart LR
 
 | 文件 | 內容 | 狀態 |
 |---|---|---|
-| [ADR-42](adr/ADR-42-run-provides-opentelemetry.md) | 選項、決策、取捨與後果 | 提案中 |
-| [runner-libraries](runner-libraries.md) | Runner 提供的函式庫與版本（公告） | 提案中 |
-| [#43](work-items/43-run-provides-opentelemetry.md) | 工作項：行為與驗收條件 | 提案中 |
+| [ADR-42](adr/ADR-42-run-provides-opentelemetry.md) | 選項、決策、取捨與後果 | 已核可 |
+| [runner-libraries](runner-libraries.md) | Runner 提供的函式庫與版本（公告） | 已核可 |
+| [#43](work-items/43-run-provides-opentelemetry.md) | 工作項：行為與驗收條件 | 已核可，待派工 |
 
 ## 待確認問題
 

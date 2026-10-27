@@ -85,6 +85,8 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 
 `counter` 是正式型別而非過渡：它仍適合「保護一個 Engine 不中介的外部系統」。
 
+補充（2026-10-27）：封閉集合新增第五個內建型別 `trace-export`（把 pipeline 提交的完成後 span 匯出到 OTLP 端點；容量為 Engine 固定的值），決策見 [ADR-46](../../trace-export/adr/ADR-46-trace-export-resource.md)。上表與本文其餘處列出的型別為該補充之前的首版。
+
 ### 2. 管理與宣告
 
 - 只有管理員可建立、修改、刪除、檢查資源與重載機密（沿用 ADR-012 的角色）；開發人員不能讀取資源設定。

@@ -111,7 +111,7 @@ class TraceExportBehaviorTest {
   // ---- the end of a run ----
 
   @Test
-  fun `closing the binding flushes what is queued without waiting for the schedule`() {
+  fun `closing the binding returns at once, and what is queued is sent without waiting for the schedule`() {
     val rig = rig(QUICK_TRACE_EXPORT.copy(scheduleDelay = Duration.ofMinutes(10)))
     val binding = rig.bind(rig.resource(receiver.endpoint))
     rig.submit(binding, "s1", "a")
@@ -120,11 +120,12 @@ class TraceExportBehaviorTest {
 
     binding.close()
 
-    assertEquals(2, receiver.spans.size)
+    await("both spans at the receiver") { receiver.spans.size == 2 }
+    await("the export counted") { rig.count("runline.trace_export.spans.exported") == 2L }
   }
 
   @Test
-  fun `closing the binding gives up on a receiver that does not answer once the wait is over`() {
+  fun `closing the binding does not wait for a receiver that does not answer, and gives up on it later, counted`() {
     receiver.hang = true
     val rig =
         rig(
@@ -141,7 +142,31 @@ class TraceExportBehaviorTest {
     binding.close()
     val tookMillis = (System.nanoTime() - started) / 1_000_000
 
-    assertTrue(tookMillis in 250..2000, "close waited $tookMillis ms")
+    assertTrue(tookMillis < 150, "close took $tookMillis ms")
+    await("the span given up") {
+      rig.count("runline.trace_export.spans.dropped", "reason" to "export_failed") +
+          rig.count("runline.trace_export.spans.dropped", "reason" to "abandoned") == 1L
+    }
+  }
+
+  @Test
+  fun `a list with more elements than the limit is cut, counted, and its content is nowhere else`() {
+    val rig = rig(QUICK_TRACE_EXPORT.copy(maxAttributeElements = 4))
+    val binding = rig.bind(rig.resource(receiver.endpoint))
+
+    rig.submit(
+        binding,
+        "s",
+        "a",
+        attributes = mapOf("many" to (1..100_000).map { "element-$it" }, "few" to listOf(1L, 2L)),
+    )
+    await("the span") { receiver.spans.isNotEmpty() }
+
+    val attributes = receiver.spans.single().attributes
+    assertEquals(listOf("element-1", "element-2", "element-3", "element-4"), attributes["many"])
+    assertEquals(listOf(1L, 2L), attributes["few"])
+    assertEquals(1L, rig.count("runline.trace_export.attributes.truncated", "kind" to "elements"))
+    assertFalse((logs.lines.joinToString() + rig.recordedText()).contains("element-"))
   }
 
   @Test

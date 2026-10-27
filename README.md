@@ -84,13 +84,14 @@ Every run executes in its own class loader whose parent is only the JDK, so a ru
 | `RUNLINE_RUN_LOG_RETENTION_SECONDS` (optional, the run's, at least 3600, not above the run's) | How long after the run ended its log is kept; shorter than the run's makes the log go first |
 | `RUNLINE_WEBHOOK_DEDUP_WINDOW_SECONDS` (optional, 604800 = 7 days, at least 86400) | How long a webhook firing is kept, which is how long a repeated delivery identifier is recognised |
 | `RUNLINE_WEBHOOK_MAX_BODY_BYTES` (optional, 16384) | The most bytes of the body of a webhook call that are read, for a webhook trigger that lists parameters its callers provide (see "Triggers" below); a longer body is refused with 400 `invalid_body`. A webhook without such parameters never reads its body |
-| `RUNLINE_TRACE_EXPORT_QUEUE_SIZE` (optional, 2048) | The spans a `trace-export` resource's queue holds (ADR-46); a span submitted to a full queue is dropped and counted. The seven `RUNLINE_TRACE_EXPORT_*` settings are positive whole numbers that apply to every such resource; any other value stops the start naming the key |
+| `RUNLINE_TRACE_EXPORT_QUEUE_SIZE` (optional, 2048) | The spans a `trace-export` resource's queue holds (ADR-46); a span submitted to a full queue is dropped and counted. The eight `RUNLINE_TRACE_EXPORT_*` settings are positive whole numbers that apply to every such resource; any other value stops the start naming the key |
 | `RUNLINE_TRACE_EXPORT_BATCH_SIZE` (optional, 512) | The most spans in one export request |
 | `RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS` (optional, 5000) | How long spans wait for a fuller batch before they are sent anyway |
 | `RUNLINE_TRACE_EXPORT_EXPORT_TIMEOUT_MILLIS` (optional, 10000) | How long one export request may take; then the batch is dropped, counted and warned about |
-| `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` (optional, 5000) | How long the end of a run waits for its resource's queue to be flushed; then the wait is given up |
+| `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` (optional, 5000) | How long, after the last run holding a resource has ended, its exporter keeps sending what is queued; nobody waits for it, and what is left is given up and counted |
 | `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTES` (optional, 128) | The attributes of a span that are kept; the rest are dropped and counted |
 | `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_LENGTH` (optional, 8192) | The characters of a name, message or text attribute that are kept; the rest is cut off and counted |
+| `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_ELEMENTS` (optional, 128) | The elements of a list attribute that are kept; the rest are dropped and counted |
 | `RUNLINE_CRON_FIRING_RETENTION_SECONDS` (optional, 2592000, at least 3600) | How long a cron firing is kept |
 | `RUNLINE_RETENTION_INTERVAL_SECONDS` (optional, 3600) | How often the clean-up runs (it also runs once at start) |
 | `RUNLINE_RETENTION_BATCH_SIZE` (optional, 1000) | Rows one clean-up statement removes |

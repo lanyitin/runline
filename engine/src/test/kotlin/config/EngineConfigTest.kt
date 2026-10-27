@@ -552,6 +552,7 @@ class EngineConfigTest {
     assertEquals(Duration.ofSeconds(5), tuning.flushWait)
     assertEquals(128, tuning.maxAttributes)
     assertEquals(8192, tuning.maxAttributeLength)
+    assertEquals(128, tuning.maxAttributeElements)
   }
 
   @Test
@@ -565,6 +566,7 @@ class EngineConfigTest {
                 "traceExport.flushWaitMillis" to "1500",
                 "traceExport.maxAttributes" to "16",
                 "traceExport.maxAttributeLength" to "256",
+                "traceExport.maxAttributeElements" to "7",
             )
             .traceExport
 
@@ -575,6 +577,7 @@ class EngineConfigTest {
     assertEquals(Duration.ofMillis(1500), tuning.flushWait)
     assertEquals(16, tuning.maxAttributes)
     assertEquals(256, tuning.maxAttributeLength)
+    assertEquals(7, tuning.maxAttributeElements)
   }
 
   @Test
@@ -588,6 +591,7 @@ class EngineConfigTest {
             "flushWaitMillis",
             "maxAttributes",
             "maxAttributeLength",
+            "maxAttributeElements",
         )) {
       for (value in listOf("0", "-1", "many", "1.5")) {
         val e =

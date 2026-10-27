@@ -17,12 +17,17 @@ data class TraceExportTuning(
     val scheduleDelay: Duration = DEFAULT_SCHEDULE_DELAY,
     /** How long one export request may take; then the batch is dropped. */
     val exportTimeout: Duration = DEFAULT_EXPORT_TIMEOUT,
-    /** How long the end of a run waits for the queue to be flushed; then the wait is given up. */
+    /**
+     * How long, after the last run that held a resource ended, its exporter keeps trying to send
+     * what is queued; then it gives up, counting what is left. Nobody waits for it.
+     */
     val flushWait: Duration = DEFAULT_FLUSH_WAIT,
     /** The most attributes of a span that are kept; the rest are dropped and counted. */
     val maxAttributes: Int = DEFAULT_MAX_ATTRIBUTES,
     /** The most characters of a text value that are kept; the rest is cut off and counted. */
     val maxAttributeLength: Int = DEFAULT_MAX_ATTRIBUTE_LENGTH,
+    /** The most elements of a list attribute that are kept; the rest are dropped and counted. */
+    val maxAttributeElements: Int = DEFAULT_MAX_ATTRIBUTE_ELEMENTS,
 ) {
   companion object {
     const val DEFAULT_QUEUE_SIZE = 2048
@@ -32,5 +37,6 @@ data class TraceExportTuning(
     val DEFAULT_FLUSH_WAIT: Duration = Duration.ofSeconds(5)
     const val DEFAULT_MAX_ATTRIBUTES = 128
     const val DEFAULT_MAX_ATTRIBUTE_LENGTH = 8192
+    const val DEFAULT_MAX_ATTRIBUTE_ELEMENTS = 128
   }
 }

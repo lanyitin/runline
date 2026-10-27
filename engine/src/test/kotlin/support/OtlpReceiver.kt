@@ -72,6 +72,9 @@ class OtlpReceiver(tls: SSLContext? = null) : AutoCloseable {
   /** The status a request is answered with (200 is a success of the export). */
   @Volatile var answer: (ReceivedRequest) -> Int = { 200 }
 
+  /** The `Location` header of every answer, for a receiver that redirects. */
+  @Volatile var location: String? = null
+
   /** While true, requests are taken in and not answered. */
   @Volatile var hang = false
 
@@ -99,6 +102,7 @@ class OtlpReceiver(tls: SSLContext? = null) : AutoCloseable {
       val received = ReceivedRequest(it.requestURI.path, headers, body, ProtoReader.spansOf(body))
       requests += received
       if (hang) released.await()
+      location?.let { target -> it.responseHeaders.add("Location", target) }
       it.sendResponseHeaders(answer(received), -1)
     }
   }

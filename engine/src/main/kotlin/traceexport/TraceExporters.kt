@@ -3,6 +3,8 @@ package dev.lawlan.runline.engine.traceexport
 import dev.lawlan.runline.accessors.tls.ResourceTls
 import dev.lawlan.runline.engine.config.TraceExportTuning
 import dev.lawlan.runline.engine.secret.SecretStore
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * The exporters of `trace-export` resources (ADR-46 decision 3): one for each resource, with the
@@ -33,8 +35,14 @@ class TraceExporters(
     override fun close() = onClose()
   }
 
+  private val closer = Executors.newSingleThreadScheduledExecutor { task ->
+    Thread.ofPlatform().name("trace-export-closer").daemon(true).unstarted(task)
+  }
   private val lock = Any()
   private val entries = HashMap<Key, Entry>()
+
+  /** Exporters whose last run has ended and that are still sending what was queued. */
+  private val draining = HashSet<TraceExporter>()
   private var closed = false
 
   /** The exporter of [resource] for these [settings]; made if no run holds one like it. */
@@ -74,15 +82,31 @@ class TraceExporters(
           entry.holders--
           (entry.holders == 0).also { if (it && entries[key] === entry) entries.remove(key) }
         }
-    if (last) entry.exporter.shutdown()
+    if (!last) return
+    // What is queued is sent, and nobody waits for it: after the wait the exporter gives up, and
+    // what it still holds is counted.
+    synchronized(lock) { draining += entry.exporter }
+    entry.exporter.endOfUse()
+    closer.schedule(
+        {
+          entry.exporter.shutdown()
+          synchronized(lock) { draining -= entry.exporter }
+        },
+        tuning.flushWait.toMillis(),
+        TimeUnit.MILLISECONDS,
+    )
   }
 
   override fun close() {
     val all =
         synchronized(lock) {
           closed = true
-          entries.values.toList().also { entries.clear() }
+          (entries.values.map { it.exporter } + draining).also {
+            entries.clear()
+            draining.clear()
+          }
         }
-    all.forEach { it.exporter.shutdown() }
+    closer.shutdownNow()
+    all.forEach { it.shutdown() }
   }
 }

@@ -90,6 +90,29 @@ class TraceExportFailureTest {
   }
 
   @Test
+  fun `a redirect is a failed export, not followed, and the credential goes nowhere else`() {
+    val elsewhere = OtlpReceiver()
+    try {
+      receiver.answer = { 307 }
+      receiver.location = elsewhere.endpoint
+      val rig = rig()
+      val binding = rig.bind(rig.resource(receiver.endpoint))
+
+      rig.submit(binding, "s1", "a")
+      await("the batch dropped") {
+        rig.count("runline.trace_export.spans.dropped", "reason" to "export_failed") == 1L
+      }
+      Thread.sleep(300)
+
+      assertEquals(1, receiver.requests.size)
+      assertTrue(elsewhere.requests.isEmpty(), "the redirect was followed")
+      await("the warning") { warnings().isNotEmpty() }
+    } finally {
+      elsewhere.close()
+    }
+  }
+
+  @Test
   fun `a receiver that cannot be reached costs the batch`() {
     val closedPort = ServerSocket(0).use { it.localPort }
     val rig = rig()

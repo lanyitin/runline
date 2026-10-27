@@ -348,6 +348,8 @@ data class EngineConfig(
               maxAttributes = exportCount("maxAttributes", tuningDefaults.maxAttributes),
               maxAttributeLength =
                   exportCount("maxAttributeLength", tuningDefaults.maxAttributeLength),
+              maxAttributeElements =
+                  exportCount("maxAttributeElements", tuningDefaults.maxAttributeElements),
           )
       val secrets = secretSettings(::text, problems)
       val runtimeDir = required("runs.runtimeDir")

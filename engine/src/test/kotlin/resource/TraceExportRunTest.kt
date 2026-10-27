@@ -190,7 +190,7 @@ class TraceExportRunTest {
   // ---- a receiver that is not well ----
 
   @Test
-  fun `a receiver that never answers costs a run nothing but the bounded wait at its end`() {
+  fun `a receiver that never answers costs a run nothing, and its end does not wait for it`() {
     receiver.hang = true
     val tuning = QUICK_TRACE_EXPORT.copy(flushWait = Duration.ofMillis(300))
     val h = harness(tuning)
@@ -203,6 +203,33 @@ class TraceExportRunTest {
 
     assertEquals(RunState.SUCCEEDED, run.state, run.failure?.message)
     assertTrue(tookMillis < 5000, "the run took $tookMillis ms")
+  }
+
+  @Test
+  fun `the end of a run that traced to a receiver that never answers does not hold up the next run`() {
+    receiver.hang = true
+    val tuning =
+        QUICK_TRACE_EXPORT.copy(
+            flushWait = Duration.ofSeconds(4),
+            exportTimeout = Duration.ofSeconds(30),
+        )
+    val h = harness(tuning)
+    h.defineTraceExport("tracing", receiver.endpoint)
+    val traced = h.upload("traced", traced, declaration = declaration)
+    val plain =
+        h.upload(
+            "plain",
+            """context.getFiles().writeText(FileScope.PIPELINE_SHARED, "done", "x");""",
+        )
+
+    h.awaitEnd(h.start(traced, "traced"))
+    await("the span at the receiver") { receiver.requests.isNotEmpty() }
+    val started = System.nanoTime()
+    val next = h.awaitEnd(h.start(plain, "plain"))
+    val tookMillis = (System.nanoTime() - started) / 1_000_000
+
+    assertEquals(RunState.SUCCEEDED, next.state, next.failure?.message)
+    assertTrue(tookMillis < 2500, "the next run took $tookMillis ms")
   }
 
   @Test

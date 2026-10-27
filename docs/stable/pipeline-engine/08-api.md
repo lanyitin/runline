@@ -448,7 +448,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 **選用的角色。** 宣告為 `trace-export` 的角色沒有綁定到存在的資源、或其資源已停用時，run 照常建立與執行：不取得容量、沒有存取端，pipeline 提交的 span 是空操作，行為與沒有 tracing 時相同；上傳時也不為此警告。型別與宣告不符（例如綁到 `counter`）照常為 `type_mismatch`。
 
-**匯出與緩衝。** 存取端收到 span 後立即返回；Engine 為 run 指派追蹤識別碼，同一個 run 的 span 屬於同一條 trace，父子關係依 pipeline 給的本地識別碼對應（子 span 先於父 span 提交也可以）。每個資源（同一份設定）一個匯出器與一個有界佇列，與 Engine 自身遙測的設定互不影響。佇列滿時丟棄新提交的 span 並計數；匯出失敗、逾時或別名缺失時丟棄該批（不重試）、計數、並記錄警告（同一資源同一原因每分鐘至多一則，只含資源名稱與 span 個數，不含任何 span 的內容）；都不阻塞 run，也不使 run 失敗。屬性內容不過濾，是否送出由管理員是否建立並綁定此資源決定，但屬性內容不出現在 Engine 的 log、metric 與錯誤訊息。run 結束時最多等待 `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` 讓佇列沖出，逾時即放棄。資源的設定被修改時，已持有它的 run 繼續用取得當下的匯出器，之後的 run 用新設定。
+**匯出與緩衝。** 存取端收到 span 後立即返回；Engine 為 run 指派追蹤識別碼，同一個 run 的 span 屬於同一條 trace，父子關係依 pipeline 給的本地識別碼對應（子 span 先於父 span 提交也可以）。每個資源（同一份設定）一個匯出器與一個有界佇列，與 Engine 自身遙測的設定互不影響。佇列滿時丟棄新提交的 span 並計數；匯出失敗、逾時或別名缺失時丟棄該批（不重試）、計數、並記錄警告（同一資源同一原因每分鐘至多一則，只含資源名稱與 span 個數，不含任何 span 的內容）；都不阻塞 run，也不使 run 失敗。屬性內容不過濾，是否送出由管理員是否建立並綁定此資源決定，但屬性內容不出現在 Engine 的 log、metric 與錯誤訊息。端點回 3xx 時視為匯出失敗（與資源檢查一致）：不跟隨轉址，認證標頭不會送到別處，該批丟棄並計數。run 結束時不等待匯出：釋放資源的執行緒立即返回，匯出器在自己的執行緒上盡力送出佇列內容，最後一個持有的 run 結束後最多再試 `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS`，逾時放棄，尚未送出的 span 計為 `abandoned`（正在送出的批次計為 `export_failed`）。因此接收端掛住不會延遲 run 的結束，也不會延遲其他 run 的啟動判斷。資源的設定被修改時，已持有它的 run 繼續用取得當下的匯出器，之後的 run 用新設定。
 
 **預設數值**（以 OpenTelemetry 批次處理器的量級起訂，全部由部署組態調整，一個值套用到所有 `trace-export` 資源；必須是正整數，否則 Engine 啟動失敗並指出鍵名）：
 
@@ -458,11 +458,12 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `RUNLINE_TRACE_EXPORT_BATCH_SIZE` | 512 | 一個匯出請求的 span 數上限 |
 | `RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS` | 5000 | span 等待更滿的批次的時間，之後照樣送出 |
 | `RUNLINE_TRACE_EXPORT_EXPORT_TIMEOUT_MILLIS` | 10000 | 一個匯出請求的時間上限，逾時丟棄該批 |
-| `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` | 5000 | run 結束時等待沖出的時間 |
+| `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` | 5000 | 最後一個持有的 run 結束後，匯出器繼續送出佇列內容的時間上限；沒有人等待它，逾時放棄並計數 |
 | `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTES` | 128 | 每個 span 保留的屬性數；其餘依鍵排序後丟棄並計數 |
 | `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_LENGTH` | 8192 | 名稱、狀態訊息與文字屬性（含清單內的文字）保留的字元數；超過則截斷並計數 |
+| `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_ELEMENTS` | 128 | 每個清單屬性保留的元素數；超過的元素丟棄，每個被截的清單計數一次。單一 span 因此至多保留 128 個屬性、每個至多 128 個各 8192 字元的元素，大小有界 |
 
-**指標**（標籤只有 `resource` 與下列固定值，從不含 span 的名稱、屬性或訊息）：`runline.trace_export.spans.exported`（匯出成功的 span 數）、`runline.trace_export.spans.dropped`（丟棄的 span 數，`reason`：`queue_full`、`export_failed`、`key_unavailable`、`unavailable`（資源的憑證不可用，不匯出）、`abandoned`（匯出器關閉時還在佇列））、`runline.trace_export.exports`（匯出請求數，`outcome`：`ok`、`failed`、`key_unavailable`）、`runline.trace_export.attributes.truncated`（`kind`：`count` 超過數量、`length` 文字被截斷、`invalid` 值的型別不合）。
+**指標**（標籤只有 `resource` 與下列固定值，從不含 span 的名稱、屬性或訊息）：`runline.trace_export.spans.exported`（匯出成功的 span 數）、`runline.trace_export.spans.dropped`（丟棄的 span 數，`reason`：`queue_full`、`export_failed`、`key_unavailable`、`unavailable`（資源的憑證不可用，不匯出）、`abandoned`（匯出器關閉時還在佇列））、`runline.trace_export.exports`（匯出請求數，`outcome`：`ok`、`failed`、`key_unavailable`）、`runline.trace_export.attributes.truncated`（`kind`：`count` 超過數量、`length` 文字被截斷、`elements` 清單元素被截斷、`invalid` 值的型別不合）。
 
 **檢查。** 對端點送出一個沒有 span 的 OTLP 匯出請求（空的匯出，不匯出任何東西），帶資源的認證值與憑證，用檢查自己的短逾時（`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`）：`failure` 為 `alias_missing`／`alias_invalid`／`alias_wrong_type`（別名或憑證別名問題，此時不連線；包括沒有組態金鑰庫）、`connection_failed`、`rejected`（401 或 403）、`server_error`、`redirect_blocked`、`unexpected_response`、`timeout`，以及 TLS 類別（`trust_failed`、`hostname_mismatch` 等）。run 在別名缺失或金鑰庫未設定時不失敗，只是該批 span 被丟棄並計數。
 

@@ -39,8 +39,9 @@ internal class TraceExportBinding(
   }
 
   override fun close() {
+    // The run does not wait for the endpoint: what is queued is sent now, in the exporter's time.
     try {
-      sink.flush(tuning.flushWait)
+      sink.requestFlush()
     } finally {
       onClose()
     }
@@ -60,23 +61,21 @@ internal class TraceExportBinding(
         }
     val message = arguments["statusMessage"]?.let { it as? String ?: invalid() }.orEmpty()
     val given = arguments["attributes"] as? Map<*, *> ?: invalid()
-    var cut = 0
-    fun text(value: String): String =
-        if (value.length <= tuning.maxAttributeLength) value
-        else value.substring(0, tuning.maxAttributeLength).also { cut++ }
+    val cuts = Cuts(tuning)
     val span =
         PendingSpan(
-            name = text(name),
+            name = cuts.text(name),
             traceId = traceId,
             spanId = identifierOf(id),
             parentSpanId = parentId?.takeIf { it.isNotEmpty() && it != id }?.let(::identifierOf),
             startEpochNanos = start,
             endEpochNanos = end,
             error = error,
-            statusMessage = text(message),
-            attributes = attributesOf(given, ::text),
+            statusMessage = cuts.text(message),
+            attributes = attributesOf(given, cuts),
         )
-    telemetry.truncated(resource, Truncation.LENGTH, cut)
+    telemetry.truncated(resource, Truncation.LENGTH, cuts.texts)
+    telemetry.truncated(resource, Truncation.ELEMENTS, cuts.lists)
     return span
   }
 
@@ -85,16 +84,16 @@ internal class TraceExportBinding(
    * string, boolean, long, double or a list of one of these, with texts cut to the limit. What is
    * not kept is counted.
    */
-  private fun attributesOf(given: Map<*, *>, text: (String) -> String): Map<String, Any> {
+  private fun attributesOf(given: Map<*, *>, cuts: Cuts): Map<String, Any> {
     val kept = LinkedHashMap<String, Any>()
     var beyondLimit = 0
     var invalid = 0
     for (key in given.keys.filterIsInstance<String>().sorted()) {
-      val value = carry(given[key], text)
+      val value = carry(given[key], cuts)
       when {
         value == null -> invalid++
         kept.size >= tuning.maxAttributes -> beyondLimit++
-        else -> kept[text(key)] = value
+        else -> kept[cuts.text(key)] = value
       }
     }
     invalid += given.keys.count { it !is String }
@@ -103,25 +102,37 @@ internal class TraceExportBinding(
     return kept
   }
 
-  private fun carry(value: Any?, text: (String) -> String): Any? =
+  private fun carry(value: Any?, cuts: Cuts): Any? =
       when (value) {
-        is List<*> -> carryList(value, text)
-        else -> carryScalar(value, text)
+        is List<*> -> carryList(value, cuts)
+        else -> carryScalar(value, cuts)
       }
 
-  private fun carryScalar(value: Any?, text: (String) -> String): Any? =
+  private fun carryScalar(value: Any?, cuts: Cuts): Any? =
       when (value) {
-        is String -> text(value)
+        is String -> cuts.text(value)
         is Boolean -> value
         is Long -> value
         is Double -> value
         else -> null
       }
 
-  private fun carryList(value: List<*>, text: (String) -> String): Any? {
-    val carried = ArrayList<Any>(value.size)
-    for (element in value) carried += carryScalar(element, text) ?: return null
+  private fun carryList(value: List<*>, cuts: Cuts): Any? {
+    val kept = minOf(value.size, tuning.maxAttributeElements)
+    if (kept < value.size) cuts.lists++
+    val carried = ArrayList<Any>(kept)
+    for (i in 0 until kept) carried += carryScalar(value[i], cuts) ?: return null
     return if (carried.map { it.javaClass }.toSet().size <= 1) carried else null
+  }
+
+  /** What was cut from one span: texts to the length limit, lists to the element limit. */
+  private class Cuts(private val tuning: TraceExportTuning) {
+    var texts = 0
+    var lists = 0
+
+    fun text(value: String): String =
+        if (value.length <= tuning.maxAttributeLength) value
+        else value.substring(0, tuning.maxAttributeLength).also { texts++ }
   }
 
   /** Eight bytes made from the trace and the name the pipeline gave: the same name, the same id. */

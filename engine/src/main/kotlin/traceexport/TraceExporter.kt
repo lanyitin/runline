@@ -1,6 +1,5 @@
 package dev.lawlan.runline.engine.traceexport
 
-import dev.lawlan.runline.accessors.tls.HostCheckingContext
 import dev.lawlan.runline.accessors.tls.TlsContext
 import dev.lawlan.runline.engine.config.TraceExportTuning
 import dev.lawlan.runline.engine.secret.SecretLookup
@@ -22,15 +21,15 @@ internal interface SpanSink {
   /** Takes [span] and returns at once; the reason it was not taken, or null when it was. */
   fun offer(span: PendingSpan): DropReason?
 
-  /** Waits at most [wait] until every span taken so far has been handled; whether it was. */
-  fun flush(wait: Duration): Boolean
+  /** Asks for what is queued to be sent now, without waiting for the schedule; returns at once. */
+  fun requestFlush()
 }
 
 /** The sink of a resource that cannot export (its certificates cannot be used): nothing is kept. */
 internal object UnavailableSink : SpanSink {
   override fun offer(span: PendingSpan): DropReason = DropReason.UNAVAILABLE
 
-  override fun flush(wait: Duration): Boolean = true
+  override fun requestFlush() {}
 }
 
 /**
@@ -65,14 +64,9 @@ internal class TraceExporter(
           // A batch that fails is dropped, not tried again (ADR-46 decision 4).
           .setRetryPolicy(null)
           .setMeterProvider(MeterProvider.noop())
-          // OpenTelemetry's client checks the host itself, after the handshake; the context makes
-          // the
-          // JDK check it too, which the resource's trust manager insists on (ADR-019 decision 12).
-          .also { builder ->
-            tls?.let {
-              builder.setSslContext(HostCheckingContext.of(it.sslContext), it.trustManager)
-            }
-          }
+          // Its own sender, which does not follow redirects.
+          .setComponentLoader(NoRedirectHttpSender.Components)
+          .also { builder -> tls?.let { builder.setSslContext(it.sslContext, it.trustManager) } }
           .build()
   private val resource: Resource =
       Resource.create(
@@ -85,10 +79,8 @@ internal class TraceExporter(
 
   private val lock = ReentrantLock()
   private val wake = lock.newCondition()
-  private val handled = lock.newCondition()
   private val queue = ArrayDeque<PendingSpan>()
-  private var accepted = 0L
-  private var done = 0L
+  private var closing = false
   private var flushRequested = false
   private var stopping = false
   private val worker =
@@ -97,23 +89,29 @@ internal class TraceExporter(
   override fun offer(span: PendingSpan): DropReason? = lock.withLock {
     if (stopping || queue.size >= tuning.queueSize) return DropReason.QUEUE_FULL
     queue.addLast(span)
-    accepted++
     // The worker is woken to start the clock of the first span or to send a full batch.
     if (queue.size == 1 || queue.size >= tuning.batchSize) wake.signal()
     null
   }
 
-  override fun flush(wait: Duration): Boolean = lock.withLock {
-    val target = accepted
-    if (done >= target) return true
-    flushRequested = true
-    wake.signalAll()
-    var nanos = wait.toNanos()
-    while (done < target) {
-      if (nanos <= 0) return false
-      nanos = handled.awaitNanos(nanos)
+  override fun requestFlush() {
+    lock.withLock {
+      flushRequested = true
+      wake.signalAll()
     }
-    true
+  }
+
+  /**
+   * The last run that held the resource has ended: what is queued is sent now, and the thread ends
+   * when the queue is empty. Nobody waits for it; [TraceExporters] calls [shutdown] if it takes
+   * longer than the wait allows.
+   */
+  fun endOfUse() {
+    lock.withLock {
+      closing = true
+      flushRequested = true
+      wake.signalAll()
+    }
   }
 
   /**
@@ -125,9 +123,7 @@ internal class TraceExporter(
       stopping = true
       val n = queue.size
       queue.clear()
-      done += n
       wake.signalAll()
-      handled.signalAll()
       n
     }
     if (left > 0) telemetry.dropped(resourceName, left, DropReason.ABANDONED)
@@ -136,14 +132,18 @@ internal class TraceExporter(
   }
 
   private fun run() {
+    try {
+      loop()
+    } finally {
+      exporter.shutdown()
+    }
+  }
+
+  private fun loop() {
     while (true) {
       val batch = nextBatch() ?: return
       send(batch)
-      lock.withLock {
-        done += batch.size
-        if (queue.isEmpty()) flushRequested = false
-        handled.signalAll()
-      }
+      lock.withLock { if (queue.isEmpty()) flushRequested = false }
     }
   }
 
@@ -154,6 +154,7 @@ internal class TraceExporter(
       while (true) {
         if (stopping) return null
         if (queue.isEmpty()) {
+          if (closing) return null
           firstWaitedSince = 0L
           try {
             wake.await()

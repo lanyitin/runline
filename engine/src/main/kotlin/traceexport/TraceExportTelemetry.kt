@@ -32,6 +32,9 @@ enum class Truncation(val wire: String) {
   /** A text (a value, a name, a message) cut to the most characters kept. */
   LENGTH("length"),
 
+  /** Elements of a list attribute beyond the most a list keeps. */
+  ELEMENTS("elements"),
+
   /** An attribute whose value is not one of the kinds a span carries. */
   INVALID("invalid"),
 }

@@ -35,7 +35,7 @@ flowchart LR
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| [#50](work-items/50-core-span-contract.md) | core span 契約與 devkit 實作 | 無 | 已核可，待派工 |
+| [#50](work-items/50-core-span-contract.md) | core span 契約與 devkit 實作 | 無 | 已完成（2026-10-27；PR #56） |
 | [#51](work-items/51-engine-trace-export.md) | Engine 型別、匯出器與緩衝 | #50 | 已核可，待派工 |
 | [#52](work-items/52-console-trace-export.md) | Console 與型別目錄 | #51 | 已核可，待派工 |
 | [#53](work-items/53-trace-export-verification.md) | 整體驗證 | #50、#51、#52 | 已核可，待派工 |

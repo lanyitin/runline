@@ -1,6 +1,6 @@
 # #50 core span 契約與 devkit 實作
 
-本文回答：pipeline 端要能做什麼、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#50。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：無。
+本文回答：pipeline 端要能做什麼、如何驗收。狀態：已完成（2026-10-27；PR #56）。Issue：#50。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：無。
 
 ## 行為
 

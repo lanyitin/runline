@@ -1,6 +1,6 @@
 # #43 run 類別載入器提供 OpenTelemetry
 
-本文回答：要達成什麼行為、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#43。決策見 [ADR-42](../adr/ADR-42-run-provides-opentelemetry.md)，公告見 [runner-libraries](../runner-libraries.md)。相依：無。完成後需通知 runline-transcribe（其 WI-18 等待本項部署）。
+本文回答：要達成什麼行為、如何驗收。狀態：已作廢（2026-10-27），被 #46 取代，未實作，不得派工。Issue：#43。決策見 [ADR-42](../adr/ADR-42-run-provides-opentelemetry.md)，公告見 [runner-libraries](../runner-libraries.md)。相依：無。完成後需通知 runline-transcribe（其 WI-18 等待本項部署）。
 
 ## 行為
 

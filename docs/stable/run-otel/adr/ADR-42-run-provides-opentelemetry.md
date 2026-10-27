@@ -1,6 +1,6 @@
 # ADR-42 run 類別載入器提供 OpenTelemetry
 
-狀態：已核可（2026-10-27）。Issue：#42。修訂 [ADR-001](../../pipeline-engine/adr/ADR-001-isolated-classloader.md) 的 class loader 內容（不取代其隔離決策）。回答：pipeline 需要 OpenTelemetry 時，由誰提供、版本與隔離如何處理。
+狀態：已作廢（2026-10-27），被 #46 取代，未實作。Issue：#42。修訂 [ADR-001](../../pipeline-engine/adr/ADR-001-isolated-classloader.md) 的 class loader 內容（不取代其隔離決策）。回答：pipeline 需要 OpenTelemetry 時，由誰提供、版本與隔離如何處理。
 
 ## 背景
 

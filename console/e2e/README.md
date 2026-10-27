@@ -16,7 +16,7 @@ made with keytool and two Fake OpenAI compatible services as processes of their 
 | `API_TOKENS` with two developers and an admin | every script | the same text in `E2E_TOKENS` |
 | `RUNLINE_MAX_CONCURRENT_RUNS` of 8 | every script that makes runs | the value the scripts are verified with (several tests keep runs going side by side; the contract tests need 8 or more) |
 | The sample jars, `dev/sample-pipelines/build/pipelines` | `admin`, `bindings`, `developer`, `resources`, `security`, `typed-forms`, `versions` | `./gradlew -p dev/sample-pipelines pipelineJars`; in `E2E_JARS` |
-| A PKCS12 keystore the Engine opens, writable by the tests | `resources`, `resource-types`, `typed-forms`, `certificates` | its entries are below; `resources` changes it with keytool and puts it back |
+| A PKCS12 keystore the Engine opens, writable by the tests | `resources`, `resource-types`, `typed-forms`, `certificates`, `trace-export` | its entries are below; `resources` changes it with keytool and puts it back |
 | A database `orders` owned by an account `reader` | `typed-forms` | the password is the secret `db-pass` |
 | The Fake OpenAI compatible service over HTTP, asking for the key | `typed-forms` | `FAKE_OPENAI_KEY_FILE` (the value of `llm-key`), `FAKE_OPENAI_CHAT_DELAY_MS=15000`; in `E2E_OPENAI_URL` |
 | The Fake OpenAI compatible service over TLS, requiring a client certificate | `certificates` | issued by `internal-ca`; in `E2E_TLS_OPENAI_URL` |
@@ -28,7 +28,7 @@ made with keytool and two Fake OpenAI compatible services as processes of their 
 
 | Alias | Kind of entry | What it is | Needed by |
 |---|---|---|---|
-| `llm-key` | secret (`keytool -importpass`) | a marker: any text that occurs nowhere else; it is `E2E_SECRET_MARKER` and the key the HTTP Fake asks for | `resources`, `resource-types`, `typed-forms` |
+| `llm-key` | secret (`keytool -importpass`) | a marker: any text that occurs nowhere else; it is `E2E_SECRET_MARKER` and the key the HTTP Fake asks for | `resources`, `resource-types`, `typed-forms`, `trace-export` |
 | `db-pass` | secret | the password of the database account `reader`; it is `E2E_DB_PASSWORD` | `typed-forms` |
 | `other-pass` | secret | any other text | `typed-forms` |
 | `corporate-ca` | trusted certificate (`keytool -importcert`) | any certificate authority | `resources` |

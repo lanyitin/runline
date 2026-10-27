@@ -27,7 +27,7 @@ export interface FakeBinding {
 export type RoleProblem = 'unbound' | 'unknown' | 'disabled' | 'type_mismatch';
 
 /** The closed set of the types of shared resources (ADR-019). */
-const TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible'];
+const TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export'];
 
 const DEFINITION_NOT_FOUND = () =>
   failure(404, 'definition_not_found', 'No such version and pipeline.');

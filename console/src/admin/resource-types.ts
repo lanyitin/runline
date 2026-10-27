@@ -4,10 +4,10 @@
 // Console does not know (a newer Engine) has no summary and no form; its card still shows the rest.
 
 /** The types the Console can define, in the order it offers them. */
-export const formTypes: string[] = ['counter', 'file', 'jdbc-pool', 'openai-compatible'];
+export const formTypes: string[] = ['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export'];
 
 /** The types whose settings refer to a secret of the keystore by its alias. */
-const SECRET_TYPES = ['jdbc-pool', 'openai-compatible'];
+const SECRET_TYPES = ['jdbc-pool', 'openai-compatible', 'trace-export'];
 
 export const takesSecret = (type: string): boolean => SECRET_TYPES.includes(type);
 
@@ -16,6 +16,7 @@ const SUMMARY_FIELDS: Record<string, string[]> = {
   counter: [],
   file: ['path'],
   'openai-compatible': ['baseUrl', 'organization', 'project'],
+  'trace-export': ['endpoint', 'serviceName'],
   'jdbc-pool': ['kind', 'host', 'port', 'database', 'username', 'path'],
 };
 

@@ -4,7 +4,7 @@
 // enumerations (`kind`, `outcome`, `action`, `problem`) are kept as they came: one that a newer
 // Engine adds is shown as it is, not refused.
 
-import { bool, list, num, obj, str, strOrNull, strings, type Obj } from './parse.ts';
+import { bad, bool, list, num, obj, str, strOrNull, strings, type Obj } from './parse.ts';
 
 export interface Trigger {
   name: string;
@@ -600,6 +600,15 @@ export interface ResourceTypeCatalog {
   openAi: { endpoints: CatalogEndpoint[]; requestParameters: CatalogParameter[] } | null;
   /** Null when the Engine tells nothing of `jdbc-pool`. */
   jdbc: { databases: CatalogDatabase[] } | null;
+  /** Null when the Engine tells nothing of `trace-export`; its capacity is the Engine's, not the admin's. */
+  traceExport: { fixedCapacity: number } | null;
+}
+
+/** The fixed capacity of a type, a whole number of one or more. */
+function fixedCapacity(value: unknown): number {
+  const capacity = num(value, 'fixedCapacity');
+  if (!Number.isInteger(capacity) || capacity < 1) throw bad('fixedCapacity');
+  return capacity;
 }
 
 export function parseResourceTypes(json: unknown): ResourceTypeCatalog {
@@ -607,6 +616,7 @@ export function parseResourceTypes(json: unknown): ResourceTypeCatalog {
   const of = (name: string) => types.find((t) => t.type === name);
   const openAi = of('openai-compatible');
   const jdbc = of('jdbc-pool');
+  const traceExport = of('trace-export');
   return {
     types: types.map((t) => str(t.type, 'resource type name')),
     openAi:
@@ -632,6 +642,8 @@ export function parseResourceTypes(json: unknown): ResourceTypeCatalog {
               return { name: str(p.name, 'parameter name'), kind: str(p.kind, 'parameter kind'), ceiling: bool(p.ceiling, 'parameter ceiling') };
             }),
           },
+    traceExport:
+      traceExport === undefined ? null : { fixedCapacity: fixedCapacity(traceExport.fixedCapacity) },
     jdbc:
       jdbc === undefined
         ? null

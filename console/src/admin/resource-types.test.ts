@@ -23,6 +23,20 @@ describe('the summary of the settings of a resource', () => {
     ]);
   });
 
+  test('of a trace-export is its endpoint and the service name; the certificates and the alias are not in it', () => {
+    expect(
+      settingsSummary('trace-export', {
+        endpoint: 'https://trace.example/v1/traces',
+        serviceName: 'runline',
+        trustAliases: ['ca'],
+        clientCertAlias: 'me',
+      }),
+    ).toEqual([
+      { field: 'endpoint', value: 'https://trace.example/v1/traces' },
+      { field: 'serviceName', value: 'runline' },
+    ]);
+  });
+
   test('of a jdbc-pool is the kind of database, where it is and the account', () => {
     expect(
       settingsSummary('jdbc-pool', {
@@ -58,14 +72,11 @@ describe('the summary of the settings of a resource', () => {
 
 describe('the types of resources', () => {
   test('a form is offered for every type of the closed set', () => {
-    expect(formTypes).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible']);
+    expect(formTypes).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export']);
   });
 
-  test('the types that refer to a secret are jdbc-pool and openai-compatible', () => {
-    expect(['counter', 'file', 'jdbc-pool', 'openai-compatible'].filter(takesSecret)).toEqual([
-      'jdbc-pool',
-      'openai-compatible',
-    ]);
+  test('the types that refer to a secret are jdbc-pool, openai-compatible and trace-export', () => {
+    expect(formTypes.filter(takesSecret)).toEqual(['jdbc-pool', 'openai-compatible', 'trace-export']);
   });
 });
 

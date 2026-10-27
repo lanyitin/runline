@@ -4,7 +4,7 @@
 // Engine has one behavior per type; the contract tests (contract/admin-contract.ts) hold each to the
 // Engine. What the Engine tells of its types (fake-resource-types.ts) is what these rules accept.
 
-import { accepts, DATABASES, ENDPOINTS, REQUEST_PARAMETERS } from './fake-resource-types';
+import { accepts, DATABASES, ENDPOINTS, REQUEST_PARAMETERS, TRACE_EXPORT_CAPACITY } from './fake-resource-types';
 
 /** The settings as written, or the `problem` of `invalid_resource` that refuses them. */
 export type SettingsAnswer = { settings: Record<string, unknown> } | { problem: string };
@@ -12,6 +12,10 @@ export type SettingsAnswer = { settings: Record<string, unknown> } | { problem: 
 export interface TypeRules {
   /** Whether a resource of the type may name a secret of the keystore by its alias. */
   takesSecret: boolean;
+  /** Whether a resource of the type must name a secret when it is defined. */
+  secretRequired?: boolean;
+  /** The capacity the Engine fixes for the type; any other capacity is refused (`capacity`). */
+  fixedCapacity?: number;
   /** [given] (undefined when the request had none), checked and written out. */
   settings(given: unknown): SettingsAnswer;
   /** Whether a resource with these (written) settings may name a secret; [takesSecret] when absent. */
@@ -91,6 +95,7 @@ const DAY_MS = 24 * 3600 * 1000;
 
 const JDBC_COMMON = ['kind', 'connectionsPerRun', 'timeouts', 'maxRows', 'maxResponseBytes', 'properties'];
 const JDBC_TLS = ['trustAliases', 'clientCertAlias'];
+const TLS_MEMBERS = JDBC_TLS;
 /** A path of at most eight plain names, each starting with a letter, a digit or an underscore. */
 const SQLITE_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}(?:\/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}){0,7}$/;
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])$/;
@@ -360,10 +365,48 @@ const openAiCompatible: TypeRules = {
   },
 };
 
+/** The service name of exported spans: text of 1 to 100 characters, no control character. */
+const SERVICE_NAME = /^[^\u0000-\u001f\u007f-\u009f]{1,100}$/;
+
+/** The whole address of the traces signal as it is kept: the scheme in lower case, the rest as given. */
+function endpointOf(value: string): string | undefined {
+  if (!/^[\x21-\x7e]+$/.test(value)) return undefined;
+  const match = /^(https?):\/\/([^/?#]+)([^?#]*)$/i.exec(value);
+  if (match === null || match[2].includes('@')) return undefined;
+  return `${match[1].toLowerCase()}://${match[2]}${match[3]}`;
+}
+
+/**
+ * An OTLP endpoint (ADR-46): its address as an `openai-compatible` base address, its service name,
+ * and the certificates for an https address; the credentials are the secret, which it must have.
+ */
+const traceExport: TypeRules = {
+  takesSecret: true,
+  secretRequired: true,
+  fixedCapacity: TRACE_EXPORT_CAPACITY,
+  settings(given) {
+    const settings = objectOf(given);
+    if (settings === null || Object.keys(settings).some((key) => !['endpoint', 'serviceName', ...TLS_MEMBERS].includes(key))) {
+      return { problem: 'invalid_settings' };
+    }
+    const { serviceName } = settings;
+    if (typeof settings.endpoint !== 'string' || typeof serviceName !== 'string' || !SERVICE_NAME.test(serviceName)) {
+      return { problem: 'invalid_settings' };
+    }
+    const endpoint = endpointOf(settings.endpoint);
+    if (endpoint === undefined) return { problem: 'invalid_base_url' };
+    const tls = tlsOf(settings);
+    if ('problem' in tls) return tls as { problem: string };
+    if (Object.keys(tls).length > 0 && !endpoint.startsWith('https://')) return { problem: 'invalid_settings' };
+    return { settings: { endpoint, serviceName, ...tls } };
+  },
+};
+
 /** The types the Fake defines through the API, by their name in the API. */
 export const TYPE_RULES: Record<string, TypeRules> = {
   counter,
   file,
   'jdbc-pool': jdbcPool,
   'openai-compatible': openAiCompatible,
+  'trace-export': traceExport,
 };

@@ -1021,5 +1021,16 @@
   "admin.version.impact.jarRemoved": "The jar is removed too, because no other version has this content.",
   "admin.version.impact.jarStays": "The jar stays, because another version has the same content.",
   "admin.version.effect.withRuns": "The runs and their log entries will be deleted with the version and cannot be recovered.",
-  "admin.version.effect.noRuns": "This version has no runs. Only the version is deleted."
+  "admin.version.effect.noRuns": "This version has no runs. Only the version is deleted.",
+  "resourceType.trace-export": "Trace export (OTLP)",
+  "resources.setting.endpoint": "Endpoint",
+  "resources.setting.serviceName": "Service name",
+  "resources.form.trace.endpoint.help": "The full address of the OTLP/HTTP traces endpoint, e.g. https://cloud.langfuse.com/api/public/otel/v1/traces. The Engine adds no path and does not follow redirects. No user, query or fragment in it.",
+  "resources.form.trace.serviceName.help": "The service.name of the spans that this resource exports, up to 100 characters.",
+  "resources.form.capacity.fixed": "The capacity is fixed by the Engine (close to unlimited: runs never wait for it) and cannot be changed.",
+  "resources.form.secret.trace-export": "Credentials: the alias in the keystore of the whole Authorization value",
+  "resources.form.certificates.help.trace-export": "For an https endpoint only. With trusted certificates, only they are trusted, not the JVM's default; without, the JVM's default trust is used. The host name is always verified.",
+  "resources.problem.invalid_settings.trace-export": "The Engine refused the settings: the endpoint or the service name is missing or empty, the service name is longer than 100 characters, or certificates are given for an address that is not https.",
+  "resources.problem.invalid_secret_alias.trace-export": "Choose the alias of the credentials in the keystore: this type needs one.",
+  "resources.fixedCapacity": "No capacity limit: runs never wait for it, and it is not held."
 }

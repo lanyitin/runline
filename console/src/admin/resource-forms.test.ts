@@ -128,6 +128,53 @@ describe('the form of a jdbc-pool', () => {
   });
 });
 
+describe('the form of a trace-export', () => {
+  const form = formOf('trace-export', CATALOG)!;
+  const fields = { endpoint: 'https://trace.example/v1/traces', serviceName: 'runline', trustAliases: [], clientCertAlias: '' };
+
+  test('has a form only when the Engine tells the type; its capacity is the one the Engine fixes', () => {
+    expect(formOf('trace-export', null)).toBeUndefined();
+    expect(formOf('trace-export', { ...CATALOG, traceExport: null })).toBeUndefined();
+    expect(form.fixedCapacity).toBe(1000000);
+    expect(formOf('file', CATALOG)!.fixedCapacity).toBeUndefined();
+  });
+
+  test('is empty for a new one, and has the settings of one that exists', () => {
+    expect(form.empty()).toEqual({ endpoint: '', serviceName: '', trustAliases: [], clientCertAlias: '' });
+    expect(form.fromSettings({ endpoint: fields.endpoint, serviceName: 'runline', trustAliases: ['ca'], clientCertAlias: 'me' })).toEqual({
+      ...fields,
+      trustAliases: ['ca'],
+      clientCertAlias: 'me',
+    });
+  });
+
+  test('names a secret by its alias', () => {
+    expect(form.takesSecret).toBe(true);
+  });
+
+  test('makes the settings of the endpoint and the service name, and the certificates only for https', () => {
+    expect(form.toSettings({ ...fields, trustAliases: ['ca'], clientCertAlias: 'me' }, {})).toEqual({
+      settings: { endpoint: fields.endpoint, serviceName: 'runline', trustAliases: ['ca'], clientCertAlias: 'me' },
+    });
+    expect(form.toSettings({ ...fields, endpoint: 'http://trace.internal:4318/v1/traces', trustAliases: ['ca'], clientCertAlias: 'me' }, {})).toEqual({
+      settings: { endpoint: 'http://trace.internal:4318/v1/traces', serviceName: 'runline' },
+    });
+  });
+
+  test('asks for the endpoint and the service name before it asks the Engine', () => {
+    expect(form.toSettings({ ...fields, endpoint: ' ', serviceName: '' }, {})).toEqual({
+      errors: { 'trace-endpoint': 'required', 'trace-service-name': 'required' },
+    });
+  });
+
+  test('says what the Engine refused at the field it is about', () => {
+    expect(form.fieldOf('invalid_base_url')).toBe('trace-endpoint');
+    expect(form.fieldOf('invalid_settings')).toBe('trace-settings');
+    expect(form.fieldOf('alias_wrong_type')).toBe('resource-certificates');
+    expect(form.fieldOf('capacity')).toBeUndefined();
+  });
+});
+
 describe('the form of an openai-compatible service', () => {
   const form = formOf('openai-compatible', CATALOG)!;
   const noParameters = () => form.empty().parameters;
@@ -394,7 +441,8 @@ describe('the forms and the catalog of the Engine (WI-55)', () => {
 
   // Another Engine, with a catalog this Console was never built with.
   const other: ResourceTypeCatalog = {
-    types: ['counter', 'file', 'jdbc-pool', 'openai-compatible'],
+    types: ['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export'],
+    traceExport: { fixedCapacity: 5 },
     openAi: {
       endpoints: [
         { id: 'b.two', group: 'b', method: 'GET', path: '/b', request: 'none', response: 'json', streams: false, defaultEnabled: false, stateful: false },
@@ -418,6 +466,10 @@ describe('the forms and the catalog of the Engine (WI-55)', () => {
     expect(formOf('openai-compatible', other)!.empty()).toMatchObject({ endpoints: ['a.one'] });
     expect(Object.keys(formOf('openai-compatible', other)!.empty().parameters)).toEqual(['top_q', 'style', 'words']);
     expect(formOf('jdbc-pool', other)!.empty().kind).toBe('otherdb');
+  });
+
+  test('the capacity of a trace-export is the one this catalog fixes, not one the Console knows', () => {
+    expect(formOf('trace-export', other)!.fixedCapacity).toBe(5);
   });
 
   test('the settings follow the catalog: entries in its order, each default read as the kind it says', () => {

@@ -5,6 +5,7 @@
   import ResourceCard from '../admin/ResourceCard.svelte';
   import ResourceDeleteDialog from '../admin/ResourceDeleteDialog.svelte';
   import ResourceFormDialog from '../admin/ResourceFormDialog.svelte';
+  import { formOf } from '../admin/resource-forms';
   import SecretsPanel from '../admin/SecretsPanel.svelte';
   import { useApp } from '../app/context';
   import { browserClock, pageVisibility, type Clock, type Visibility } from '../runs/run-watch.svelte';
@@ -142,6 +143,7 @@
       {#each resources as resource (resource.name)}
         <ResourceCard
           {resource}
+          fixedCapacity={formOf(resource.type, catalogTypes)?.fixedCapacity ?? null}
           onchange={() => (form = { resource })}
           ondelete={() => (deleting = resource.name)}
           onrelease={(holder) => {

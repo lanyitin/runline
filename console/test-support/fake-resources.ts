@@ -89,7 +89,7 @@ export interface ResourceSecrets {
 }
 
 /** The closed set of types (ADR-019). */
-const TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible'];
+const TYPES = ['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export'];
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -421,7 +421,13 @@ export class FakeResources {
     }
     const settings = rules.settings(request.settings);
     if ('problem' in settings) return this.invalid('The settings are not valid.', settings.problem);
+    if (rules.fixedCapacity !== undefined && request.capacity !== rules.fixedCapacity) {
+      return this.invalid('The capacity of this type is fixed.', 'capacity');
+    }
     const alias = request.secretAlias;
+    if (rules.secretRequired === true && alias === undefined) {
+      return this.invalid('This type needs the alias of a secret.', 'invalid_secret_alias');
+    }
     const secretAllowed = rules.secretFor?.(settings.settings) ?? rules.takesSecret;
     if (alias !== undefined && (!secretAllowed || typeof alias !== 'string' || !NAME.test(alias))) {
       return this.invalid('The secret alias is not valid.', 'invalid_secret_alias');
@@ -481,6 +487,9 @@ export class FakeResources {
     // The settings replace the stored ones as a whole, and are checked as when it was defined; so is
     // the alias, against the type.
     const rules = TYPE_RULES[resource.type];
+    if (capacity !== undefined && rules?.fixedCapacity !== undefined && capacity !== rules.fixedCapacity) {
+      return this.invalid('The capacity of this type is fixed.', 'capacity');
+    }
     const written = settings === undefined || rules === undefined ? undefined : rules.settings(settings);
     if (written !== undefined && 'problem' in written) return this.invalid('The settings are not valid.', written.problem);
     const secretAllowed = rules?.secretFor?.(written?.settings ?? resource.settings) ?? rules?.takesSecret === true;

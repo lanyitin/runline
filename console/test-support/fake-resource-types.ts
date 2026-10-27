@@ -149,6 +149,9 @@ export function accepts(rule: PropertyRule, value: string): boolean {
   }
 }
 
+/** The capacity of every `trace-export` resource: near enough to unlimited; not for an admin to set. */
+export const TRACE_EXPORT_CAPACITY = 1_000_000;
+
 /** The answer of `GET /api/v1/resource-types`. */
 export const RESOURCE_TYPES_ANSWER = {
   types: [
@@ -156,5 +159,6 @@ export const RESOURCE_TYPES_ANSWER = {
     { type: 'file' },
     { type: 'jdbc-pool', databases: DATABASES },
     { type: 'openai-compatible', endpoints: ENDPOINTS, requestParameters: REQUEST_PARAMETERS },
+    { type: 'trace-export', fixedCapacity: TRACE_EXPORT_CAPACITY },
   ],
 };

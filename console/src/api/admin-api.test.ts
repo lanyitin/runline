@@ -478,7 +478,8 @@ describe('typed resources, checks, deleting and secrets', () => {
 
     const catalog = await api.resourceTypes();
 
-    expect(catalog.types).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible']);
+    expect(catalog.types).toEqual(['counter', 'file', 'jdbc-pool', 'openai-compatible', 'trace-export']);
+    expect(catalog.traceExport).toEqual({ fixedCapacity: 1000000 });
     expect(catalog.openAi?.endpoints.find((e) => e.id === 'files.delete')).toEqual({
       id: 'files.delete',
       group: 'files',
@@ -498,6 +499,15 @@ describe('typed resources, checks, deleting and secrets', () => {
       rule: 'oneOf',
       values: ['true', 'false'],
     });
+  });
+
+  test('a catalog whose trace-export has no fixed capacity as a whole number of one or more is a failure', async () => {
+    const api = await start();
+    app.engine.faults.push({ match: /resource-types/, status: 200, body: { types: [{ type: 'trace-export', fixedCapacity: 'many' }] }, times: 1 });
+
+    const failed = await api.resourceTypes().catch((e) => e);
+
+    expect(failed).toBeInstanceOf(ApiFailure);
   });
 
   test('resource types that are not as 08-api says are a failure, not a catalog', async () => {

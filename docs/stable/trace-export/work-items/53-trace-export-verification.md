@@ -1,6 +1,6 @@
 # #53 trace-export 整體驗證
 
-本文回答：整條路徑是否符合 ADR-46、文件是否一致。狀態：提案中（2026-10-27）。Issue：#53。決策見 [ADR-46](../../../stable/trace-export/adr/ADR-46-trace-export-resource.md)。相依：#50、#51、#52。
+本文回答：整條路徑是否符合 ADR-46、文件是否一致。狀態：已核可（2026-10-27），待派工。Issue：#53。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：#50、#51、#52。
 
 ## 行為
 

@@ -1,6 +1,6 @@
 # #50 core span 契約與 devkit 實作
 
-本文回答：pipeline 端要能做什麼、如何驗收。狀態：提案中（2026-10-27）。Issue：#50。決策見 [ADR-46](../../../stable/trace-export/adr/ADR-46-trace-export-resource.md)。相依：無。
+本文回答：pipeline 端要能做什麼、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#50。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：無。
 
 ## 行為
 
@@ -22,6 +22,6 @@
 
 ## 架構約束
 
-- 邊界只傳 JDK 內建型別（[05](../../../stable/pipeline-engine/05-ipc.md)）。
+- 邊界只傳 JDK 內建型別（[05](../../pipeline-engine/05-ipc.md)）。
 - 契約是「完成後提交」，不提供開啟與結束兩段式。
 - 測試的外部系統用真實或簡易真實實作，不用 Stub 或 Mock。

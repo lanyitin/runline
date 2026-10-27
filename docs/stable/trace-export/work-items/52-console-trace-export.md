@@ -1,6 +1,6 @@
 # #52 Console 與型別目錄支援 trace-export
 
-本文回答：管理員在 Console 如何管理新型別、如何驗收。狀態：提案中（2026-10-27）。Issue：#52。決策見 [ADR-46](../../../stable/trace-export/adr/ADR-46-trace-export-resource.md)。相依：#51。
+本文回答：管理員在 Console 如何管理新型別、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#52。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：#51。
 
 ## 行為
 
@@ -17,9 +17,9 @@
 - 建立、修改、停用、刪除、檢查在真實 Engine 上可操作。
 - 容量不可編輯；介面上沒有任何位置顯示機密值。
 - 既有型別的資源頁行為不變。
-- 版面在既有 Console 的響應式規則下可用（[console-responsive](../../../stable/console-responsive/README.md)）。
+- 版面在既有 Console 的響應式規則下可用（[console-responsive](../../console-responsive/README.md)）。
 
 ## 架構約束
 
-- Console 只用同源 `/api/v1`，不改變 Bearer API 契約（[ADR-012](../../../stable/pipeline-engine/adr/ADR-012-api-authentication.md)、[ADR-015](../../../stable/pipeline-engine/adr/ADR-015-console-frontend.md)）。
+- Console 只用同源 `/api/v1`，不改變 Bearer API 契約（[ADR-012](../../pipeline-engine/adr/ADR-012-api-authentication.md)、[ADR-015](../../pipeline-engine/adr/ADR-015-console-frontend.md)）。
 - 不信任內容的顯示機制沿用既有規則。

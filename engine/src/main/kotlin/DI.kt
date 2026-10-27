@@ -34,6 +34,8 @@ import dev.lawlan.runline.engine.resource.*
 import dev.lawlan.runline.engine.retention.*
 import dev.lawlan.runline.engine.run.*
 import dev.lawlan.runline.engine.secret.*
+import dev.lawlan.runline.engine.traceexport.TraceExportTelemetry
+import dev.lawlan.runline.engine.traceexport.TraceExporters
 import dev.lawlan.runline.engine.trigger.*
 import dev.lawlan.runline.engine.view.*
 import dev.lawlan.runline.runner.Runner
@@ -273,6 +275,16 @@ fun Application.configureDependencyInjection() {
     }
     provide<JdbcPools> { JdbcPools(resolve<JdbcProfiles>()) }
     provide<TlsTelemetry> { TlsTelemetry(resolve<OpenTelemetry>()) }
+    // The exporters of `trace-export` resources (ADR-46): each has a thread and a queue of its own
+    // and none touches the Engine's own telemetry. Closed with the Engine, after the runs that
+    // submit to them (declared before the scheduler).
+    provide<TraceExporters> {
+      TraceExporters(
+          resolve<SecretStore>(),
+          resolve<EngineConfig>().traceExport,
+          TraceExportTelemetry(resolve<OpenTelemetry>()),
+      )
+    }
     provide<ResourceBehaviors> {
       ResourceBehaviors.forEngine(
           resolve<EngineConfig>().resources,
@@ -285,6 +297,7 @@ fun Application.configureDependencyInjection() {
           resolve<JdbcProfiles>(),
           resolve<JdbcPools>(),
           JdbcTelemetry(resolve<OpenTelemetry>(), resolve<JdbcPools>(), resolve<TlsTelemetry>()),
+          resolve<TraceExporters>(),
       )
     }
     provide<ResourceAdmin> {

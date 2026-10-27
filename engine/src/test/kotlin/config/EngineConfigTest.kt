@@ -6,6 +6,7 @@ import dev.lawlan.runline.analyzer.DefaultAllowList
 import dev.lawlan.runline.engine.artifact.JarLimits
 import dev.lawlan.runline.engine.auth.Role
 import io.ktor.server.config.*
+import java.time.Duration
 import kotlin.test.*
 
 class EngineConfigTest {
@@ -535,6 +536,70 @@ class EngineConfigTest {
             parse("views.maxReadsPerResource" to value)
           }
       assertTrue(e.message!!.contains("views.maxReadsPerResource"), e.message)
+    }
+  }
+
+  // ---- spans of trace-export resources (ADR-46) ----
+
+  @Test
+  fun `the export of spans has the scale of OpenTelemetry's batch processor unless set`() {
+    val tuning = parse().traceExport
+
+    assertEquals(2048, tuning.queueSize)
+    assertEquals(512, tuning.batchSize)
+    assertEquals(Duration.ofSeconds(5), tuning.scheduleDelay)
+    assertEquals(Duration.ofSeconds(10), tuning.exportTimeout)
+    assertEquals(Duration.ofSeconds(5), tuning.flushWait)
+    assertEquals(128, tuning.maxAttributes)
+    assertEquals(8192, tuning.maxAttributeLength)
+    assertEquals(128, tuning.maxAttributeElements)
+  }
+
+  @Test
+  fun `every number of the export of spans can be set`() {
+    val tuning =
+        parse(
+                "traceExport.queueSize" to "100",
+                "traceExport.batchSize" to "10",
+                "traceExport.scheduleDelayMillis" to "250",
+                "traceExport.exportTimeoutMillis" to "3000",
+                "traceExport.flushWaitMillis" to "1500",
+                "traceExport.maxAttributes" to "16",
+                "traceExport.maxAttributeLength" to "256",
+                "traceExport.maxAttributeElements" to "7",
+            )
+            .traceExport
+
+    assertEquals(100, tuning.queueSize)
+    assertEquals(10, tuning.batchSize)
+    assertEquals(Duration.ofMillis(250), tuning.scheduleDelay)
+    assertEquals(Duration.ofMillis(3000), tuning.exportTimeout)
+    assertEquals(Duration.ofMillis(1500), tuning.flushWait)
+    assertEquals(16, tuning.maxAttributes)
+    assertEquals(256, tuning.maxAttributeLength)
+    assertEquals(7, tuning.maxAttributeElements)
+  }
+
+  @Test
+  fun `a number of the export of spans that is not a positive whole number is reported by name`() {
+    for (key in
+        listOf(
+            "queueSize",
+            "batchSize",
+            "scheduleDelayMillis",
+            "exportTimeoutMillis",
+            "flushWaitMillis",
+            "maxAttributes",
+            "maxAttributeLength",
+            "maxAttributeElements",
+        )) {
+      for (value in listOf("0", "-1", "many", "1.5")) {
+        val e =
+            assertFailsWith<ConfigurationException>("$key=$value") {
+              parse("traceExport.$key" to value)
+            }
+        assertTrue(e.message!!.contains("traceExport.$key"), e.message)
+      }
     }
   }
 

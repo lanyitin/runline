@@ -35,3 +35,21 @@
 - 機密只在金鑰庫，不進入資料庫、API、metadata、log、trace、錯誤與邊界（[ADR-019](../../pipeline-engine/adr/ADR-019-typed-shared-resources.md)）；型別集合維持封閉。
 - 端點的 TLS 信任沿用 ADR-019 決策 12 的機制。
 - 測試的外部系統用真實或簡易真實實作，不用 Stub 或 Mock。
+
+## 實作記錄
+
+- 型別 `trace-export` 在 Engine 的 `ResourceType`；資料庫的型別檢查約束由 `V15__trace_export_resource_type.sql` 加入第五個成員。設定為 `endpoint`（OTLP/HTTP protobuf traces 訊號的完整位址，Engine 不附加路徑）、`serviceName`，另可有 `trustAliases`、`clientCertAlias`（`https` 時，沿用 ADR-019 決策 12）；`secretAlias` 必填，指向整串認證值，原樣作為 `Authorization` 標頭。規則與預設見 [08](../../pipeline-engine/08-api.md) 的「`trace-export` 型別」。
+- 匯出器在 `engine` 模組的 `traceexport` 套件（`accessors` 與 `runner` 沒有 OpenTelemetry 相依）：每個資源（同一份設定與憑證）一個 `TraceExporter`，由持有它的 run 共用、最後一個放開時結束；一條執行緒、一個有界佇列、OpenTelemetry 的 `OtlpHttpSpanExporter`（不重試、meter 為 noop、不讀環境與全域設定）。span 由 Engine 組成 OpenTelemetry 的 `SpanData`，追蹤識別碼每個 run（每個存取端綁定）隨機產生，span 識別碼由追蹤識別碼與 pipeline 的本地識別碼雜湊導出，所以父子關係不需要順序。
+- 金鑰在每個批次送出時才從金鑰庫讀取，重載後下一個批次用新金鑰；別名缺失、不可用或金鑰庫未設定時該批以 `key_unavailable` 丟棄。端點的 TLS 用 `ResourceTls` 的安全上下文，由 Engine 自己的 HTTP 傳送端（`NoRedirectHttpSender`，JDK 的 HttpClient，經 OpenTelemetry 匯出器公開的 `HttpSenderProvider` 與 `ComponentLoader` 接上）使用，JDK 預設即檢查主機名稱，主機名稱驗證仍然不可關閉。
+- 選用的角色：宣告為 `trace-export` 的角色沒有綁定到存在的資源、或資源停用時，`ResolvedRole.isLeftOut` 使它不成為問題（不拒絕 run、不警告、不取得容量、沒有存取端）。這是對 ADR-025「宣告的角色必須解析到可用資源」的例外，只適用此型別，依據是 ADR-46 決策 5 與驗收條件「未綁定與未啟用的行為與沒有 tracing 時相同」。
+- 容量固定為 `1000000`（`TRACE_EXPORT_CAPACITY`）。建立時 `capacity` 照常必填（缺少為 400，維持既有契約），但須等於這個值，修改時帶不同的值被拒絕（`capacity`）；`GET /api/v1/resource-types` 的 `trace-export` 項有 `fixedCapacity`，供 Console（#52）使用。
+- 預設數值：佇列 2048、批次 512、批次間隔 5 秒、匯出請求上限 10 秒、run 結束的沖出等待 5 秒、屬性數 128、文字長度 8192 個字元；屬性元素數上限 128；八個環境變數 `RUNLINE_TRACE_EXPORT_*` 可調。
+- 屬性超過數量上限時，保留依鍵排序的前面幾個；值的型別不合的屬性在 host 側再次捨棄並計入 `kind=invalid`。
+- 型別目錄、08-api、05-ipc、04-deployment、README 的設定表、06、07 已同步；Engine 自身的 trace 不為 `trace.submit` 產生 span。
+- 整串認證值為可列印 ASCII 的限制已用真實金鑰庫（`keytool` 寫入）驗證：0x20 至 0x7e 的每個字元原樣送達接收端；含非 ASCII 的機密是 `invalid_secret`，檢查回報 `alias_invalid`，匯出以 `key_unavailable` 丟棄。
+
+### 補強（使用者決定後追加）
+
+1. **不跟隨重新導向。** OpenTelemetry 內建的 OkHttp 傳送端預設跟隨轉址且沒有設定可關，轉址會把認證標頭帶到管理員沒有給的位址。改用 Engine 自己的傳送端（JDK HttpClient，`followRedirects(NEVER)`）：3xx 即匯出失敗，該批丟棄、計數（`export_failed`）、限速警告，與資源檢查（`redirect_blocked`）一致。測試用真實接收端回 307 並指向另一個真實接收端，沒有任何請求到達轉址目標。因此原先的 `HostCheckingContext` 不再需要，已移除。
+2. **清單屬性的元素數上限**（採元素數上限，而非單筆總大小上限：與屬性數、文字長度兩個上限合起來，單一 span 的保留量有明確的上界，且不必估算序列化大小）。預設 128，`RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_ELEMENTS` 可調，非正整數啟動失敗並指出 `traceExport.maxAttributeElements`。超過的元素丟棄，每個被截的清單在 `runline.trace_export.attributes.truncated` 以 `kind=elements` 計數一次；內容不出現在 log、metric、錯誤。
+3. **run 結束的沖出改為非阻塞。** 存取端關閉時只要求匯出器立即送出（不等待排程），不在釋放資源的執行緒上等待。最後一個持有的 run 結束後，匯出器在自己的執行緒上盡力送完佇列，最多 `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS`（預設 5000），逾時由一條共用的收尾執行緒關閉它：佇列中未送出的 span 計為 `abandoned`，正在送出的批次計為 `export_failed`。這取代前述「有界地阻塞釋放執行緒」的做法：接收端掛住時，run 的結束與其他 run 的啟動判斷都不被延遲。

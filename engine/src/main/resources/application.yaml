@@ -143,6 +143,27 @@ webhook:
 views:
   maxReadsPerResource: "$?RUNLINE_VIEW_MAX_CONCURRENT_READS"
 
+# Spans of `trace-export` resources (ADR-46, #51). All optional; the defaults are the scale of
+# OpenTelemetry's batch span processor, and one value applies to every such resource. Each must be a
+# positive whole number; any other value stops the start naming the key.
+# RUNLINE_TRACE_EXPORT_QUEUE_SIZE (default 2048): spans a resource's queue holds; a span submitted to
+# a full queue is dropped and counted. RUNLINE_TRACE_EXPORT_BATCH_SIZE (512): spans in one export
+# request. RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS (5000): how long spans wait for a fuller batch.
+# RUNLINE_TRACE_EXPORT_EXPORT_TIMEOUT_MILLIS (10000): how long one export request may take; then the
+# batch is dropped. RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS (5000): how long the end of a run waits
+# for the queue to be flushed. RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTES (128): attributes of a span that
+# are kept. RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_LENGTH (8192): characters of a text that are kept.
+# RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_ELEMENTS (128): elements of a list attribute that are kept.
+traceExport:
+  queueSize: "$RUNLINE_TRACE_EXPORT_QUEUE_SIZE:"
+  batchSize: "$RUNLINE_TRACE_EXPORT_BATCH_SIZE:"
+  scheduleDelayMillis: "$RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS:"
+  exportTimeoutMillis: "$RUNLINE_TRACE_EXPORT_EXPORT_TIMEOUT_MILLIS:"
+  flushWaitMillis: "$RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS:"
+  maxAttributes: "$RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTES:"
+  maxAttributeLength: "$RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_LENGTH:"
+  maxAttributeElements: "$RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_ELEMENTS:"
+
 # Files of `file` shared resources (WI-43, ADR-019). RUNLINE_RESOURCE_ROOT is the directory every such
 # file lives under; it must be persistent storage and must not be, contain or lie inside the shared
 # or the run directory. Backup and capacity of it are the deployment's. A root that is missing or

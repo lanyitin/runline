@@ -182,6 +182,8 @@ data class EngineConfig(
     val oidc: OidcSettings? = null,
     val webhook: WebhookSettings = WebhookSettings(),
     val views: ViewSettings = ViewSettings(),
+    /** How the spans of `trace-export` resources are buffered and sent (ADR-46). */
+    val traceExport: TraceExportTuning = TraceExportTuning(),
 ) {
   companion object {
     private const val DEFAULT_MAX_UPLOAD_BYTES = 50L * 1024 * 1024
@@ -326,6 +328,29 @@ data class EngineConfig(
       val webhook =
           WebhookSettings(positive("webhook.maxBodyBytes", WebhookSettings.DEFAULT_MAX_BODY_BYTES))
       val views = ViewSettings(viewReadLimit(config, problems))
+      val tuningDefaults = TraceExportTuning()
+
+      fun exportCount(name: String, default: Int): Int =
+          (optionalNumber("traceExport.$name", min = 1) ?: default.toLong())
+              .coerceAtMost(Int.MAX_VALUE.toLong())
+              .toInt()
+
+      fun exportMillis(name: String, default: Duration): Duration =
+          Duration.ofMillis(optionalNumber("traceExport.$name", min = 1) ?: default.toMillis())
+
+      val traceExport =
+          TraceExportTuning(
+              queueSize = exportCount("queueSize", tuningDefaults.queueSize),
+              batchSize = exportCount("batchSize", tuningDefaults.batchSize),
+              scheduleDelay = exportMillis("scheduleDelayMillis", tuningDefaults.scheduleDelay),
+              exportTimeout = exportMillis("exportTimeoutMillis", tuningDefaults.exportTimeout),
+              flushWait = exportMillis("flushWaitMillis", tuningDefaults.flushWait),
+              maxAttributes = exportCount("maxAttributes", tuningDefaults.maxAttributes),
+              maxAttributeLength =
+                  exportCount("maxAttributeLength", tuningDefaults.maxAttributeLength),
+              maxAttributeElements =
+                  exportCount("maxAttributeElements", tuningDefaults.maxAttributeElements),
+          )
       val secrets = secretSettings(::text, problems)
       val runtimeDir = required("runs.runtimeDir")
       val runs =
@@ -389,6 +414,7 @@ data class EngineConfig(
           oidc,
           webhook,
           views,
+          traceExport,
       )
     }
 

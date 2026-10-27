@@ -74,11 +74,10 @@ class ResourceTls(val trusted: List<X509Certificate>, val client: ClientCertific
     val trust = TrustManagerFactory.getInstance("PKIX").apply { init(anchors) }
     val delegate = trust.trustManagers.filterIsInstance<X509ExtendedTrustManager>().single()
     val keys = PresentingKeyManager(client?.let(::keyManagerOf))
+    val verifying = VerifyingTrustManager(delegate)
     val context =
-        SSLContext.getInstance("TLS").apply {
-          init(arrayOf(keys), arrayOf(VerifyingTrustManager(delegate)), null)
-        }
-    return TlsContext(context, keys)
+        SSLContext.getInstance("TLS").apply { init(arrayOf(keys), arrayOf(verifying), null) }
+    return TlsContext(context, verifying, keys)
   }
 
   /**
@@ -99,7 +98,15 @@ class ResourceTls(val trusted: List<X509Certificate>, val client: ClientCertific
 
 /** The security context of some connections of a resource, and how their failures are told. */
 class TlsContext
-internal constructor(val sslContext: SSLContext, private val keys: PresentingKeyManager) {
+internal constructor(
+    val sslContext: SSLContext,
+    /**
+     * The trust manager [sslContext] was made with, for a client that wants it beside the context.
+     * It is the same one: the chain and the host are checked as for any connection of the resource.
+     */
+    val trustManager: javax.net.ssl.X509TrustManager,
+    private val keys: PresentingKeyManager,
+) {
   /**
    * The category of a failure of a connection made with [sslContext]; null when it is not of TLS.
    * What the resource refused is told by its own check; a failure of the handshake otherwise is the

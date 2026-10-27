@@ -11,8 +11,12 @@ import dev.lawlan.runline.accessors.jdbc.SqliteProfile
 import dev.lawlan.runline.accessors.openai.OpenAiObserver
 import dev.lawlan.runline.accessors.tls.TlsAliases
 import dev.lawlan.runline.engine.config.ResourceSettings
+import dev.lawlan.runline.engine.config.TraceExportTuning
 import dev.lawlan.runline.engine.secret.NoSecretStore
 import dev.lawlan.runline.engine.secret.SecretStore
+import dev.lawlan.runline.engine.traceexport.TraceExportTelemetry
+import dev.lawlan.runline.engine.traceexport.TraceExporters
+import io.opentelemetry.api.OpenTelemetry
 import java.security.cert.X509Certificate
 import kotlinx.serialization.json.JsonObject
 
@@ -50,6 +54,14 @@ interface ResourceBehavior {
    * never from a list of their own. Nothing of a resource, a secret or the Engine's configuration.
    */
   fun description(): JsonObject = JsonObject(emptyMap())
+
+  /**
+   * The capacity every resource of the type has, for a type that fixes it (ADR-46 decision 10): an
+   * administrator neither sets nor changes it. Null for a type whose capacity is the
+   * administrator's.
+   */
+  val fixedCapacity: Int?
+    get() = null
 
   /** The settings as they are stored, every effective value written out; given valid [settings]. */
   fun normalized(settings: JsonObject): JsonObject = settings
@@ -129,6 +141,12 @@ class ResourceBehaviors(private val byType: Map<ResourceType, ResourceBehavior>)
             JdbcProfiles(listOf(PostgresProfile, SqliteProfile(settings.root))),
         jdbcPools: JdbcPools = JdbcPools(jdbcProfiles),
         jdbcObserver: JdbcObserver = JdbcObserver.NONE,
+        traceExporters: TraceExporters =
+            TraceExporters(
+                secrets,
+                TraceExportTuning(),
+                TraceExportTelemetry(OpenTelemetry.noop()),
+            ),
     ) =
         ResourceBehaviors(
             mapOf(
@@ -144,6 +162,8 @@ class ResourceBehaviors(private val byType: Map<ResourceType, ResourceBehavior>)
                     ),
                 ResourceType.OPENAI_COMPATIBLE to
                     OpenAiCompatibleBehavior(secrets, settings.checkTimeout, openAiObserver),
+                ResourceType.TRACE_EXPORT to
+                    TraceExportBehavior(secrets, settings.checkTimeout, traceExporters),
             )
         )
   }

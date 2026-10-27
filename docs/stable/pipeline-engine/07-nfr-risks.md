@@ -28,7 +28,7 @@
 | 跳出目錄範圍 | 相對路徑或符號連結可能指向範圍外 | context 拒絕跳出的操作；經 JDK 直接存取的程式碼不受控，屬 unsafe 範疇 |
 | 共享目錄遺失 | 磁碟區故障會讓快取消失 | 視為可重建；pipeline 不得依賴它作為唯一的資料來源 |
 | pipeline 名稱與目錄名稱不相容 | 目錄名稱只允許字母、數字、`.`、`_`、`-`；名稱含其他字元的 pipeline 會在初始化階段失敗 | 上傳時驗證 pipeline 名稱並拒絕不相容者（[WI-18](work-items/WI-18-upload-hardening.md)） |
-| 共享資源鎖是約定式（`counter` 型別） | 鎖不綁定實際網路動作，pipeline 未宣告就連線不會被攔下 | 接受；與協作式 context 的限度一致。有實體的型別（`file`、`jdbc-pool`、`openai-compatible`）經存取端強制，safe 的 pipeline 無法繞過；unsafe 的 pipeline 仍可直接使用 JDK 繞過容量與中介，但拿不到機密（[ADR-019](adr/ADR-019-typed-shared-resources.md)） |
+| 共享資源鎖是約定式（`counter` 型別） | 鎖不綁定實際網路動作，pipeline 未宣告就連線不會被攔下 | 接受；與協作式 context 的限度一致。有實體的型別（`file`、`jdbc-pool`、`openai-compatible`、`trace-export`）經存取端強制，safe 的 pipeline 無法繞過；unsafe 的 pipeline 仍可直接使用 JDK 繞過容量與中介，但拿不到機密（[ADR-019](adr/ADR-019-typed-shared-resources.md)） |
 | 共享資源占用過久 | 初始化階段取得、run 結束才釋放，吞吐低 | 接受（[ADR-007](adr/ADR-007-shared-resources.md)）；以持有時間 metric 觀察 |
 | 共享資源持有者卡住 | 無法強制終止的 run 長期占用資源 | 不自動釋放以保住互斥；提供持有時間 metric 與管理員強制釋放 |
 | 共享資源狀態遺失 | Engine 狀態在記憶體，重啟後消失 | 重啟時所有進行中 run 本就標記為中斷，資源一併釋放；多實例前需改為共享儲存（容量、連線池與額度需跨實例分配，金鑰庫需在每個實例提供） |
@@ -69,7 +69,7 @@
 - Log：每個 run 的 log 歸屬到該 run，並可查詢。
 - Trace：每個 run 一條 trace，包含 trigger 來源與主要階段。
 - Metric：進行中 run 數、排隊數、逾時未結束數、class loader 回收數、unsafe 比例、上傳判定結果、共享資源的等待時間／持有時間／佇列長度、trigger 的觸發／被拒絕／失敗／重複／驗證失敗數。
-- 型別化資源（[ADR-019](adr/ADR-019-typed-shared-resources.md)）：資源指標帶資源名稱與型別標籤（不放 SQL、路徑、網址或模型的使用者輸入）；另有 `jdbc-pool` 的使用中連線數（`runline.resources.jdbc.connections.active`）、取得失敗數（`runline.resources.jdbc.acquire.failures`）與語句耗時（`runline.resources.jdbc.statement.duration`），`openai-compatible` 的進行中請求數、依狀態類別的請求數與延遲、等待請求額度的時間、生成時間（首位元組到完成；串流另有首塊時間與塊間最長間隔）、依逾時種類的逾時次數、服務回報的 token 用量，`file` 的操作數與路徑檢查失敗數，所有型別的實體檢查結果，機密重載的次數與結果。
+- 型別化資源（[ADR-019](adr/ADR-019-typed-shared-resources.md)）：資源指標帶資源名稱與型別標籤（不放 SQL、路徑、網址或模型的使用者輸入）；另有 `jdbc-pool` 的使用中連線數（`runline.resources.jdbc.connections.active`）、取得失敗數（`runline.resources.jdbc.acquire.failures`）與語句耗時（`runline.resources.jdbc.statement.duration`），`openai-compatible` 的進行中請求數、依狀態類別的請求數與延遲、等待請求額度的時間、生成時間（首位元組到完成；串流另有首塊時間與塊間最長間隔）、依逾時種類的逾時次數、服務回報的 token 用量，`file` 的操作數與路徑檢查失敗數，所有型別的實體檢查結果，機密重載的次數與結果；`trace-export` 的匯出與丟棄的 span 數（含原因）、匯出請求的結果、被截斷的屬性數（`runline.trace_export.*`，標籤只有資源名稱與固定的類別，從不含 span 的內容，名稱見 [08](08-api.md) 的「`trace-export` 型別」）。
 - Run 的 trace 之下每次資源操作一個 span，只記錄資源名稱、型別與操作類別。Run 的 log 記錄資源的取得、存取端失效與實體錯誤類別，不記錄 SQL 參數、請求與回應本文、機密。資源的建立、修改、刪除、檢查、強制釋放與機密重載記錄管理員名稱。
 
 ## 安全

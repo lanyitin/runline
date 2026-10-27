@@ -238,6 +238,39 @@ class ResourceAvailabilityTest {
   }
 
   @Test
+  fun `a trace-export role that has no usable resource is no problem, tracing being optional`() {
+    define("off", enabled = false, type = ResourceType.TRACE_EXPORT)
+    define("count")
+    bind("traced", "gone")
+    val types =
+        mapOf(
+            "tracing" to "trace-export",
+            "off" to "trace-export",
+            "traced" to "trace-export",
+            "count" to "trace-export",
+        )
+
+    val problems = availability.problems(p, listOf("tracing", "off", "traced", "count"), types)
+
+    // Not bound, disabled, bound to a resource that is not there: nothing stops the run. Only a
+    // resource of another type is a mismatch, as it is for every type.
+    assertEquals(listOf(ResourceProblem("count", ResourceProblemKind.TYPE_MISMATCH)), problems)
+  }
+
+  @Test
+  fun `a role that is not of the trace-export type is judged as before`() {
+    define("off", enabled = false, type = ResourceType.TRACE_EXPORT)
+
+    assertEquals(
+        listOf(
+            ResourceProblem("ghost", ResourceProblemKind.UNBOUND),
+            ResourceProblem("off", ResourceProblemKind.DISABLED),
+        ),
+        availability.problems(p, listOf("ghost", "off"), mapOf("off" to "counter")),
+    )
+  }
+
+  @Test
   fun `one lookup judges several pipelines, each with its own bindings`() {
     define("a")
     define("b")

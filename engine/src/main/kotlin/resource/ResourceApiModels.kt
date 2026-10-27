@@ -8,7 +8,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** [type] is a counter when left out; [settings] and [secretAlias] belong to the type (ADR-019). */
+/**
+ * [type] is a counter when left out; [settings] and [secretAlias] belong to the type (ADR-019). A
+ * type that fixes its capacity (ADR-46) is given exactly that capacity.
+ */
 @Serializable
 data class CreateResourceRequest(
     val name: String,

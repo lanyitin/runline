@@ -3,8 +3,10 @@ package dev.lawlan.runline.engine.packaged
 import dev.lawlan.runline.engine.config.DatabaseConfig
 import dev.lawlan.runline.engine.support.Keystores
 import dev.lawlan.runline.engine.support.ManagedProcess
+import dev.lawlan.runline.engine.support.OtlpReceiver
 import dev.lawlan.runline.engine.support.PipelineJars
 import dev.lawlan.runline.engine.support.PostgresTestContainer
+import dev.lawlan.runline.engine.support.RunHarness
 import dev.lawlan.runline.engine.support.StoppablePostgres
 import dev.lawlan.runline.engine.support.StuckServer
 import dev.lawlan.runline.engine.support.TestTimeouts
@@ -38,12 +40,14 @@ class PackagedEngineTest {
   // not answer it, so each try is short and the start as a whole has the limit.
   private val probe = TimedHttp(requestTimeout = TestTimeouts.readinessProbe)
   private val processes = mutableListOf<ManagedProcess>()
+  private val receivers = mutableListOf<OtlpReceiver>()
   private val port = ServerSocket(0).use { it.localPort }
   private val base = "http://localhost:$port"
 
   /** Every process started here ends with the test, whether it passed, failed or timed out. */
   @AfterTest
   fun stop() {
+    receivers.forEach { it.close() }
     val failures = processes.mapNotNull { runCatching { it.close() }.exceptionOrNull() }
     failures.firstOrNull()?.let { throw it }
     val left = processes.filter { it.process.isAlive }
@@ -56,25 +60,27 @@ class PackagedEngineTest {
       database: DatabaseConfig,
       runtimeDir: Path,
       extra: Map<String, String> = emptyMap(),
+      without: Set<String> = emptySet(),
   ) =
       mapOf(
-          "PORT" to port.toString(),
-          "POSTGRES_URL" to database.url,
-          "POSTGRES_USER" to database.user,
-          "POSTGRES_PASSWORD" to database.password,
-          "API_TOKENS" to "alice:developer:tok-alice-0123456789,root:admin:tok-root-0123456789",
-          "RUNLINE_SHARED_ROOT" to work.resolve("shared").toString(),
-          "RUNLINE_RUN_ROOT" to work.resolve("runs").toString(),
-          "RUNLINE_RESOURCE_ROOT" to work.resolve("resources").toString(),
-          "RUNLINE_WORKSPACE_MAX_BYTES" to "1000000",
-          "RUNLINE_FAILED_RUN_RETENTION_SECONDS" to "3600",
-          "RUNLINE_MAX_CONCURRENT_RUNS" to "2",
-          "RUNLINE_RUNTIME_DIR" to runtimeDir.toString(),
-          "RUNLINE_SHUTDOWN_GRACE_SECONDS" to "5",
-          "OTEL_TRACES_EXPORTER" to "none",
-          "OTEL_LOGS_EXPORTER" to "none",
-          "OTEL_METRICS_EXPORTER" to "none",
-      ) + extra
+              "PORT" to port.toString(),
+              "POSTGRES_URL" to database.url,
+              "POSTGRES_USER" to database.user,
+              "POSTGRES_PASSWORD" to database.password,
+              "API_TOKENS" to "alice:developer:tok-alice-0123456789,root:admin:tok-root-0123456789",
+              "RUNLINE_SHARED_ROOT" to work.resolve("shared").toString(),
+              "RUNLINE_RUN_ROOT" to work.resolve("runs").toString(),
+              "RUNLINE_RESOURCE_ROOT" to work.resolve("resources").toString(),
+              "RUNLINE_WORKSPACE_MAX_BYTES" to "1000000",
+              "RUNLINE_FAILED_RUN_RETENTION_SECONDS" to "3600",
+              "RUNLINE_MAX_CONCURRENT_RUNS" to "2",
+              "RUNLINE_RUNTIME_DIR" to runtimeDir.toString(),
+              "RUNLINE_SHUTDOWN_GRACE_SECONDS" to "5",
+              "OTEL_TRACES_EXPORTER" to "none",
+              "OTEL_LOGS_EXPORTER" to "none",
+              "OTEL_METRICS_EXPORTER" to "none",
+          )
+          .minus(without) + extra
 
   private fun launch(
       description: String,
@@ -115,11 +121,12 @@ class PackagedEngineTest {
       database: DatabaseConfig,
       runtimeDir: Path,
       extra: Map<String, String> = emptyMap(),
+      without: Set<String> = emptySet(),
   ): ManagedProcess {
     val process =
         launch(
             "the packaged Engine",
-            environment(database, runtimeDir, extra),
+            environment(database, runtimeDir, extra, without),
             "-jar",
             dist.resolve("engine.jar").toString(),
             log = "engine.log",
@@ -1166,7 +1173,185 @@ class PackagedEngineTest {
     assertTrue("java.lang" in names, names.toString())
   }
 
+  // ---- metrics export and the warning of a full queue (#64) ----
+
+  /**
+   * A packaged Engine with a keystore and a `trace-export` resource named `tracing` that points at
+   * [traces], and a run of a pipeline that submits [spans] spans carrying a marker in an attribute.
+   * Returns the run's id.
+   */
+  private fun tracedRun(
+      traces: OtlpReceiver,
+      spans: Int,
+      env: Map<String, String>,
+      without: Set<String> = emptySet(),
+  ): String {
+    val database = PostgresTestContainer.newDatabase()
+    val runtime = dist.resolve("run-runtime")
+    migrate(database, runtime)
+    val keystores = Keystores(Files.createTempDirectory(work, "keystore"))
+    val file = keystores.pkcs12("engine.p12", mapOf("langfuse-auth" to TRACE_KEY), STOREPASS)
+    val passwordFile = keystores.passwordFile(STOREPASS, "engine.pw")
+    startEngine(
+        database,
+        runtime,
+        mapOf(
+            "RUNLINE_KEYSTORE_PATH" to file.toString(),
+            "RUNLINE_KEYSTORE_PASSWORD_FILE" to passwordFile.toString(),
+        ) + env,
+        without,
+    )
+    val define =
+        send(
+            "POST",
+            "/api/v1/resources",
+            ROOT,
+            ("""{"name":"tracing","capacity":1000000,"type":"trace-export","secretAlias":"langfuse-auth",""" +
+                    """"settings":{"endpoint":"${traces.endpoint}","serviceName":"packaged"}}""")
+                .toByteArray(),
+            "application/json",
+        )
+    assertEquals(201, define.statusCode(), define.body())
+    val body =
+        """
+        for (int i = 0; i < $spans; i++) {
+          java.util.HashMap<String, Object> attributes = new java.util.HashMap<String, Object>();
+          attributes.put("note", "$SPAN_MARKER");
+          context.getAccessors().traceExport("tracing").submit(new SpanRecord("s", java.time.Instant.now(), java.time.Instant.now(), SpanStatus.OK, null, attributes, "id" + i, null));
+        }
+        """
+            .trimIndent()
+    val hash =
+        uploadAllowed(
+            "demo.Traced",
+            "traced",
+            RunHarness.usingTyped("tracing" to "trace-export"),
+            body,
+        )
+    return startRun(hash, "traced")
+  }
+
+  private fun receiver(): OtlpReceiver = OtlpReceiver().also { receivers += it }
+
+  private fun assertNoLeak(what: String, text: String) {
+    for (marker in listOf(TRACE_KEY, SPAN_MARKER, STOREPASS)) {
+      assertFalse(text.contains(marker), "$what holds $marker")
+    }
+  }
+
+  private fun assertSucceeded(runId: String) =
+      assertEquals(
+          "SUCCEEDED",
+          awaitState(runId, "SUCCEEDED", "FAILED")["state"]!!.jsonPrimitive.content,
+          tail("engine.log"),
+      )
+
+  @Test
+  fun `the packaged Engine exports its metrics to a real OTLP receiver when the standard variables say so`() {
+    val traces = receiver()
+    val collector = receiver()
+
+    val runId =
+        tracedRun(
+            traces,
+            spans = 3,
+            env =
+                mapOf(
+                    "OTEL_METRICS_EXPORTER" to "otlp",
+                    "OTEL_EXPORTER_OTLP_ENDPOINT" to collector.baseUrl,
+                    "OTEL_EXPORTER_OTLP_PROTOCOL" to "http/protobuf",
+                    "OTEL_METRIC_EXPORT_INTERVAL" to "300",
+                    "RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS" to "100",
+                ),
+        )
+
+    assertSucceeded(runId)
+    awaitCondition("the spans at the trace receiver", diagnostics = { tail("engine.log") }) {
+      traces.spans.size == 3
+    }
+    awaitCondition(
+        "the export counts at the metrics receiver",
+        diagnostics = { "${collector.metricNames}\n${tail("engine.log")}" },
+    ) {
+      "runline.trace_export.spans.exported" in collector.metricNames &&
+          "runline.trace_export.exports" in collector.metricNames
+    }
+    for (request in collector.requests) {
+      assertNoLeak("a metrics request", String(request.body, Charsets.ISO_8859_1))
+    }
+    assertNoLeak("the Engine's log", output("engine.log"))
+  }
+
+  @Test
+  fun `the packaged Engine sends no metrics and stops at once when no metrics exporter is set`() {
+    val traces = receiver()
+    val collector = receiver()
+
+    val runId =
+        tracedRun(
+            traces,
+            spans = 3,
+            env =
+                mapOf(
+                    "OTEL_EXPORTER_OTLP_ENDPOINT" to collector.baseUrl,
+                    "OTEL_METRIC_EXPORT_INTERVAL" to "300",
+                    "RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS" to "100",
+                ),
+            without = setOf("OTEL_METRICS_EXPORTER"),
+        )
+    assertSucceeded(runId)
+    awaitCondition("the spans at the trace receiver", diagnostics = { tail("engine.log") }) {
+      traces.spans.size == 3
+    }
+    Thread.sleep(1500) // several export intervals
+
+    val engine = processes.last()
+    val started = System.nanoTime()
+    engine.terminate()
+    assertEquals(0, engine.awaitExit(TestTimeouts.processExit), output("engine.log"))
+    val tookMillis = (System.nanoTime() - started) / 1_000_000
+
+    assertTrue(collector.requests.isEmpty(), "${collector.requests.map { it.path }}")
+    assertTrue(tookMillis < 5000, "stopping took $tookMillis ms")
+  }
+
+  @Test
+  fun `the warning of a full trace-export queue is in the Engine's log, not in the run's, and says nothing of the spans`() {
+    val traces = receiver()
+    traces.hang = true
+
+    val runId =
+        tracedRun(
+            traces,
+            spans = 300,
+            env =
+                mapOf(
+                    "RUNLINE_TRACE_EXPORT_QUEUE_SIZE" to "10",
+                    "RUNLINE_TRACE_EXPORT_BATCH_SIZE" to "5",
+                    "RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS" to "50",
+                    "RUNLINE_TRACE_EXPORT_EXPORT_TIMEOUT_MILLIS" to "30000",
+                    "RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS" to "300",
+                ),
+        )
+
+    assertSucceeded(runId)
+    awaitCondition("the warning in the Engine's log", diagnostics = { tail("engine.log") }) {
+      output("engine.log").lines().any {
+        it.contains("WARN") &&
+            it.contains("trace-export resource tracing dropped") &&
+            it.contains("queue_full")
+      }
+    }
+    val runLog = logLines(runId)
+    assertTrue(runLog.none { it.contains("queue_full") }, "the run's log: $runLog")
+    assertNoLeak("the Engine's log", output("engine.log"))
+    assertNoLeak("the run's log", runLog.joinToString("\n"))
+  }
+
   private companion object {
+    const val TRACE_KEY = "Basic marker-trace-key-64"
+    const val STOREPASS = "marker-storepass-64"
+    const val SPAN_MARKER = "marker-span-attribute-64"
     const val ALICE = "tok-alice-0123456789"
     const val ROOT = "tok-root-0123456789"
   }

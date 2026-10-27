@@ -1,7 +1,9 @@
 package dev.lawlan.runline.engine.resource
 
+import ch.qos.logback.classic.Level
 import dev.lawlan.runline.analyzer.AllowListEntry
 import dev.lawlan.runline.analyzer.Verdict
+import dev.lawlan.runline.engine.artifact.Visibility
 import dev.lawlan.runline.engine.config.TraceExportTuning
 import dev.lawlan.runline.engine.run.RunState
 import dev.lawlan.runline.engine.secret.KeystoreSecretStore
@@ -233,6 +235,32 @@ class TraceExportRunTest {
   }
 
   @Test
+  fun `the warning of a full queue is the Engine's, not a line of the run that filled it`() {
+    receiver.hang = true
+    val tuning =
+        QUICK_TRACE_EXPORT.copy(
+            queueSize = 10,
+            batchSize = 5,
+            exportTimeout = Duration.ofSeconds(30),
+            flushWait = Duration.ofMillis(300),
+        )
+    val h = harness(tuning)
+    h.defineTraceExport("tracing", receiver.endpoint)
+    val flood = "for (int i = 0; i < 200; i++) {\n" + span("s", "x") + "\n}"
+    val hash = h.upload("flood", flood, declaration = declaration)
+
+    val id = h.start(hash, "flood")
+    val run = h.awaitEnd(id)
+
+    assertEquals(RunState.SUCCEEDED, run.state, run.failure?.message)
+    await("the Engine's warning") {
+      logs.at(Level.WARN).any { it.contains("trace-export") && it.contains("queue_full") }
+    }
+    val runLog = h.catalog.log(id, Visibility.All, 0, 10_000)!!.map { it.line }
+    assertTrue(runLog.none { it.contains("queue_full") }, "the run's log: $runLog")
+  }
+
+  @Test
   fun `a receiver that answers with an error costs the batch, not the run`() {
     receiver.answer = { 500 }
     val h = harness()
@@ -249,7 +277,7 @@ class TraceExportRunTest {
           .flatMap { it.longSumData.points }
           .sumOf { it.value } == 2L
     }
-    assertTrue(logs.lines.any { it.contains("trace-export resource tracing dropped") })
+    await("the warning") { logs.lines.any { it.contains("trace-export resource tracing dropped") } }
   }
 
   // ---- keys and endpoints ----

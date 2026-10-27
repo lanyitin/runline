@@ -140,6 +140,7 @@ class TraceExportFailureTest {
       rig.count("runline.trace_export.spans.dropped", "reason" to "export_failed") == 20L
     }
 
+    await("the warning") { warnings().isNotEmpty() }
     assertEquals(1, warnings().size, warnings().toString())
   }
 

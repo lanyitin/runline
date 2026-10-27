@@ -1,6 +1,6 @@
 # #64 Engine 指標匯出與 trace-export 佇列滿警告進 Engine log
 
-本文回答：要達成什麼行為、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#64。背景見 [README](../README.md)，上游決策見 [ADR-46](../../trace-export/adr/ADR-46-trace-export-resource.md)。相依：無（#50 至 #53 已完成）。
+本文回答：要達成什麼行為、如何驗收。狀態：已完成（2026-10-27；PR #68）。Issue：#64。背景見 [README](../README.md)，上游決策見 [ADR-46](../../trace-export/adr/ADR-46-trace-export-resource.md)。相依：無（#50 至 #53 已完成）。
 
 ## 行為
 

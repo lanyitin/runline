@@ -39,7 +39,7 @@ Pipeline 定義與共享資源之間以名稱鬆散關聯（虛線）：定義�
 | OIDC User | 識別碼、provider 的 issuer 與 subject、runline 內的名稱、顯示名稱、建立時間、最近登入時間 | 登入過的人（[ADR-029](../oidc-login/adr/ADR-029-oidc-login-with-server-session.md)，遷移 `V11__oidc_login.sql`）；（issuer，subject）唯一；名稱唯一，首次登入時取 `preferred_username`，之後不變，擁有權資料（上傳者、綁定等）仍以名稱保存、不引用此表；名稱不得等於 `API_TOKENS` 的名稱（由 Engine 在登入與啟動時檢查，token 不在資料庫）；不保存密碼、email、token、群組；不因 provider 改名或移出群組而刪除；停用狀態（`disabled`）與最近一次停用／啟用的操作者與時間（`status_changed_by`／`status_changed_at`，`V13__revalidation_and_user_disable.sql`）：被停用者的工作階段在同一交易內刪除，且不能登入，登入時以對使用者列的鎖與停用互斥，並行下不會留下工作階段 |
 | User Session | 識別碼的 SHA-256、所屬使用者、登入當下的角色、CSRF token、加密的 refresh token（必有，`V12__session_refresh_token_required.sql`；沒有 refresh token 的登入不成立）、建立／最近使用／最近成功驗證時間、到期時間 | 識別碼只在使用者的 cookie，資料庫只有雜湊；refresh token 以 AES-256-GCM 加密並綁定該工作階段，金鑰不在資料庫；有效 = 未到到期時間 且 距最近使用未超過閒置時間（閒置時間是組態，不存），過期即無效、不依賴清理；登出刪除。另有管理用的代號 `public_id`（不是識別碼，不能登入）與最近一次向 provider 驗證失敗的嘗試時間 `last_attempt_at`（`V13`；失敗的驗證每個間隔最多一次，寬限從最近一次成功起算）；重新驗證的結果（角色、新的 refresh token、驗證時間）寫入此列，同一工作階段的檢查以資料庫的 advisory lock 輪流進行 |
 | Login Attempt | state、nonce、PKCE 驗證碼、返回路徑、建立時間 | 短效（10 分鐘）、單次使用：消耗（讀取並刪除）是一個語句，同一 state 只成功一次；逾時的視為不存在 |
-| Shared Resource | 名稱、型別（`counter`、`file`、`jdbc-pool`、`openai-compatible`，建立後不可改）、容量、啟用旗標、型別專屬的非機密設定、機密別名、最近一次實體檢查的結果與時間、建立者與時間、修改者與時間 | 由管理員維護；名稱為識別；機密值不入庫，只存金鑰庫別名（[ADR-019](adr/ADR-019-typed-shared-resources.md)）；設定或別名被修改時，最近一次檢查結果清除；持有者與等待者是執行期狀態，存於 Engine 記憶體，不入庫 |
+| Shared Resource | 名稱、型別（`counter`、`file`、`jdbc-pool`、`openai-compatible`、`trace-export`，建立後不可改）、容量、啟用旗標、型別專屬的非機密設定、機密別名、最近一次實體檢查的結果與時間、建立者與時間、修改者與時間 | 由管理員維護；名稱為識別；機密值不入庫，只存金鑰庫別名（[ADR-019](adr/ADR-019-typed-shared-resources.md)）；設定或別名被修改時，最近一次檢查結果清除；持有者與等待者是執行期狀態，存於 Engine 記憶體，不入庫 |
 
 ## 一致性與交易邊界
 

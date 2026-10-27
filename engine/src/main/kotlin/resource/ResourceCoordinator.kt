@@ -131,9 +131,14 @@ class ResourceCoordinator(
         if (removals != removalsSeen) return@synchronized
         val problems = inspection.problemsFor(pipeline, roles, run.roleTypes)
         if (problems.isNotEmpty()) return refuse(run, inspection, problems)
-        // Roles that lead to the same resource take its capacity once (ADR-025).
-        val byRole = roles.associateWith { inspection.resolve(pipeline, it).resource }
+        // Roles that lead to the same resource take its capacity once (ADR-025). A role of tracing
+        // that has no resource to use is left out: it holds nothing (ADR-46 decision 5).
+        val byRole =
+            roles
+                .filterNot { inspection.resolve(pipeline, it).isLeftOut(run.roleTypes[it]) }
+                .associateWith { inspection.resolve(pipeline, it).resource }
         val names = byRole.values.distinct()
+        if (names.isEmpty()) return GateDecision.GRANTED
         if (holds[run.id]?.resources?.containsAll(names) == true) return GateDecision.GRANTED
         val grantable = names.all { name ->
           holders(name) < inspection.defined.getValue(name).capacity && !waiterAhead(name, run.id)

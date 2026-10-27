@@ -12,7 +12,10 @@ enum class ResourceType(
   COUNTER("counter"),
   FILE("file"),
   JDBC_POOL("jdbc-pool"),
-  OPENAI_COMPATIBLE("openai-compatible");
+  OPENAI_COMPATIBLE("openai-compatible"),
+
+  /** Spans exported to an OTLP endpoint with a key of the keystore (ADR-46). */
+  TRACE_EXPORT("trace-export");
 
   companion object {
     /** The type named [wireName], or null when the name is not in the closed set. */

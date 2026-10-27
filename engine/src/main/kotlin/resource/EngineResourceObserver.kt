@@ -37,6 +37,9 @@ internal class EngineResourceObserver(
     }
     // A pull of a stream is no span: the stream has one of its own, from its opening to its end.
     if (operation == "openai.stream.next") return body()
+    // A span a pipeline hands over is not an operation worth a span of the Engine's own: a pipeline
+    // may submit thousands, and what is counted of them has its own metrics (ADR-46).
+    if (type == ResourceType.TRACE_EXPORT.wireName) return body()
     val span = traces.resourceOperation(runId, actual, type, operation)
     // Current for as long as the operation runs, so that what the type reports about it (the time
     // a request waited, the time to its first byte) lands on this span.

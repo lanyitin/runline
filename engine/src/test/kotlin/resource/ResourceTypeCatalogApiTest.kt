@@ -33,7 +33,7 @@ class ResourceTypeCatalogApiTest : ResourceApiSupport() {
         engine()
 
         assertEquals(
-            listOf("counter", "file", "jdbc-pool", "openai-compatible"),
+            listOf("counter", "file", "jdbc-pool", "openai-compatible", "trace-export"),
             types().map { it.text("type") },
         )
         assertEquals(HttpStatusCode.Forbidden, catalog(TestTokens.ALICE).status)

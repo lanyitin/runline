@@ -228,7 +228,7 @@ Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engin
 
 **資源角色與用途（[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)）。** pipeline 宣告的是「資源角色」：`metadata.resources[]` 的每個名稱是一個角色，名稱同時是 pipeline 程式取用存取端的名稱（pipeline 看不到實際的資源名稱）；角色實際使用哪個共享資源由綁定決定（見「資源角色與綁定」），沒有綁定時是與角色同名的資源，所以只宣告名稱或名稱加型別的既有 jar 不需重新上傳，行為不變。`metadata.resourcePurposes` 是角色名稱到「用途說明」的對照，只含寫了用途的角色（沒有任何用途時為 `{}`）；用途是供人閱讀的短文字，**最長 200 個字元**（超過則上傳被拒絕為 `resource_purpose_too_long`），不影響 safe 或 unsafe 判定，也不影響綁定與取得資源的任何判定。用途承載於型別宣告：`@TypedResource(name, type, purpose = "...")` 的選填成員 `purpose`（預設為空，空字串視為沒有）；因此用途一定隨一個型別一起宣告，只宣告名稱的角色沒有用途。這個成員在 core 的註解、analyzer 讀 class 檔的統一 metadata 讀取路徑（Engine 上傳、開發入口、查詢都用它）上只有一種讀法：註解上沒有 `purpose` 成員的既有 jar 讀為沒有用途，不破壞既有 jar 的讀取；錄製（[ADR-004](adr/ADR-004-recording.md)）產生的 metadata 提案不含用途，開發人員自行補寫。
 
-`metadata.resources[]` 是 pipeline 宣告的全部資源角色名稱；`metadata.resourceTypes` 是名稱到「期望型別」的對照，只含另外宣告了型別的名稱（型別取自 `counter`、`file`、`jdbc-pool`、`openai-compatible`，即使該型別尚未實作也可宣告），只宣告名稱者不在其中，沒有任何型別宣告時為 `{}`。型別宣告不影響 safe 或 unsafe 判定。
+`metadata.resources[]` 是 pipeline 宣告的全部資源角色名稱；`metadata.resourceTypes` 是名稱到「期望型別」的對照，只含另外宣告了型別的名稱（型別取自 `counter`、`file`、`jdbc-pool`、`openai-compatible`、`trace-export`，即使該型別尚未實作也可宣告），只宣告名稱者不在其中，沒有任何型別宣告時為 `{}`。型別宣告不影響 safe 或 unsafe 判定。
 
 **view 宣告（[ADR-033](../pipeline-views/adr/ADR-033-pipeline-views.md)）。** `metadata.views[]` 是 pipeline 宣告的唯讀 view，依宣告順序；沒有宣告時為 `[]`，不含 view 的既有 jar 與儲存的既有 metadata 都讀為 `[]`，行為不變。宣告只是 metadata：讀取它不執行 pipeline 邏輯（[ADR-003](adr/ADR-003-jar-and-discovery.md)），不影響 safe 或 unsafe 判定，也不影響資源角色與綁定的任何判定；它隨版本保存，由上傳回應、`GET /api/v1/artifacts/{contentHash}` 與 `GET /api/v1/definitions` 原樣回傳（本項不執行 view 的查詢）。每個 view：
 
@@ -244,7 +244,7 @@ Provider 帶 `code` 與 `state`（或 `error`）把瀏覽器送回這裡。Engin
 
 上傳時驗證，任一項不合格即整個 jar 拒絕為 `view_declaration_invalid`（不留下資料），`message` 列出全部問題，每項指出 pipeline、view 與問題：view 識別重複；掛載的角色未宣告，或宣告的型別不是 `jdbc-pool`（含沒有宣告型別）；鑽取的目標 view 不存在、要帶入的參數不是目標 view 的參數、取值的欄位不是本 view 的欄位；同一 view 內欄位名稱或參數名稱重複；欄位型別、參數型別或語氣不在上列允許的集合；`CHOICE` 參數沒有選項；預設排序的欄位不是本 view 的欄位；查詢的具名佔位符指向沒有宣告的參數、已宣告的參數沒有被查詢引用、查詢使用位置參數標記 `?`（[ADR-034](../pipeline-views/adr/ADR-034-view-parameter-binding.md)，規則見「查詢與參數」；佔位符的檢查只讀查詢文字，因為資料庫要到綁定資源時才知道，所以文字依 PostgreSQL 與 SQLite 兩種語法各讀一次，任一種讀到的佔位符都算，兩種都讀不完的文字交給讀取時判定）。作者端的註解寫法見 [core 的說明](../../../core/README.md)。
 
-`warnings[].kind` 的值（只是警告，不影響判定與上傳結果；資源之後被定義、改變或綁定時，查詢時重新計算，依「綁定後的結果」：角色綁定到某資源時，警告針對該資源，`resource` 為該資源的名稱，`message` 另說明是哪個角色；沒有綁定的角色針對同名資源，與先前相同）：`resource_unknown`（宣告的資源尚未定義）、`resource_disabled`（已停用）、`resource_type_mismatch`（資源的型別與宣告的型別不同）、`resource_type_unknown`（宣告的型別不在 `counter`、`file`、`jdbc-pool`、`openai-compatible` 之內；建立 run 時視為型別不符）、`network_host_has_resource`（`network` 宣告的主機與某個 `openai-compatible` 資源的根位址主機相同，不分大小寫；提示應改經由資源存取，`resource` 為該資源；使用資源不需要在 `network` 宣告其主機，也不使 `network` 變成不限制）。每項含 `kind`、`resource`、`message`。
+`warnings[].kind` 的值（只是警告，不影響判定與上傳結果；資源之後被定義、改變或綁定時，查詢時重新計算，依「綁定後的結果」：角色綁定到某資源時，警告針對該資源，`resource` 為該資源的名稱，`message` 另說明是哪個角色；沒有綁定的角色針對同名資源，與先前相同）：`resource_unknown`（宣告的資源尚未定義）、`resource_disabled`（已停用）、`resource_type_mismatch`（資源的型別與宣告的型別不同）、`resource_type_unknown`（宣告的型別不在 `counter`、`file`、`jdbc-pool`、`openai-compatible`、`trace-export` 之內；建立 run 時視為型別不符）、`network_host_has_resource`（`network` 宣告的主機與某個 `openai-compatible` 資源的根位址主機相同，不分大小寫；提示應改經由資源存取，`resource` 為該資源；使用資源不需要在 `network` 宣告其主機，也不使 `network` 變成不限制）。每項含 `kind`、`resource`、`message`。宣告為 `trace-export` 的角色是選用的（[ADR-46](../trace-export/adr/ADR-46-trace-export-resource.md)）：沒有綁定到存在的資源、或資源已停用時，不產生 `resource_unknown` 與 `resource_disabled`，建立 run 也不因此被拒絕（見「`trace-export` 型別」）；型別不符照常警告。
 
 `reasons[].kind` 的值：`UNRESTRICTED_ACCESS`（網路或行程未設限，`category`）、`NOT_ALLOW_LISTED`（白名單外的類別，`className` 與 `path[]`）、`JVM_EXIT`（參照 JVM 結束成員，`member` 與 `path[]`）、`IO_SENSITIVE_MEMBER`（參照 IO 敏感成員：啟動外部行程、載入原生程式碼，或在基礎套件內可直接開啟檔案或網路的成員，`member` 為含描述子的成員名稱，`path[]` 為從 pipeline 到該參照的路徑，不受套件白名單豁免，[ADR-013](adr/ADR-013-io-sensitive-members.md)）、`UNREADABLE_CLASS`（類別檔無法解析，`className`、`path[]`、`detail`）、`LIMIT_EXCEEDED`（分析超出時間或大小預算，`detail`）。新增 `IO_SENSITIVE_MEMBER` 之前已儲存的判定仍照原樣讀取與顯示，不會被自動重判。
 
@@ -359,7 +359,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 資源由管理員定義，pipeline 在 metadata 中宣告需要的資源角色（名稱），另可宣告期望的型別與用途；角色實際使用哪個資源由綁定決定，沒有綁定時是與角色同名的資源（[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)，見「資源角色與綁定」）；規則見 [ADR-007](adr/ADR-007-shared-resources.md) 與 [ADR-019](adr/ADR-019-typed-shared-resources.md)。資源的建立、修改與刪除仍只有管理員；開發人員只能在「資源角色與綁定」的端點中，從既有的資源裡選擇。名稱 1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭。
 
-資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。封閉集合內的型別都可建立：`counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）、`jdbc-pool`（一個資料庫的連線池，資料庫種類為 PostgreSQL 與 SQLite，見下方「`jdbc-pool` 型別」）與 `openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
+資源有型別，取自封閉集合：`counter`、`file`、`jdbc-pool`、`openai-compatible`、`trace-export`；沒有外掛或註冊型別的方式。型別與名稱在建立後不可修改（要換型別就刪除後重新建立）。封閉集合內的型別都可建立：`counter`（只有名稱與容量，也就是資源原本的語意）、`file`（Engine 主機上資源根目錄之下的一個檔案）、`jdbc-pool`（一個資料庫的連線池，資料庫種類為 PostgreSQL 與 SQLite，見下方「`jdbc-pool` 型別」）、`openai-compatible`（一個 OpenAI 相容服務，見下方「`openai-compatible` 型別」）與 `trace-export`（把 pipeline 提交的 span 匯出到一個 OTLP 端點，見下方「`trace-export` 型別」）。機密的清單與重載端點見下一節「機密（管理員）」；資源以別名引用機密，別名的狀態見下方資源欄位的 `secretStatus`。
 
 資源的欄位（建立、查詢、列表與修改的回傳相同）：`name`、`type`、`capacity`、`enabled`、`settings`（型別專屬的非機密設定，物件；`counter` 為 `{}`）、`secretAlias`（機密在金鑰庫中的別名，一律是小寫的正規化形式，沒有時為 `null`；機密值不會出現在任何回應）、`secretStatus`（別名對金鑰庫的狀態：`not_set` 未設定別名、`found` 金鑰庫有這個機密項目且可使用、`missing` 設定了別名但金鑰庫沒有該別名或 Engine 沒有組態金鑰庫、`invalid_secret` 別名存在但機密值含非可列印 ASCII 而不被使用、`wrong_type` 別名存在但不是機密項目（例如在建立後的重載中被換成憑證）；永遠不含機密值，金鑰庫重載後隨之變化）、`trustStatus`（`openai-compatible` 與 `jdbc-pool` 的 `settings.trustAliases` 每個別名對金鑰庫的狀態，依設定順序，每項 `{alias, status}`；`status` 為 `found`、`missing`、`wrong_type`（不是受信任憑證項目）；沒有信任別名時為 `[]`，[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）、`clientCertStatus`（`settings.clientCertAlias` 的狀態：`not_set`、`found`、`missing`、`wrong_type`（不是私鑰項目）、`invalid_key`（私鑰項目不能以金鑰庫密碼開啟，見「機密（管理員）」））、`concurrencyLimit`（Engine 推導的「整體並行上限」：容量乘以每 run 同時請求數（`openai-compatible`）或每 run 連線數（`jdbc-pool`，也就是連線池的大小），其他型別為 `null`）、`usage`（型別專屬的使用量：`openai-compatible` 為 `{"inFlightRequests": n}`，目前進行中的請求數；`jdbc-pool` 為 `{"activeConnections": n}`，run 目前持有的連線數（run 在結束前持有它用到的連線，閒置也計入），含所有世代；其他型別為 `null`，型別沒有的成員不出現）、`lastCheck`（最近一次實體檢查的結果，見下，時間的精度與格式見[通則](#通則)；從未檢查、或設定或別名在檢查後被修改時為 `null`）、`createdBy`、`createdAt`、`updatedBy`、`updatedAt`、`holders[]`（`runId`、`pipeline`、`heldSince`、`heldSeconds`）、`waiters[]`（依服務順序；`runId`、`pipeline`、`waitingFor[]`、`waitingSince`、`waitedSeconds`），以及 `declaredBy`：經由角色引用了這個資源的 pipeline 定義（角色綁定到這個資源，或沒有綁定而與資源同名；綁定到別的資源的角色不算，[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)），`count`（定義數，同一定義有多個角色引用同一資源時只算一個）、`triggers`（綁在這些定義上的 trigger 數，每個只算一次）、`definitions[]`（綁定以上傳者的 pipeline 為單位，所以只有該上傳者的定義會經由其綁定引用資源；資源 API 只有管理員可讀，開發人員得到 403，不會看到任何宣告者，含自己的；每個引用一項，同一定義的多個角色各一項：`contentHash`、`uploader`、`pipeline`、`role`（引用它的角色名稱）、`declaredType`（該定義替這個角色宣告的型別，只宣告名稱時為 `null`）、`triggers`）。
 
@@ -368,14 +368,14 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `problem` | 意義 |
 |---|---|
 | `name` | 名稱不合規 |
-| `capacity` | 容量小於 1 |
+| `capacity` | 容量小於 1；或型別固定容量（`trace-export`）而給了與固定值不同的容量（建立與修改都一樣） |
 | `nothing_to_change` | 修改沒有要改的欄位 |
 | `unknown_type` | 型別不在封閉集合內 |
 | `unsupported_type` | 型別在集合內，但尚未實作，還不能建立（保留給日後新增的型別；目前集合內的型別都已實作） |
-| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串；`openai-compatible` 必填 `baseUrl`，且不接受清單以外的欄位，包括任何形式的金鑰、路徑與標頭；`jdbc-pool` 必填 `kind`，其餘依種類：`postgresql` 必填 `host`、`database`、`username`，`sqlite` 必填 `path`；不接受連線字串、密碼、驅動、別種資料庫的欄位（`sqlite` 不接受 `host`、`port`、`database`、`username`、`trustAliases`、`clientCertAlias`）與清單以外的任何欄位，位址欄位含有可以多帶東西的字元，`path` 不是一般的相對檔名，或額外屬性的值不合該屬性的規則） |
+| `invalid_settings` | 這個型別沒有這些設定欄位（`counter` 沒有任何設定），或缺少必要欄位（`file` 只有 `path`，必填，非空字串；`openai-compatible` 必填 `baseUrl`，且不接受清單以外的欄位，包括任何形式的金鑰、路徑與標頭；`trace-export` 必填 `endpoint` 與 `serviceName`（非空文字，最長 100 個字元，不含控制字元），另可有 `trustAliases` 與 `clientCertAlias`（只在 `endpoint` 為 `https` 時），不接受其他欄位；`jdbc-pool` 必填 `kind`，其餘依種類：`postgresql` 必填 `host`、`database`、`username`，`sqlite` 必填 `path`；不接受連線字串、密碼、驅動、別種資料庫的欄位（`sqlite` 不接受 `host`、`port`、`database`、`username`、`trustAliases`、`clientCertAlias`）與清單以外的任何欄位，位址欄位含有可以多帶東西的字元，`path` 不是一般的相對檔名，或額外屬性的值不合該屬性的規則） |
 | `unsupported_database` | `jdbc-pool` 的 `kind` 不是這個 Engine 內建資料庫設定檔的種類（目前為 `postgresql` 與 `sqlite`，大小寫須相符） |
 | `property_not_allowed` | `jdbc-pool` 的 `properties` 含有不在該資料庫允許清單內的連線屬性：載入類別（socket 與 SSL 工廠、認證外掛、密碼回呼）、寫檔（日誌）、機密（`user`、`password`、`passfile`）、改連到別處（`options`、多主機、目標伺服器種類）與一切 TLS 相關的屬性都不在清單內 |
-| `invalid_base_url` | `openai-compatible` 的 `baseUrl` 不是自成一格的 `http` 或 `https` 位址：含使用者資訊、查詢、片段、`.` 或 `..` 片段，或不可列印字元 |
+| `invalid_base_url` | `openai-compatible` 的 `baseUrl`（`trace-export` 的 `endpoint`）不是自成一格的 `http` 或 `https` 位址：含使用者資訊、查詢、片段、`.` 或 `..` 片段，或不可列印字元 |
 | `invalid_header` | `openai-compatible` 的額外標頭（`headers`）、`organization` 或 `project` 不合規：名稱含 `auth`、`key`、`token`、`secret`、`cookie`（不分大小寫），是 Engine 自己設定或決定請求框架的標頭（`Host`、`Content-Type`、`Content-Length`、`Accept`、`Connection`、`Transfer-Encoding`、`OpenAI-Organization`、`OpenAI-Project` 等），名稱不是標頭名稱，或值含換行與其他控制字元 |
 | `invalid_endpoint` | `endpoints` 含不在端點目錄內的名稱、這個版本尚未提供的條目（目前沒有：目錄的每個條目都已提供），或為空 |
 | `invalid_request_defaults` | `defaults`、`allowedModels`、`lockedParameters` 或 `maxValues` 不合規：只有模型與取樣、長度相關的參數可以設定，值須是該參數的型別，預設不得違反同一資源的模型清單與上限 |
@@ -383,7 +383,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 | `invalid_limit` | `requestsPerRun`、`maxRequestBytes`、`maxResponseBytes` 或 `maxDownloadBytes`（`openai-compatible`），`connectionsPerRun`、`maxRows` 或 `maxResponseBytes`（`jdbc-pool`）超出允許範圍 |
 | `path_outside_root` | `file` 的路徑，或 `jdbc-pool` 在 `sqlite` 種類的 `path`，不在資源根目錄內：絕對路徑、`..` 跳出根目錄，或路徑上的符號連結解析後跳出根目錄（`sqlite` 的符號連結在建立時只看文字，檔案實際被開啟與檢查時才解析） |
 | `path_unusable` | `file` 的路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫 |
-| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file`、以及 `sqlite` 種類的 `jdbc-pool` 沒有），或別名不合規（格式同資源名稱：1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭）；`settings.trustAliases` 與 `settings.clientCertAlias` 的別名同此規則 |
+| `invalid_secret_alias` | 這個型別沒有機密別名（`counter`、`file`、以及 `sqlite` 種類的 `jdbc-pool` 沒有），或 `trace-export` 沒有給別名（必填），或別名不合規（格式同資源名稱：1 至 100 個字元，字母、數字、`.`、`_`、`-`，以字母或數字開頭）；`settings.trustAliases` 與 `settings.clientCertAlias` 的別名同此規則 |
 | `alias_wrong_type` | 別名存在於金鑰庫，但項目類型與欄位不符（[WI-52](work-items/WI-52-tls-trust-and-mtls.md)）：`secretAlias` 只接受機密項目、`trustAliases` 只接受受信任憑證項目、`clientCertAlias` 只接受私鑰項目。建立與修改時檢查；金鑰庫沒有的別名不是錯誤（狀態為 `missing`） |
 | `immutable_name` | 修改嘗試帶了 `name`；名稱不可修改 |
 | `immutable_type` | 修改嘗試帶了 `type`；型別不可修改，值相同也一樣被拒絕 |
@@ -429,6 +429,42 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 - 取消、強制釋放與終止：進行中的上傳與下載立即中斷（服務端觀察到連線中斷），額度歸還，暫存檔移除。
 
 **整體並行上限**：容量是同時持有的 run 數，每個 run 同時進行的請求數受 `requestsPerRun` 限制，因此服務端的同時請求數不超過容量乘以 `requestsPerRun`；資源的 `concurrencyLimit` 回報這個乘積，每 run 上限維持 1 時，它就是容量（目標服務最高並行為 1 時，容量設 1）。限度：降低容量不從持有者手上收回資源，降低後到持有者結束之前，服務端的並行請求數可以暫時高於新的上限（`concurrencyLimit` 已是新值）；run 取消或被強制釋放時 Engine 立即關閉連線並歸還額度，但服務端是否隨連線中斷而停止生成取決於服務，不停止時服務端的真實並行可能短暫高於 Engine 的計數；容量 1 時整個服務同一時間只有一個 run 持有，其他 run 在初始化階段排隊，即使持有者暫時沒有請求。
+
+### `trace-export` 型別
+
+把 pipeline 提交的「完成後的 span」匯出到一個 OTLP 端點，例如 Langfuse（[ADR-46](../trace-export/adr/ADR-46-trace-export-resource.md)、[#51](../trace-export/work-items/51-engine-trace-export.md)）。pipeline 以 `context.accessors.traceExport(角色名稱).submit(span)` 提交（契約見 [core 的說明](../../../core/README.md)），不持有金鑰也不引用 OpenTelemetry；OpenTelemetry 的 SDK 與匯出器只在 Engine 的 class loader，run 的 class loader 沒有任何 OpenTelemetry 類別。
+
+`settings`：
+
+| 欄位 | 意義 |
+|---|---|
+| `endpoint` | 必填。OTLP/HTTP（protobuf）traces 訊號的完整位址，例如 `https://cloud.langfuse.com/api/public/otel/v1/traces`；Engine 不再附加路徑。規則同 `baseUrl`（`http` 或 `https`，不含使用者資訊、查詢與片段），違反為 `invalid_base_url`。重新導向不跟隨 |
+| `serviceName` | 必填。匯出的 span 所屬資源的 `service.name` |
+| `trustAliases`、`clientCertAlias` | 選填，只在 `endpoint` 為 `https` 時；意義與規則同其他型別（ADR-019 決策 12）：`trustAliases` 取代 JVM 預設信任，主機名稱一律驗證，沒有設定可以關閉 |
+
+`secretAlias` 必填：金鑰庫中「整串認證值」的別名，Engine 原樣作為匯出請求的 `Authorization` 標頭（Langfuse 為 `Basic <base64>`）。值須是可列印 ASCII（與所有機密相同，違反的別名狀態為 `invalid_secret`）。金鑰在每個批次送出時才從金鑰庫讀取，所以金鑰庫重載後下一個批次就用新金鑰，已在佇列中的 span 也用新金鑰送出，不需重新部署或重啟 run。金鑰值不出現在資料庫、API、log、metric、trace、錯誤與邊界。
+
+**容量固定。** 容量是固定值 `1000000`（近乎無限，取得容量永遠立即成功，run 不會因此等待）；管理員不能設定或修改：建立時 `capacity` 照常必填，但必須等於這個值，修改時帶不同的值（帶相同的值沒有影響）為 `invalid_resource` 的 `capacity`。Console 從 `GET /api/v1/resource-types` 的 `fixedCapacity` 得知這個值，表單顯示它且不讓使用者編輯。
+
+**選用的角色。** 宣告為 `trace-export` 的角色沒有綁定到存在的資源、或其資源已停用時，run 照常建立與執行：不取得容量、沒有存取端，pipeline 提交的 span 是空操作，行為與沒有 tracing 時相同；上傳時也不為此警告。型別與宣告不符（例如綁到 `counter`）照常為 `type_mismatch`。
+
+**匯出與緩衝。** 存取端收到 span 後立即返回；Engine 為 run 指派追蹤識別碼，同一個 run 的 span 屬於同一條 trace，父子關係依 pipeline 給的本地識別碼對應（子 span 先於父 span 提交也可以）。每個資源（同一份設定）一個匯出器與一個有界佇列，與 Engine 自身遙測的設定互不影響。佇列滿時丟棄新提交的 span 並計數；匯出失敗、逾時或別名缺失時丟棄該批（不重試）、計數、並記錄警告（同一資源同一原因每分鐘至多一則，只含資源名稱與 span 個數，不含任何 span 的內容）；都不阻塞 run，也不使 run 失敗。屬性內容不過濾，是否送出由管理員是否建立並綁定此資源決定，但屬性內容不出現在 Engine 的 log、metric 與錯誤訊息。run 結束時最多等待 `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` 讓佇列沖出，逾時即放棄。資源的設定被修改時，已持有它的 run 繼續用取得當下的匯出器，之後的 run 用新設定。
+
+**預設數值**（以 OpenTelemetry 批次處理器的量級起訂，全部由部署組態調整，一個值套用到所有 `trace-export` 資源；必須是正整數，否則 Engine 啟動失敗並指出鍵名）：
+
+| 環境變數 | 預設 | 意義 |
+|---|---|---|
+| `RUNLINE_TRACE_EXPORT_QUEUE_SIZE` | 2048 | 每個匯出器的佇列大小（span 數） |
+| `RUNLINE_TRACE_EXPORT_BATCH_SIZE` | 512 | 一個匯出請求的 span 數上限 |
+| `RUNLINE_TRACE_EXPORT_SCHEDULE_DELAY_MILLIS` | 5000 | span 等待更滿的批次的時間，之後照樣送出 |
+| `RUNLINE_TRACE_EXPORT_EXPORT_TIMEOUT_MILLIS` | 10000 | 一個匯出請求的時間上限，逾時丟棄該批 |
+| `RUNLINE_TRACE_EXPORT_FLUSH_WAIT_MILLIS` | 5000 | run 結束時等待沖出的時間 |
+| `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTES` | 128 | 每個 span 保留的屬性數；其餘依鍵排序後丟棄並計數 |
+| `RUNLINE_TRACE_EXPORT_MAX_ATTRIBUTE_LENGTH` | 8192 | 名稱、狀態訊息與文字屬性（含清單內的文字）保留的字元數；超過則截斷並計數 |
+
+**指標**（標籤只有 `resource` 與下列固定值，從不含 span 的名稱、屬性或訊息）：`runline.trace_export.spans.exported`（匯出成功的 span 數）、`runline.trace_export.spans.dropped`（丟棄的 span 數，`reason`：`queue_full`、`export_failed`、`key_unavailable`、`unavailable`（資源的憑證不可用，不匯出）、`abandoned`（匯出器關閉時還在佇列））、`runline.trace_export.exports`（匯出請求數，`outcome`：`ok`、`failed`、`key_unavailable`）、`runline.trace_export.attributes.truncated`（`kind`：`count` 超過數量、`length` 文字被截斷、`invalid` 值的型別不合）。
+
+**檢查。** 對端點送出一個沒有 span 的 OTLP 匯出請求（空的匯出，不匯出任何東西），帶資源的認證值與憑證，用檢查自己的短逾時（`RUNLINE_RESOURCE_CHECK_TIMEOUT_SECONDS`）：`failure` 為 `alias_missing`／`alias_invalid`／`alias_wrong_type`（別名或憑證別名問題，此時不連線；包括沒有組態金鑰庫）、`connection_failed`、`rejected`（401 或 403）、`server_error`、`redirect_blocked`、`unexpected_response`、`timeout`，以及 TLS 類別（`trust_failed`、`hostname_mismatch` 等）。run 在別名缺失或金鑰庫未設定時不失敗，只是該批 span 被丟棄並計數。
 
 ### `jdbc-pool` 型別
 
@@ -482,7 +518,7 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 認證：Bearer（admin）
 
-定義資源。本文 `{"name": "...", "capacity": 1}`，另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。`type` 為 `openai-compatible` 時 `settings` 見下方「`openai-compatible` 型別」，`secretAlias` 選填（本機服務可能不需要金鑰）；`type` 為 `jdbc-pool` 時 `settings` 見下方「`jdbc-pool` 型別」，`secretAlias` 是資料庫帳號密碼在金鑰庫的別名，選填（帳號不需要密碼時）；回傳的 `settings` 是寫出每個有效值的正規化形式（省略的項目以預設值寫出），`secretAlias` 是小寫的正規化形式。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
+定義資源。本文 `{"name": "...", "capacity": 1}`（型別固定容量時 `capacity` 必須是那個值，見「`trace-export` 型別」），另可帶 `type`（省略視為 `counter`，所以只送名稱與容量的呼叫維持有效）、`settings`、`secretAlias`。`type` 為 `file` 時 `settings` 為 `{"path": "相對於資源根目錄的路徑"}`，例如 `{"type": "file", "settings": {"path": "logs/out.txt"}}`；絕對路徑、跳出根目錄的路徑與解析後跳出根目錄的符號連結被拒絕，檔案所在的目錄不必先存在（只要可建立）。`type` 為 `openai-compatible` 時 `settings` 見下方「`openai-compatible` 型別」，`secretAlias` 選填（本機服務可能不需要金鑰）；`type` 為 `jdbc-pool` 時 `settings` 見下方「`jdbc-pool` 型別」，`secretAlias` 是資料庫帳號密碼在金鑰庫的別名，選填（帳號不需要密碼時）；`type` 為 `trace-export` 時 `settings` 見「`trace-export` 型別」，`secretAlias` 必填；回傳的 `settings` 是寫出每個有效值的正規化形式（省略的項目以預設值寫出），`secretAlias` 是小寫的正規化形式。201（帶 `Location`）回傳資源；400 `bad_request`；409 `resource_exists`；422 `invalid_resource`（見上表：名稱、容量、型別不明或尚未支援、設定不合規、路徑不在資源根目錄內或不可用、`counter` 帶有設定或機密別名）。
 
 ### `GET /api/v1/resources`
 
@@ -540,12 +576,13 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
 
 回應不含任何資源的設定、使用量、機密別名或機密值，也不含 Engine 的組態值（例如資源根目錄）與設定的預設值（留空時的實際值見各型別一節的「預設」欄）。
 
-200，本文 `{"types": [...]}`，依 Engine 的固定順序（`counter`、`file`、`jdbc-pool`、`openai-compatible`），每項有 `type`，另有該型別的成員（沒有的型別不出現；`counter` 與 `file` 只有 `type`）：
+200，本文 `{"types": [...]}`，依 Engine 的固定順序（`counter`、`file`、`jdbc-pool`、`openai-compatible`、`trace-export`），每項有 `type`，另有該型別的成員（沒有的型別不出現；`counter` 與 `file` 只有 `type`）：
 
 - `openai-compatible`：
   - `endpoints[]`：可啟用的端點條目，依目錄順序。每項 `id`（條目名稱，即 `settings.endpoints` 所用）、`group`（ADR-019 目錄表的群組：`chat`、`completions`、`embeddings`、`models`、`responses`、`moderations`、`rerank`、`images`、`audio`、`files`、`batches`）、`method`、`path`（根位址之下的路徑樣板，`{model}`、`{id}` 為路徑參數）、`request`（請求本文：`none`、`json`、`multipart`）、`response`（`json`、`binary`）、`streams`（是否可串流：`json` 回應為事件串流，`binary` 回應為位元組塊）、`defaultEnabled`（新資源省略 `endpoints` 時是否啟用）、`stateful`（是否建立、取消或刪除服務端保存的東西：`responses.create`（OpenAI 相容服務預設會保存建立的回應）、`responses.delete`、`responses.cancel`、`files.create`、`files.delete`、`batches.create`、`batches.cancel`；這些條目都不預設啟用）。
   - `requestParameters[]`：可設預設、鎖定或上限的請求參數，依上表順序。每項 `name`、`kind`（值的種類：`number`、`text`（非空文字）、`textOrList`（文字或文字清單，即 `stop`）、`object`（JSON 物件，即 `response_format`））、`ceiling`（是否可設上限，只有 `number`）。
 - `jdbc-pool`：`databases[]`，每個資料庫設定檔一項：`kind`（`settings.kind` 所用的種類）、`fields[]`（該種類的位址欄位，也就是 `settings` 中只有這個種類接受、用來說明資料庫在哪裡的欄位：`postgresql` 為 `host`、`port`、`database`、`username`，`sqlite` 為 `path`；別種的欄位為 `invalid_settings`）、`properties[]`（允許的額外連線屬性，每項 `name` 與值規則 `rule`：`text` 帶 `maxLength`，任何不含控制字元、最長 `maxLength` 個字元的文字；`oneOf` 帶 `values`，只能是其中之一；`pattern` 帶 `pattern`，整個值須符合這個正規表示式，寫法在 Java 與 JavaScript 意義相同）。值不符規則為 `invalid_settings`，名稱不在清單為 `property_not_allowed`。
+- `trace-export`：`fixedCapacity`（Engine 固定的容量，管理員不能設定或修改；建立時 `capacity` 必須是這個值）。
 
 範例（節錄）：
 
@@ -561,7 +598,8 @@ WebSocket，供非瀏覽器的客戶端使用。瀏覽器的 WebSocket 不能設
   {"type": "openai-compatible",
    "endpoints": [{"id": "chat.completions", "group": "chat", "method": "POST", "path": "/chat/completions",
      "request": "json", "response": "json", "streams": true, "defaultEnabled": true, "stateful": false}],
-   "requestParameters": [{"name": "temperature", "kind": "number", "ceiling": true}]}
+   "requestParameters": [{"name": "temperature", "kind": "number", "ceiling": true}]},
+  {"type": "trace-export", "fixedCapacity": 1000000}
 ]}
 ```
 

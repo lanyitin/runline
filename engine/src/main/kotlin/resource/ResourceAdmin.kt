@@ -119,6 +119,10 @@ class ResourceAdmin(
     val behavior =
         behaviors.of(resourceType)
             ?: return CreateResourceResult.Invalid(InvalidResource.UNSUPPORTED_TYPE)
+    // A type that fixes its capacity is given that one and no other (ADR-46 decision 10).
+    behavior.fixedCapacity?.let {
+      if (capacity != it) return CreateResourceResult.Invalid(InvalidResource.CAPACITY)
+    }
     behavior.problemWith(settings, secretAlias)?.let {
       return CreateResourceResult.Invalid(it)
     }
@@ -167,6 +171,11 @@ class ResourceAdmin(
     }
     val existing = store.find(name) ?: return UpdateResourceResult.NotFound
     val behavior = behaviors.of(existing.type)
+    // A capacity the type fixes is not the administrator's to edit (ADR-46 decision 10).
+    val fixed = behavior?.fixedCapacity
+    if (fixed != null && capacity != null && capacity != fixed) {
+      return UpdateResourceResult.Invalid(InvalidResource.CAPACITY)
+    }
     behavior?.problemWithChange(existing, settings, secretAlias)?.let {
       return UpdateResourceResult.Invalid(it)
     }

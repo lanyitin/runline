@@ -76,7 +76,7 @@ class ResourceWarnings(
       WarningDoc(
           "resource_type_unknown",
           name,
-          "共享資源「$name」宣告的型別「$type」不在 counter、file、jdbc-pool、openai-compatible 之內；" +
+          "共享資源「$name」宣告的型別「$type」不在 counter、file、jdbc-pool、openai-compatible、trace-export 之內；" +
               "建立 run 時會視為型別不符。",
       )
 

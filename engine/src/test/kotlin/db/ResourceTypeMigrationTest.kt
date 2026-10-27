@@ -104,7 +104,7 @@ class ResourceTypeMigrationTest {
   }
 
   @Test
-  fun `the database accepts only the four types of the closed set`() {
+  fun `the database accepts only the five types of the closed set`() {
     DatabaseMigrator(database).migrate()
     fun insert(type: String) =
         execute(
@@ -113,9 +113,11 @@ class ResourceTypeMigrationTest {
                 "'root', now(), 'root', now())"
         )
 
-    listOf("counter", "file", "jdbc-pool", "openai-compatible").forEach { insert(it) }
+    listOf("counter", "file", "jdbc-pool", "openai-compatible", "trace-export").forEach {
+      insert(it)
+    }
 
     assertFailsWith<SQLException> { insert("http-endpoint") }
-    assertEquals(4, rows().size)
+    assertEquals(5, rows().size)
   }
 }

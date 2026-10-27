@@ -72,6 +72,9 @@ class RunHarness(
         {
           dev.lawlan.runline.accessors.jdbc.JdbcObserver.NONE
         },
+    /** How the spans of `trace-export` resources are buffered and sent (ADR-46). */
+    traceExportTuning: dev.lawlan.runline.engine.config.TraceExportTuning =
+        dev.lawlan.runline.engine.config.TraceExportTuning(),
     /** The databases the Engine carries a profile for, given the directory of the resources. */
     jdbcProfilesFor: (Path) -> dev.lawlan.runline.accessors.jdbc.JdbcProfiles = {
       dev.lawlan.runline.accessors.jdbc.JdbcProfiles(
@@ -95,6 +98,12 @@ class RunHarness(
   val resourceRoot: Path = Files.createDirectories(dir.resolve("resource-root"))
   val jdbcProfiles = jdbcProfilesFor(resourceRoot)
   val jdbcPools = dev.lawlan.runline.accessors.jdbc.JdbcPools(jdbcProfiles)
+  val traceExporters =
+      dev.lawlan.runline.engine.traceexport.TraceExporters(
+          secrets,
+          traceExportTuning,
+          dev.lawlan.runline.engine.traceexport.TraceExportTelemetry(openTelemetry),
+      )
   val behaviors =
       ResourceBehaviors.forEngine(
           ResourceSettings(resourceRoot, java.time.Duration.ofSeconds(10), maxReadBytes),
@@ -103,6 +112,7 @@ class RunHarness(
           jdbcProfiles,
           jdbcPools,
           jdbcObserverFor(jdbcPools),
+          traceExporters,
       )
   val resourceAdmin =
       ResourceAdmin(resourceStore, Clock.systemUTC(), behaviors) { scheduler.wake() }
@@ -249,6 +259,28 @@ class RunHarness(
     assertIs<CreateResourceResult.Created>(created, "$created")
   }
 
+  /** Defines a `trace-export` resource (ADR-46) with the capacity the Engine fixes for the type. */
+  fun defineTraceExport(
+      name: String,
+      endpoint: String,
+      serviceName: String = "transcribe",
+      alias: String? = "langfuse-auth",
+      enabled: Boolean = true,
+  ) {
+    val root = ApiIdentity("root", Role.ADMIN)
+    val settings =
+        kotlinx.serialization.json.JsonObject(
+            mapOf(
+                "endpoint" to kotlinx.serialization.json.JsonPrimitive(endpoint),
+                "serviceName" to kotlinx.serialization.json.JsonPrimitive(serviceName),
+            )
+        )
+    val created =
+        resourceAdmin.create(name, TRACE_EXPORT_CAPACITY, root, "trace-export", settings, alias)
+    assertIs<CreateResourceResult.Created>(created, "$created")
+    if (!enabled) resourceAdmin.update(name, null, false, root)
+  }
+
   /**
    * Uploads a pipeline written in Kotlin, given as the compiled classes of this test source set.
    */
@@ -323,6 +355,7 @@ class RunHarness(
     runner.close()
     coordinator?.close()
     jdbcPools.close()
+    traceExporters.close()
   }
 
   companion object {

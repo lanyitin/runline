@@ -380,6 +380,80 @@ class ResourceCoordinatorTest {
     assertEquals(emptyList(), c.activity("a").holders)
   }
 
+  // ---- tracing is optional (ADR-46) ----
+
+  private fun traced(vararg roles: String) =
+      PendingRun(
+          UUID.randomUUID(),
+          "p",
+          roles.toList(),
+          roles.associateWith { if (it == "tracing") "trace-export" else "counter" },
+          "alice",
+      )
+
+  @Test
+  fun `a run whose trace-export role has no resource is granted what its other roles need`() {
+    define("lemonade", 1)
+    val c = coordinator()
+    val first = traced("lemonade", "tracing")
+    val second = traced("lemonade", "tracing")
+
+    c.granted(first)
+
+    assertEquals(setOf("lemonade"), c.granted(first.id).keys)
+    c.waits(second)
+    c.release(first.id)
+    c.granted(second)
+  }
+
+  @Test
+  fun `a run with only a trace-export role that has no resource holds nothing`() {
+    val c = coordinator()
+    val run = traced("tracing")
+
+    c.granted(run)
+
+    assertEquals(emptyMap(), c.granted(run.id))
+  }
+
+  @Test
+  fun `a disabled trace-export resource is left out, and an enabled one is held`() {
+    assertIs<CreateResourceResult.Created>(
+        ResourceAdmin(
+                store,
+                MutableClock(),
+                ResourceBehaviors.forEngine(
+                    dev.lawlan.runline.engine.config.ResourceSettings(
+                        java.nio.file.Path.of("."),
+                        Duration.ofSeconds(1),
+                        1,
+                    )
+                ),
+            ) {}
+            .create(
+                "tracing",
+                TRACE_EXPORT_CAPACITY,
+                root,
+                "trace-export",
+                kotlinx.serialization.json.Json.parseToJsonElement(
+                    """{"endpoint":"http://127.0.0.1:1/v1/traces","serviceName":"s"}"""
+                ) as kotlinx.serialization.json.JsonObject,
+                "alias",
+            )
+    )
+    val c = coordinator()
+    val enabled = traced("tracing")
+    c.granted(enabled)
+    assertEquals(setOf("tracing"), c.granted(enabled.id).keys)
+    c.release(enabled.id)
+
+    admin.update("tracing", null, false, root)
+    val disabled = traced("tracing")
+    c.granted(disabled)
+
+    assertEquals(emptyMap(), c.granted(disabled.id))
+  }
+
   // ---- capacity changes ----
 
   @Test

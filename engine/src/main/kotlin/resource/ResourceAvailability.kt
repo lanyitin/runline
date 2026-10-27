@@ -47,8 +47,19 @@ class ResolvedRole(
   val resource: String
     get() = bound ?: role
 
+  /**
+   * Whether the role is left without a resource, and that is fine: tracing is optional (ADR-46
+   * decision 5). A role declared as `trace-export` that is not bound to a resource that exists, or
+   * whose resource is disabled, gets nothing, and the pipeline runs as it does without tracing.
+   * Nothing is held for it and it gets no accessor.
+   */
+  fun isLeftOut(declaredType: String?): Boolean =
+      declaredType == ResourceType.TRACE_EXPORT.wireName &&
+          (definition == null || !definition.enabled)
+
   /** What is wrong with it given the type the pipeline declared for the role, or null. */
   fun problem(declaredType: String?): ResourceProblem? {
+    if (isLeftOut(declaredType)) return null
     val kind =
         when {
           definition == null ->

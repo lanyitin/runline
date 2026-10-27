@@ -242,16 +242,18 @@ private fun RemovalPreview.toResponse() =
 private fun InvalidResource.message() =
     when (this) {
       InvalidResource.NAME -> "資源名稱需為 1 至 100 個字元，只能使用英文字母、數字、「.」、「_」、「-」，且以英文字母或數字開頭。"
-      InvalidResource.CAPACITY -> "容量必須是 1 以上的整數。"
+      InvalidResource.CAPACITY -> "容量必須是 1 以上的整數；型別固定容量時（trace-export），容量由 Engine 決定，不能設定或修改。"
       InvalidResource.NOTHING_TO_CHANGE -> "請提供要修改的 capacity 或 enabled。"
-      InvalidResource.UNKNOWN_TYPE -> "資源型別不明；型別只能是 counter、file、jdbc-pool、openai-compatible。"
+      InvalidResource.UNKNOWN_TYPE ->
+          "資源型別不明；型別只能是 counter、file、jdbc-pool、openai-compatible、trace-export。"
       InvalidResource.UNSUPPORTED_TYPE ->
-          "這個資源型別尚未支援，目前只能建立 counter、file、jdbc-pool 與 openai-compatible。"
+          "這個資源型別尚未支援，目前只能建立 counter、file、jdbc-pool、openai-compatible 與 trace-export。"
       InvalidResource.INVALID_SETTINGS -> "這個資源型別沒有這些設定欄位。"
       InvalidResource.INVALID_SECRET_ALIAS -> "這個資源型別沒有機密別名，或別名不合規。"
       InvalidResource.PATH_OUTSIDE_ROOT -> "路徑不在資源根目錄內：路徑必須是相對於資源根目錄的路徑，不能是絕對路徑，也不能跳出根目錄。"
       InvalidResource.PATH_UNUSABLE -> "路徑目前不可用：資源根目錄不可用、檔案所在的目錄不存在也無法建立，或檔案不可讀寫。"
-      InvalidResource.INVALID_BASE_URL -> "根位址必須是 http 或 https 位址，不含使用者資訊、查詢與片段。"
+      InvalidResource.INVALID_BASE_URL ->
+          "根位址（trace-export 為匯出端點）必須是 http 或 https 位址，不含使用者資訊、查詢與片段。"
       InvalidResource.INVALID_HEADER ->
           "額外標頭不合規：名稱不得含 auth、key、token、secret、cookie，不得是 Engine 自己設定的標頭，值不得含換行或控制字元。"
       InvalidResource.INVALID_ENDPOINT -> "啟用的端點必須是端點目錄內、且這個版本已提供的條目，且至少一個。"

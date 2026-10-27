@@ -1,6 +1,6 @@
 # #43 run 類別載入器提供 OpenTelemetry
 
-本文回答：要達成什麼行為、如何驗收。狀態：提案中（2026-10-27）。Issue：#43。決策見 [ADR-42](../adr/ADR-42-run-provides-opentelemetry.md)，公告見 [runner-libraries](../runner-libraries.md)。相依：無。完成後需通知 runline-transcribe（其 WI-18 等待本項部署）。
+本文回答：要達成什麼行為、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#43。決策見 [ADR-42](../adr/ADR-42-run-provides-opentelemetry.md)，公告見 [runner-libraries](../runner-libraries.md)。相依：無。完成後需通知 runline-transcribe（其 WI-18 等待本項部署）。
 
 ## 行為
 
@@ -20,11 +20,11 @@
 - 公告的版本與 run 實際載入的版本一致，以自動化檢查驗證；公告與執行期目錄內容不符時檢查失敗。
 - 夾帶不同版本 OpenTelemetry 的 jar：run 使用 Runner 的版本，警告出現在上傳結果與 run log。
 - run 結束後 class loader 可回收，包含 pipeline 未關閉 SDK 的情況。
-- 04-deployment 與 ADR-001 的相關描述（晉升後）同步更新；文件一致性不留矛盾。
+- 04-deployment 與 ADR-001 的相關描述同步更新；文件一致性不留矛盾。
 
 ## 架構約束
 
-- 不得改變 [ADR-001](../../../stable/pipeline-engine/adr/ADR-001-isolated-classloader.md) 的隔離：run 的上層仍只有 JDK 平台 class loader。
+- 不得改變 [ADR-001](../../pipeline-engine/adr/ADR-001-isolated-classloader.md) 的隔離：run 的上層仍只有 JDK 平台 class loader。
 - 邊界只傳 JDK 內建型別，不穿過 OpenTelemetry 型別。
 - Engine 的 OpenTelemetry 不得被 run 看見，反之亦然。
 - core 與 runner 主程式維持不依賴 OpenTelemetry；函式庫只存在於 run 執行期目錄。

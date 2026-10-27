@@ -41,7 +41,7 @@ Engine 與 run 位於同一 JVM，但分屬不同 class loader。邊界契約如
 
 ## 資源存取端
 
-型別化資源（`file`、`jdbc-pool`、`openai-compatible`，見 [ADR-019](adr/ADR-019-typed-shared-resources.md)）由 Engine 中介：
+型別化資源（`file`、`jdbc-pool`、`openai-compatible`、`trace-export`，見 [ADR-019](adr/ADR-019-typed-shared-resources.md)）由 Engine 中介：
 
 - 實體（檔案路徑、連線池、HTTP 用戶端）與機密由 Engine 持有，操作在 Engine 側執行；run 只拿到受控的存取端。存取端的契約由 core 定義。
 - 存取端跨越邊界時只使用 JDK 內建型別（字串、數字、位元組、集合）；機密、驅動物件與 Engine 內部型別不穿過邊界。
@@ -52,6 +52,7 @@ Engine 與 run 位於同一 JVM，但分屬不同 class loader。邊界契約如
 - 串流（`openai-compatible`，WI-47）仍是同一個單一呼叫的邊界：開啟、拉取一個事件、關閉各是一次操作（`openai.stream.open`、`openai.stream.next`、`openai.stream.close`），串流由 Engine 側以編號持有，run 只拿到編號、狀態碼、標頭與每次一個事件的文字；串流在結束、被關閉、失敗、失效或 run 終止時，連線關閉並歸還額度。
 - 檔案與位元組（WI-53）仍是單一呼叫：`openai.call` 的表單、`openai.download`（記憶體或寫入檔案）與帶 `binary` 的 `openai.stream.open`；檔案部分與下載目標在呼叫中只有範圍名稱與相對路徑。目錄的位置、用量上限與宣告的範圍可寫性由 Runner 在 run 的目錄備妥後以 `ResourceHost.workspaceReady` 從 Engine 側告知，host 在每次呼叫以此覆蓋呼叫帶的任何同類資訊，並依宣告檢查讀寫。
 - `jdbc-pool`（WI-48）：`jdbc.query`、`jdbc.update`、`jdbc.begin`、`jdbc.commit`、`jdbc.rollback` 各是一次操作；引數只有 `sql` 與 `parameters`（`null`、字串、布林、`Long`、`Double`、`BigDecimal`、位元組的清單），帶其他成員或其他型別的值一律 `INVALID_ARGUMENT`，連線位址、帳號、密碼與驅動永遠來自資源。結果是 `columns` 與 `rows`（JDK 的 `ArrayList` 與 `HashMap`，值只有上列各型別與字串）。失敗的回覆帶類別、`errorId` 與 5 個字元的 `sqlState`（host 側再驗證其形式），沒有訊息。host 側自己檢查操作名稱、引數形狀與資源是否由這個 run 持有，不信任 run 內存取端已檢查過。run 的執行緒被中斷（取消）時，等待它的執行緒在資料庫端取消語句並切斷連線，因為驅動的 socket 讀取不會因中斷而結束。
+- `trace-export`（ADR-46、#50）：只有一個操作 `trace.submit`，是「完成後提交」的單向呼叫，沒有開啟與結束兩段式。引數是 `name`、`id`、`parentId`（可為 `null`）、`startTime`、`endTime`（`java.time.Instant`）、`status`（`OK` 或 `ERROR`）、`statusMessage`（可為 `null`）與 `attributes`（字串鍵；值為字串、`Boolean`、`Long`、`Double` 或同一種型別的清單）；沒有追蹤識別碼，由 Engine 依 run 指派。run 側的存取端先捨棄不合法的屬性值，不看 host 的回覆、也不把 host 的失敗或例外傳給 pipeline；host 沒有提供這個角色時，存取端為空操作，不呼叫 host。
 - 開發入口以同一份契約提供本機實作，不連 Engine。
 
 ## 錄製資料

@@ -27,8 +27,9 @@ object ResourceTypes {
   const val FILE = "file"
   const val JDBC_POOL = "jdbc-pool"
   const val OPENAI_COMPATIBLE = "openai-compatible"
+  const val TRACE_EXPORT = "trace-export"
 
-  val ALL: Set<String> = setOf(COUNTER, FILE, JDBC_POOL, OPENAI_COMPATIBLE)
+  val ALL: Set<String> = setOf(COUNTER, FILE, JDBC_POOL, OPENAI_COMPATIBLE, TRACE_EXPORT)
 }
 
 data class ParameterSpec(val name: String, val required: Boolean, val default: String?)

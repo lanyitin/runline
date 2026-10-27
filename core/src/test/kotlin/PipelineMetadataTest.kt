@@ -75,8 +75,11 @@ class PipelineMetadataTest {
   }
 
   @Test
-  fun `the closed set of resource types is exactly the four of ADR-019`() {
-    assertEquals(setOf("counter", "file", "jdbc-pool", "openai-compatible"), ResourceTypes.ALL)
+  fun `the closed set of resource types is the four of ADR-019 and the trace-export of ADR-46`() {
+    assertEquals(
+        setOf("counter", "file", "jdbc-pool", "openai-compatible", "trace-export"),
+        ResourceTypes.ALL,
+    )
   }
 
   @Test

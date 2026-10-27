@@ -127,8 +127,8 @@ data class DevConfig(
     /**
      * `RUNLINE_RESOURCE_ROOT` (default `.runline/resources`) and `RUNLINE_RESOURCES`, a comma
      * separated list of `name=type[:path]`: a `file` has its path below the root, an
-     * `openai-compatible` the path of its settings file (relative to the project), a `counter`
-     * nothing more.
+     * `openai-compatible` the path of its settings file (relative to the project), a `counter` or a
+     * `trace-export` nothing more.
      */
     private fun resources(env: Map<String, String>, projectDir: Path): LocalResourceSettings {
       val root = projectDir.resolve(optional(env, RESOURCE_ROOT) ?: ".runline/resources")
@@ -146,13 +146,14 @@ data class DevConfig(
                   "file",
                   "jdbc-pool",
                   "openai-compatible" -> !path.isNullOrEmpty()
-                  "counter" -> path == null
+                  "counter",
+                  "trace-export" -> path == null
                   else -> false
                 }
         check(valid) {
           "Environment variable $RESOURCES entry '$text' must be name=file:<path>, " +
-              "name=openai-compatible:<settings file>, name=jdbc-pool:<settings file> " +
-              "or name=counter, with each name once"
+              "name=openai-compatible:<settings file>, name=jdbc-pool:<settings file>, " +
+              "name=counter or name=trace-export, with each name once"
         }
         definitions[name] = LocalResource(type, path)
       }

@@ -10,6 +10,13 @@ interface Accessors {
   fun jdbcPool(name: String): JdbcAccessor
 
   fun openAiCompatible(name: String): OpenAiAccessor
+
+  /**
+   * The accessor of a `trace-export` resource (ADR-46). Unlike the other types, one that the host
+   * did not provide is not refused: its accessor drops what is submitted, so a pipeline runs the
+   * same with or without tracing.
+   */
+  fun traceExport(name: String): TraceExportAccessor
 }
 
 /** Controlled access to the one file behind a `file` resource; the path is never exposed. */

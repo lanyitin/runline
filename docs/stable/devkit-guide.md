@@ -54,7 +54,7 @@
 | `RUNLINE_SHARED_ROOT` | pipeline 共享目錄的根位置（多次執行間保留） | 專案內 `.runline/shared` |
 | `RUNLINE_RUN_ROOT` | run 私有目錄的根位置（每次執行全新） | 專案內 `.runline/runs` |
 | `RUNLINE_RESOURCE_ROOT` | `file` 型別共享資源的檔案所在的根位置（[ADR-019](pipeline-engine/adr/ADR-019-typed-shared-resources.md)） | 專案內 `.runline/resources` |
-| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，名稱是 pipeline 宣告的**資源角色**名稱（本機沒有綁定：一個角色就是一個本機資源，與 Engine 上「沒有綁定時角色就是同名資源」同義；[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)；pipeline 宣告了用途說明時，角色未定義或型別不符的訊息會附上它），`file` 的路徑相對於根位置，`openai-compatible` 與 `jdbc-pool` 的路徑是專案內的設定檔（見「型別化共享資源（`openai-compatible`）」），`counter` 沒有路徑，例如 `audit=file:logs/out.txt,lemon=openai-compatible:openai/lemon.json,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動 | 無 |
+| `RUNLINE_RESOURCES` | 本機的共享資源定義（開發入口不連 Engine）：以逗號分隔的 `名稱=型別[:路徑]`，名稱是 pipeline 宣告的**資源角色**名稱（本機沒有綁定：一個角色就是一個本機資源，與 Engine 上「沒有綁定時角色就是同名資源」同義；[ADR-025](https://forgejo.dev.lan/runline/runline-digest-rss/src/branch/main/docs/stable/digest-rss/adr/ADR-025-resource-roles-and-binding.md)；pipeline 宣告了用途說明時，角色未定義或型別不符的訊息會附上它），`file` 的路徑相對於根位置，`openai-compatible` 與 `jdbc-pool` 的路徑是專案內的設定檔（見「型別化共享資源（`openai-compatible`）」），`counter` 與 `trace-export` 沒有路徑，例如 `audit=file:logs/out.txt,lemon=openai-compatible:openai/lemon.json,gate=counter`；格式不合法時啟動即失敗。pipeline 以型別宣告的資源（`typedResources`）必須在此定義且型別相符，否則不啟動；唯一的例外是 `trace-export`，可不定義（見下節） | 無 |
 | `RUNLINE_SECRET_<別名>` | `openai-compatible` 資源的金鑰（本機沒有 Engine 的金鑰庫，金鑰由環境提供）：別名轉大寫、非英數字元換成 `_`，例如別名 `lemon-key` 對應 `RUNLINE_SECRET_LEMON_KEY`；值限可列印 ASCII，與 Engine 的機密字元集一致，否則視為取不到。金鑰不寫進設定檔、不被任何輸出顯示 | 無 |
 | `RUNLINE_ALLOW_LIST` | 用逗號分隔的白名單條目，會完全取代預設白名單：套件（`kotlin`）、套件後加 `:exact` 表示「僅此套件」（`kotlin:exact`）、`class:` 開頭表示完整類別（`class:java.io.PrintStream`，只放行該類別與其巢狀類別）；格式與 Engine 的 `ALLOWLIST_PACKAGES` 相同（由 analyzer 的 `AllowListText` 共用）；名稱不合法時啟動即失敗，已不再接受的尾端 `!` 形式也會失敗並提示改用 `:exact`；設為空字串表示空清單 | 專案的預設白名單（analyzer 模組的 `DefaultAllowList`，Engine 首次啟動也用它） |
 | `RUNLINE_ALLOW_LIST_VERSION` | 設定了 `RUNLINE_ALLOW_LIST` 時，判定中顯示的白名單版本；預設清單有自己的版本，此變數對它無效 | `local`（清單為空時為 `local-empty`） |
@@ -71,6 +71,12 @@
 pipeline 在 `@PipelineDefinition` 以 `typedResources = [TypedResource(name = "audit", type = ResourceTypes.FILE)]` 宣告需要某個 `file` 資源後，在 `run` 中以 `context.accessors.file("audit")` 取得存取端：`readText`/`readBytes`、`writeText`/`writeBytes`（覆寫）、`appendText`/`appendBytes`。存取端不暴露路徑，只能碰那一個檔案；單次讀取有大小上限（預設 10 MiB，超過得到 `TOO_LARGE`）。取用沒有宣告型別的資源、只宣告名稱的資源或型別不符者，得到 `ResourceAccessException`（`failure` 為 `NOT_DECLARED`、`NO_TYPE_DECLARED`、`TYPE_MISMATCH`），沒有「執行中取得資源」的操作。run 結束後存取端失效，之後的操作失敗（`ENDED`）。錯誤只含類別（`NOT_FOUND`、`PATH_REJECTED`、`TOO_LARGE`、`FAILED` 與 errorId），不含路徑。
 
 開發入口以 `RUNLINE_RESOURCES` 與 `RUNLINE_RESOURCE_ROOT` 在本機提供同一份契約：初始化立即成功（沒有競爭），行為與 Engine 以同一組驗收測試驗證。容量 N 的資源在 Engine 中只限制同時持有的 run 數，**不提供檔案內容層級的協調**。使用存取端不改變 safe 或 unsafe 的判定。
+
+## trace 匯出（`trace-export`，ADR-46、#50）
+
+pipeline 以 `typedResources = [TypedResource(name = "trace", type = ResourceTypes.TRACE_EXPORT)]` 宣告後，以 `context.accessors.traceExport("trace")` 取得 `TraceExportAccessor`，在 span 結束時以 `submit(SpanRecord(...))` 提交一筆完成的 span（名稱、起訖 `Instant`、`SpanStatus`、選填的狀態訊息、屬性、本地 `id` 與 `parentId`）。屬性值限字串、布林、整數、浮點數與其清單，其他型別的值會被捨棄，`submit` 回傳捨棄的個數；追蹤識別碼不由 pipeline 指定。提交立即返回、不丟例外，所以不影響 run 的成敗。
+
+開發入口的本機實作只接受 span、不對外匯出：`RUNLINE_RESOURCES` 不需要定義這個角色（也可寫成 `trace=trace-export`），run 結束時主控台印出 `[resources] trace (trace-export): N span(s) accepted, not exported`。使用此存取端不改變 safe 或 unsafe 的判定，錄製時不記錄 span 內容。
 
 ## 型別化共享資源（`openai-compatible`）
 

@@ -1,6 +1,6 @@
 # #51 Engine 的 trace-export 型別、匯出器與緩衝
 
-本文回答：Engine 側要達成什麼行為、如何驗收。狀態：已核可（2026-10-27），待派工。Issue：#51。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：#50。
+本文回答：Engine 側要達成什麼行為、如何驗收。狀態：已完成（2026-10-27；PR #58）。Issue：#51。決策見 [ADR-46](../adr/ADR-46-trace-export-resource.md)。相依：#50。
 
 ## 行為
 

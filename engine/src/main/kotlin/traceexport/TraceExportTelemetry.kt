@@ -4,6 +4,8 @@ import io.opentelemetry.api.OpenTelemetry
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.common.Attributes
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import org.slf4j.LoggerFactory
 
 /** Why spans did not get to the endpoint; [wire] is the label of the metric. */
@@ -46,8 +48,18 @@ enum class Truncation(val wire: String) {
  * for a resource and a reason, which says how many spans and nothing of them. Nothing of a span's
  * name, attributes or message, and nothing of the credential, is recorded anywhere.
  */
-class TraceExportTelemetry(openTelemetry: OpenTelemetry) {
+class TraceExportTelemetry(
+    openTelemetry: OpenTelemetry,
+    /** How long a warning for a resource and a reason suppresses the ones that follow it. */
+    private val warningInterval: java.time.Duration = java.time.Duration.ofMinutes(1),
+) {
   private val log = LoggerFactory.getLogger(TraceExportTelemetry::class.java)
+
+  init {
+    // The thread of the warnings is started here, by whoever sets the Engine up, not by a run.
+    WarningLog.start()
+  }
+
   private val meter = openTelemetry.getMeter("runline.resources.trace_export")
   private val exportedSpans =
       meter
@@ -70,13 +82,11 @@ class TraceExportTelemetry(openTelemetry: OpenTelemetry) {
           .setDescription("Attributes and texts cut to the limits of a span, by kind")
           .build()
 
-  private class Limiter {
-    var lastLoggedNanos = 0L
-    var logged = false
-    var suppressed = 0L
-  }
-
-  private val limiters = ConcurrentHashMap<Pair<String, DropReason>, Limiter>()
+  /**
+   * The open windows: a warning for a resource and a reason opens one, and the warnings that come
+   * before it ends are held back; the value is how many.
+   */
+  private val windows = ConcurrentHashMap<Pair<String, DropReason>, Long>()
 
   fun exported(resource: String, spans: Int) {
     exportedSpans.add(spans.toLong(), resourceLabel(resource))
@@ -98,28 +108,40 @@ class TraceExportTelemetry(openTelemetry: OpenTelemetry) {
     if (count > 0) truncated.add(count.toLong(), resourceLabel(resource, KIND to kind.wire))
   }
 
-  /** The warning, unless one was made for the resource and reason less than a minute ago. */
+  /**
+   * The warning, unless a window is open for the resource and the reason; then it is held back, and
+   * the number held back is said when the window ends, so it counts that window and nothing else.
+   * The words are written by the thread of [WarningLog], not by the caller: a run that fills a
+   * queue calls from its own thread, and what that thread writes is the log of the run.
+   */
   private fun warn(resource: String, spans: Int, reason: DropReason) {
-    val limiter = limiters.computeIfAbsent(resource to reason) { Limiter() }
-    val suppressed: Long
-    synchronized(limiter) {
-      val now = System.nanoTime()
-      if (limiter.logged && now - limiter.lastLoggedNanos < WARNING_INTERVAL_NANOS) {
-        limiter.suppressed++
-        return
+    val key = resource to reason
+    var opened = false
+    windows.compute(key) { _, held ->
+      if (held == null) {
+        opened = true
+        0L
+      } else {
+        held + 1
       }
-      limiter.logged = true
-      limiter.lastLoggedNanos = now
-      suppressed = limiter.suppressed
-      limiter.suppressed = 0
     }
-    log.warn(
-        "trace-export resource {} dropped {} span(s): {} ({} earlier warning(s) not logged)",
-        resource,
-        spans,
-        reason.wire,
-        suppressed,
-    )
+    if (!opened) return
+    WarningLog.write {
+      log.warn("trace-export resource {} dropped {} span(s): {}", resource, spans, reason.wire)
+    }
+    WarningLog.later(warningInterval) { closeWindow(key) }
+  }
+
+  private fun closeWindow(key: Pair<String, DropReason>) {
+    val held = windows.remove(key) ?: return
+    if (held > 0) {
+      log.warn(
+          "trace-export resource {} held back {} further warning(s) of dropped spans ({}) in the last window",
+          key.first,
+          held,
+          key.second.wire,
+      )
+    }
   }
 
   private fun resourceLabel(resource: String, vararg more: Pair<AttributeKey<String>, String>) =
@@ -129,10 +151,33 @@ class TraceExportTelemetry(openTelemetry: OpenTelemetry) {
           .build()
 
   private companion object {
-    const val WARNING_INTERVAL_NANOS = 60_000_000_000L
     val RESOURCE: AttributeKey<String> = AttributeKey.stringKey("resource")
     val OUTCOME: AttributeKey<String> = AttributeKey.stringKey("outcome")
     val REASON: AttributeKey<String> = AttributeKey.stringKey("reason")
     val KIND: AttributeKey<String> = AttributeKey.stringKey("kind")
+  }
+}
+
+/**
+ * The one thread that writes the warnings of [TraceExportTelemetry]. A thread that belongs to a run
+ * writes its output into the log of the run, and so does everything it starts; the thread here is
+ * started by the Engine (see [start]) so its output is the Engine's.
+ */
+internal object WarningLog {
+  private val executor =
+      ScheduledThreadPoolExecutor(1) { task ->
+            Thread(task, "trace-export-warnings").also { it.isDaemon = true }
+          }
+          .also { it.prestartCoreThread() }
+
+  /** Makes sure the thread exists; called where the Engine is set up. */
+  fun start() = Unit
+
+  fun write(line: () -> Unit) {
+    executor.execute { runCatching(line) }
+  }
+
+  fun later(delay: java.time.Duration, line: () -> Unit) {
+    executor.schedule({ runCatching(line) }, delay.toNanos(), TimeUnit.NANOSECONDS)
   }
 }

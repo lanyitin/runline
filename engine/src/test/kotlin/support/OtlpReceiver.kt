@@ -38,6 +38,8 @@ class ReceivedRequest(
     val headers: Map<String, String>,
     val body: ByteArray,
     val spans: List<ReceivedSpan>,
+    /** The names of the metrics of a metrics request (empty for any other request). */
+    val metricNames: List<String> = emptyList(),
 ) {
   val authorization: String?
     get() = headers["authorization"]
@@ -79,7 +81,15 @@ class OtlpReceiver(tls: SSLContext? = null) : AutoCloseable {
   @Volatile var hang = false
 
   val endpoint: String
-    get() = "$scheme://$host:${server.address.port}/v1/traces"
+    get() = "$baseUrl/v1/traces"
+
+  /** What `OTEL_EXPORTER_OTLP_ENDPOINT` is given: the signals' paths are added to it. */
+  val baseUrl: String
+    get() = "$scheme://$host:${server.address.port}"
+
+  /** The names of all metrics received so far. */
+  val metricNames: List<String>
+    get() = requests.flatMap { it.metricNames }
 
   /** All spans received so far. */
   val spans: List<ReceivedSpan>
@@ -99,7 +109,11 @@ class OtlpReceiver(tls: SSLContext? = null) : AutoCloseable {
               GZIPInputStream(ByteArrayInputStream(raw)).readAllBytes()
           else raw
       val headers = it.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() }
-      val received = ReceivedRequest(it.requestURI.path, headers, body, ProtoReader.spansOf(body))
+      val path = it.requestURI.path
+      val received =
+          if (path.endsWith("/v1/metrics"))
+              ReceivedRequest(path, headers, body, emptyList(), ProtoReader.metricNamesOf(body))
+          else ReceivedRequest(path, headers, body, ProtoReader.spansOf(body))
       requests += received
       if (hang) released.await()
       location?.let { target -> it.responseHeaders.add("Location", target) }
@@ -125,6 +139,15 @@ private class ProtoField(val number: Int, val value: Long, val bytes: ByteArray?
 internal object ProtoReader {
   fun spansOf(body: ByteArray): List<ReceivedSpan> =
       fields(body).filter { it.number == 1 }.flatMap { resourceSpans(it.bytes!!) }
+
+  /** The names of the metrics of an `ExportMetricsServiceRequest` (`metrics.proto`). */
+  fun metricNamesOf(body: ByteArray): List<String> =
+      fields(body)
+          .filter { it.number == 1 }
+          .flatMap { resource -> fields(resource.bytes!!).filter { it.number == 2 } }
+          .flatMap { scope -> fields(scope.bytes!!).filter { it.number == 2 } }
+          .mapNotNull { metric -> fields(metric.bytes!!).firstOrNull { it.number == 1 } }
+          .map { it.bytes!!.decodeToString() }
 
   private fun resourceSpans(message: ByteArray): List<ReceivedSpan> {
     val parts = fields(message)

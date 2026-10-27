@@ -1,6 +1,6 @@
 # ADR-46 trace 匯出型別化資源與 core span 契約
 
-狀態：提案中（2026-10-27）。Issue：#46。補充 [ADR-019](../../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md)（新增一個內建型別），不取代；取代已作廢的 [ADR-42](../../../stable/run-otel/adr/ADR-42-run-provides-opentelemetry.md)。來源：runline-transcribe 的 ADR-31（該儲存庫 Issue #31，已核可）。回答：pipeline 如何在不持有機密、不引用 OpenTelemetry 的前提下送出 trace，以及 span 契約、緩衝與資源的形狀。
+狀態：已核可（2026-10-27）。Issue：#46。補充 [ADR-019](../../pipeline-engine/adr/ADR-019-typed-shared-resources.md)（新增一個內建型別），不取代；取代已作廢的 [ADR-42](../../run-otel/adr/ADR-42-run-provides-opentelemetry.md)。來源：runline-transcribe 的 ADR-31（該儲存庫 Issue #31，已核可）。回答：pipeline 如何在不持有機密、不引用 OpenTelemetry 的前提下送出 trace，以及 span 契約、緩衝與資源的形狀。
 
 ## 背景
 
@@ -61,7 +61,7 @@
 
 ## 後果
 
-- 新增 core 契約、Engine 型別、型別目錄（[ADR-021](../../../stable/pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md)）項目、Console 表單與 08-api 的資源型別說明。
+- 新增 core 契約、Engine 型別、型別目錄（[ADR-021](../../pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md)）項目、Console 表單與 08-api 的資源型別說明。
 - 丟棄、匯出成功與失敗的計數成為 Engine 的可觀測指標；確切名稱由工作項定義。
 - runline-transcribe 之後改用此契約，並移除自己的 OpenTelemetry 依賴與三個 langfuse 參數；該儲存庫的工作不在本儲存庫範圍。
 - 已作廢的 #42、#43 實作不併入。實作過程找到的 class loader 回收問題（背景執行緒、傳送端）因 run 不再載入 OpenTelemetry 而不適用。

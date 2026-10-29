@@ -1,0 +1,28 @@
+# WI-81 Console favicon 跟隨系統主題
+
+本文回答：Console 的網站圖示如何跟隨系統的深色或淺色偏好，以及驗收條件。狀態：提案中（Issue #84），取代 [stable 的 WI-81](../../../stable/console-dark-mode/work-items/WI-81-favicon-follows-theme.md)（Issue #81）。相依：無（[WI-71](../../../stable/console-dark-mode/work-items/WI-71-console-dark-mode.md)、[WI-74](../../../stable/console-dark-mode/work-items/WI-74-light-boundary-contrast.md) 已完成）。決策見 [ADR-70](../../../stable/console-dark-mode/adr/ADR-70-console-dark-mode.md)（只跟隨系統）；總覽見[工作項總覽](../../../stable/console-dark-mode/work-items/README.md)。
+
+## 背景
+
+favicon 是單一 SVG 檔，以固定的藍色圓角方塊和白色提示符號組成，顏色寫死，沒有跟著主題。現有的藍色與白色符號對比只有約 2.8:1，與淺色主題中強調色在白底的問題相同；介面的按鈕因此使用 `--accent-solid` 搭配 `--on-accent`。WI-71 的範圍是頁面內的 token，不含這個檔案；WI-71 的「元件不自訂顏色」檢查只涵蓋 `console/src`，不涵蓋它。
+
+## 與 stable 的關係
+
+取代 stable 的 WI-81。差異只在淺色偏好：stable 版要求「外觀與現在相同」，同時要求對比至少 3:1，兩者無法同時成立（現有配色約 2.8:1）。本版改為淺色底色採用與按鈕相同的 `--accent-solid`，放棄「淺色外觀不變」。與 ADR-70 不衝突：ADR-70 第 1 點（只跟隨系統、不加開關）同樣適用於 favicon。核可並晉升時，以本文取代 stable 的 WI-81 檔案。
+
+## 行為與驗收條件
+
+- 圖示的底色與符號色分別採用 `--accent-solid` 與 `--on-accent` 在各主題的值：淺色偏好為深藍底、白色符號；深色偏好為較亮的藍底、深色符號。形狀不變。
+- 兩種主題下底色與符號色的對比都至少 3:1，由自動化檢查涵蓋。
+- 切換由圖示自身依系統偏好決定，不需要頁面程式碼、不需要重新載入頁面，也不新增第二個檔案或開關。
+- 不支援在圖示內依偏好切換的瀏覽器顯示淺色版本；這是可接受的降級，不視為缺陷。
+- 圖示是獨立檔案，無法引用 token，所以以測試檢查圖示的兩組顏色與上述 token 在兩種主題的值一致，日後 token 改變時測試失敗。
+- 真實瀏覽器 e2e 在模擬深色與淺色偏好下，確認頁面實際引用的圖示在兩種偏好下的顏色與預期一致。瀏覽器不提供分頁圖示的計算顏色時，說明所採用的替代驗證方式（例如載入圖示檔案後讀取顏色），並照實回報它是替代，不宣稱已直接驗證分頁上的圖示。
+- 沒有新的 API、設定、儲存或後端改動。
+
+## 架構約束
+
+- 圖示維持單一 SVG 檔，不載入第三方資源，不由後端動態產生。
+- 色值取自上述 token，不另選。
+- 既有 Console 單元測試與 e2e 全部通過，不得放寬斷言。
+- 測試不使用 Stub 或 Mock；嚴格 TDD；專案沒有 CI，驗證皆可在本機完成。

@@ -5,6 +5,7 @@
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
 | [WI-71](WI-71-console-dark-mode.md) | 深色 token、跟隨系統、log 面板改用 token、全路由驗證與對比度檢查 | 無 | 未開始 |
+| [WI-74](WI-74-light-boundary-contrast.md) | 淺色主題的欄位邊框與焦點框對比度達 3:1 | WI-71 合併 | 未開始 |
 
 ## 全域架構約束
 

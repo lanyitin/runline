@@ -1,10 +1,10 @@
 # WI-74 淺色主題的邊界與焦點框對比度達 3:1
 
-本文回答：如何讓淺色主題的元件邊界與焦點框達到 3:1 對比，以及這與 ADR-70「淺色值不變」的關係。狀態：提案中（Issue #74）。相依：[WI-71](../../../stable/console-dark-mode/work-items/WI-71-console-dark-mode.md) 已合併。總覽見[工作項總覽](../../../stable/console-dark-mode/work-items/README.md)。
+本文回答：如何讓淺色主題的元件邊界與焦點框達到 3:1 對比，以及這與 ADR-70「淺色值不變」的關係。狀態：已核可（2026-10-29，Issue #74）。相依：[WI-71](WI-71-console-dark-mode.md) 已合併。總覽見[工作項總覽](README.md)。
 
 ## 背景
 
-[ADR-70](../../../stable/console-dark-mode/adr/ADR-70-console-dark-mode.md) 第 6 點要求元件邊界與焦點框至少 3:1，第 4 點同時要求淺色 token 的值不變。WI-71 實作時發現淺色有兩項在白底上不達 3:1：輸入欄位邊框 `--border-strong` 約 1.5:1，焦點框 `--accent` 約 2.8:1。深色已全部達標。
+[ADR-70](../adr/ADR-70-console-dark-mode.md) 第 6 點要求元件邊界與焦點框至少 3:1，第 4 點同時要求淺色 token 的值不變。WI-71 實作時發現淺色有兩項在白底上不達 3:1：輸入欄位邊框 `--border-strong` 約 1.5:1，焦點框 `--accent` 約 2.8:1。深色已全部達標。
 
 ## 與 stable 的衝突
 

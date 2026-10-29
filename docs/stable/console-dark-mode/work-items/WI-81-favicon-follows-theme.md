@@ -1,6 +1,6 @@
 # WI-81 Console favicon 跟隨系統主題
 
-本文回答：Console 的網站圖示如何跟隨系統的深色或淺色偏好，以及驗收條件。狀態：提案中（Issue #81）。相依：無（[WI-71](../../../stable/console-dark-mode/work-items/WI-71-console-dark-mode.md) 已完成）。決策見 [ADR-70](../../../stable/console-dark-mode/adr/ADR-70-console-dark-mode.md)（只跟隨系統）；總覽見[工作項總覽](../../../stable/console-dark-mode/work-items/README.md)。
+本文回答：Console 的網站圖示如何跟隨系統的深色或淺色偏好，以及驗收條件。狀態：已核可（2026-10-29，Issue #81）。相依：無（[WI-71](WI-71-console-dark-mode.md) 已完成）。決策見 [ADR-70](../adr/ADR-70-console-dark-mode.md)（只跟隨系統）；總覽見[工作項總覽](README.md)。
 
 ## 背景
 

@@ -125,7 +125,7 @@
   }
   input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--focus-ring);
     box-shadow: 0 0 0 3px var(--accent-tint);
   }
   input[aria-invalid='true'] {

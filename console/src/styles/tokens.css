@@ -12,7 +12,7 @@
   --surface: #ffffff;
   --surface-subtle: #f1f4f9;
   --border: #e3e8f0;
-  --border-strong: #cbd3df;
+  --border-strong: #7c8aa0; /* field borders: #cbd3df was 1.5:1 on white (WI-74) */
 
   /* Text */
   --text: #0f172a;
@@ -21,6 +21,7 @@
 
   /* Accent: electric cyan-blue, and the indigo for secondary highlights */
   --accent: #0ea5e9;
+  --focus-ring: #0284c7; /* the focus frame; --accent is 2.8:1 on white (WI-74) */
   --accent-hover: #0284c7;
   --accent-tint: #e0f4fd;
   --accent-line: #b6e3f8;
@@ -110,6 +111,7 @@
     --text-muted: #96a3ba;
 
     --accent: #38bdf8;
+    --focus-ring: #38bdf8;
     --accent-hover: #7dd3fc;
     --accent-tint: #0c2c40;
     --accent-line: #1c5575;

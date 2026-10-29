@@ -202,7 +202,7 @@
     cursor: pointer;
   }
   .choose:focus-within .rl-btn {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
   .chosen {

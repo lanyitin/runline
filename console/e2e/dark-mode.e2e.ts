@@ -290,3 +290,45 @@ describe('a change of the system preference', () => {
     await context.close();
   });
 });
+
+describe('the icon of the tab (WI-81)', () => {
+  // Chrome gives a page no computed colour of its tab icon, so this is a substitute: the file that
+  // the page's <link rel="icon"> names is loaded as an image (the way an icon is drawn; opened as a
+  // document, the Engine's style-src would block the icon's own style) under the emulated preference,
+  // and the pixels of the tile and of the symbol are read from a canvas. It does not look at the icon
+  // on the tab itself.
+  const iconColours = async (scheme: Scheme) => {
+    const { page, context } = await open(scheme, '/', null);
+    await page.locator('form input').waitFor();
+    const href = await page.locator('link[rel="icon"]').getAttribute('href');
+    expect(href).not.toBeNull();
+    const accent = await resolved(page, '--accent-solid');
+    const onAccent = await resolved(page, '--on-accent');
+    const colours = await page.evaluate(async (src) => {
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 32;
+      const draw = canvas.getContext('2d')!;
+      draw.drawImage(image, 0, 0, 32, 32);
+      const at = (x: number, y: number) => {
+        const [r, g, b, a] = draw.getImageData(x, y, 1, 1).data;
+        return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${a})`;
+      };
+      // The tile away from the symbol; the middle of the dash of the symbol.
+      return { tile: at(16, 4), mark: at(20, 21) };
+    }, new URL(href!, page.url()).toString());
+    await context.close();
+    return { colours, accent, onAccent };
+  };
+
+  test.each(['light', 'dark'] as const)('has the colours of the buttons with the system preference %s', async (scheme) => {
+    const { colours, accent, onAccent } = await iconColours(scheme);
+    expect(colours).toEqual({ tile: accent, mark: onAccent });
+  });
+
+  test('differs between the two preferences', async () => {
+    expect((await iconColours('dark')).colours).not.toEqual((await iconColours('light')).colours);
+  });
+});

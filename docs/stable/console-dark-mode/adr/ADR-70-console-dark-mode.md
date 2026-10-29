@@ -1,6 +1,6 @@
 # ADR-70 Console 在 token 層跟隨系統提供深色模式
 
-狀態：提案中。補充 [ADR-015](../../../stable/pipeline-engine/adr/ADR-015-console-frontend.md)；不修訂任何 stable 決策。回答：Console 如何提供深色模式，以及深色的設計方向與驗證標準。
+狀態：已核可（2026-10-29）。補充 [ADR-015](../../pipeline-engine/adr/ADR-015-console-frontend.md)；不修訂任何 stable 決策。回答：Console 如何提供深色模式，以及深色的設計方向與驗證標準。
 
 ## 背景
 

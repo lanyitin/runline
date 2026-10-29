@@ -1,6 +1,6 @@
 # WI-71 Console 深色模式
 
-本文回答：深色模式要達成哪些行為、如何驗收。狀態：提案中。相依：無。決策見 [ADR-70](../adr/ADR-70-console-dark-mode.md)；總覽見 [README](README.md)。
+本文回答：深色模式要達成哪些行為、如何驗收。狀態：已核可（2026-10-29）。相依：無。決策見 [ADR-70](../adr/ADR-70-console-dark-mode.md)；總覽見 [README](README.md)。
 
 ## 背景
 

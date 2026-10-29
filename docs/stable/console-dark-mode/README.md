@@ -1,6 +1,6 @@
 # Console 深色模式
 
-本文回答：Console 如何提供深色模式，範圍、切換方式與驗證標準為何。狀態：提案中（Issue #70、#71）。補充 [ADR-015](../../stable/pipeline-engine/adr/ADR-015-console-frontend.md)（Console 前端）與 [WI-33](../../stable/pipeline-engine/work-items/WI-33-console-shell-and-i18n.md)（其中「可選深色」未實作）；沒有與 stable 衝突。
+本文回答：Console 如何提供深色模式，範圍、切換方式與驗證標準為何。狀態：已核可（2026-10-29，Issue #70、#71）。補充 [ADR-015](../pipeline-engine/adr/ADR-015-console-frontend.md)（Console 前端）與 [WI-33](../pipeline-engine/work-items/WI-33-console-shell-and-i18n.md)（其中「可選深色」未實作）；沒有與 stable 衝突。
 
 ## 1. 需求摘要
 
@@ -51,8 +51,8 @@
 
 ## 8. 決策記錄
 
-- [ADR-70 Console 跟隨系統提供深色模式（提案中）](adr/ADR-70-console-dark-mode.md)
+- [ADR-70 Console 跟隨系統提供深色模式（已核可）](adr/ADR-70-console-dark-mode.md)
 
 ## 9. 交接給 tdd-coder 的工作項
 
-見[工作項總覽](work-items/README.md)（提案中，核可並晉升到 stable 前不派工）。
+見[工作項總覽](work-items/README.md)。

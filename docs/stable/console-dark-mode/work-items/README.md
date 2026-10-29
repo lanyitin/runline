@@ -1,10 +1,10 @@
 # Console 深色模式工作項總覽
 
-本文回答：Console 深色模式要交給 tdd-coder 的工作有哪些、先後順序為何。tdd-coder 讀本頁加被派到的那一項。狀態：提案中。入口：[README](../README.md)。
+本文回答：Console 深色模式要交給 tdd-coder 的工作有哪些、先後順序為何。tdd-coder 讀本頁加被派到的那一項。狀態：已核可（2026-10-29）。入口：[README](../README.md)。
 
 | 項目 | 目標 | 相依 | 狀態 |
 |---|---|---|---|
-| [WI-71](WI-71-console-dark-mode.md) | 深色 token、跟隨系統、log 面板改用 token、全路由驗證與對比度檢查 | 無 | 提案中 |
+| [WI-71](WI-71-console-dark-mode.md) | 深色 token、跟隨系統、log 面板改用 token、全路由驗證與對比度檢查 | 無 | 未開始 |
 
 ## 全域架構約束
 

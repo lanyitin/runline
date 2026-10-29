@@ -28,7 +28,7 @@ a:hover {
 
 /* Everything that can be reached by keyboard shows where the keyboard is. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

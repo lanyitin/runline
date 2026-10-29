@@ -77,16 +77,21 @@ const textPairs: Array<[string, string]> = [
   ['terminal-error-text', 'terminal-bg'],
 ];
 
-// Boundaries, icons and the focus ring against the surfaces they sit on: 3:1.
+// Boundaries of components and the focus ring against the surfaces they sit on: 3:1, in both
+// themes (WI-74). A failing pair names itself in the test title.
 const boundaryPairs: Array<[string, string]> = [
   ['danger', 'surface'],
-];
-// The boundaries that the light theme does not reach and that its unchanged values keep (the
-// field border and the focus ring on white are 1.5:1 and 2.8:1); only the dark theme is held to them.
-const darkOnlyBoundaryPairs: Array<[string, string]> = [
   ['border-strong', 'surface'],
   ['border-strong', 'bg'],
   ['border-strong', 'surface-subtle'],
+  ['focus-ring', 'surface'],
+  ['focus-ring', 'bg'],
+  ['focus-ring', 'surface-subtle'],
+];
+// Status marks, the accent as a fill and the terminal border are not component boundaries or
+// focus rings in the light theme (their light values are unchanged, ADR-70); the dark theme holds
+// them to 3:1 as before.
+const darkOnlyBoundaryPairs: Array<[string, string]> = [
   ['accent', 'surface'],
   ['accent', 'bg'],
   ['accent', 'surface-subtle'],

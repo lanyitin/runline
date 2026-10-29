@@ -176,14 +176,15 @@
   .truncated {
     margin: 0 0 var(--space-2);
   }
-  /* A terminal panel, dark in the light theme as well (the design system). */
+  /* A terminal panel, dark in both themes, set apart by its border (ADR-70). */
   .panel {
     max-height: 32rem;
     overflow: auto;
     padding: var(--space-3) 0;
     border-radius: var(--radius-md);
-    background: #0b1220;
-    color: #d6deeb;
+    background: var(--terminal-bg);
+    box-shadow: 0 0 0 1px var(--terminal-border);
+    color: var(--terminal-text);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     line-height: 1.6;
@@ -191,7 +192,7 @@
   .empty {
     margin: 0;
     padding: var(--space-2) var(--space-4);
-    color: #9aa7bd;
+    color: var(--terminal-empty);
     font-family: var(--font-sans);
   }
   .line {
@@ -202,26 +203,26 @@
     animation: appear 160ms ease-out;
   }
   .line:hover {
-    background: rgba(148, 163, 184, 0.1);
+    background: var(--terminal-hover);
   }
   .seq {
-    color: #7b88a1;
+    color: var(--terminal-muted);
     text-align: right;
     user-select: none;
   }
   time {
-    color: #7b88a1;
+    color: var(--terminal-muted);
   }
   .stream {
-    color: #7b88a1;
+    color: var(--terminal-muted);
     font-size: var(--text-2xs);
   }
   .line.stderr .stream,
   .line.stderr .text {
-    color: #ff9b9b;
+    color: var(--terminal-error-text);
   }
   .line.stderr {
-    background: rgba(239, 68, 68, 0.08);
+    background: var(--terminal-error-bg);
   }
   @keyframes appear {
     from {

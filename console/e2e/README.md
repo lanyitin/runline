@@ -188,6 +188,12 @@ It needs no environment variable for the resource root: `dev/dev.sh` uses `dev/.
 (git-ignored, removed by `dev/dev.sh clean`) unless `RUNLINE_RESOURCE_ROOT` is already exported, in
 which case your value is used as it is.
 
+## The pages of administration need a keystore (WI-71)
+
+`responsive-routes.e2e.ts` and `responsive-admin.e2e.ts` (and any other script that opens an admin page that lists the secrets) need an Engine that has a keystore, as in step 4 and step 6 above. Without one, `GET /api/v1/secrets` answers 409, the browser logs an error in its console, and these scripts assert that the console is empty: about 18 "as admin" cases fail, and which ones differs from run to run. That is the environment, not the code; with a keystore both scripts pass in full (229 cases, on `main` and on `impl-71` alike).
+
+To give a development Engine a keystore: make a PKCS12 file with at least one secret (step 4 shows how, with `keytool -importpass`), export `RUNLINE_KEYSTORE_PATH` (the file) and `RUNLINE_KEYSTORE_PASSWORD_FILE` (a file that holds its password) before starting, then run `dev/dev.sh start`. `dev/dev.sh` does not unset them, so the Engine it starts inherits them.
+
 ## The sign-in with a provider (`e2e/oidc.e2e.ts`, WI-1202)
 
 This script signs in at a real OpenID Connect provider, so it needs two things the others do not:

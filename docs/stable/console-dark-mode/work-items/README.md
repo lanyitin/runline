@@ -6,6 +6,7 @@
 |---|---|---|---|
 | [WI-71](WI-71-console-dark-mode.md) | 深色 token、跟隨系統、log 面板改用 token、全路由驗證與對比度檢查 | 無 | 已完成（2026-10-29），PR #77（f29c804）；淺色對比度的兩項由 WI-74 處理 |
 | [WI-74](WI-74-light-boundary-contrast.md) | 淺色主題的欄位邊框與焦點框對比度達 3:1 | WI-71 合併 | 已完成（2026-10-29），PR #79（dbc61d9）；新增焦點框專用 token，狀態標記的淺色對比度不在範圍內 |
+| [WI-81](WI-81-favicon-follows-theme.md) | favicon 跟隨系統主題 | 無 | 未開始 |
 
 ## 全域架構約束
 

@@ -4,17 +4,20 @@
 
 ## 模組
 
-`settings.gradle.kts` 有 `core`、`runner`、`analyzer`、`devkit`、`engine` 五個模組，各對應一個關注點。套件前綴為 `dev.lawlan.runline`。
+`settings.gradle.kts` 有 `core`、`runner`、`accessors`、`analyzer`、`devkit`、`engine` 六個模組，各對應一個關注點。套件前綴為 `dev.lawlan.runline`。
 
 | 模組 | 責任 | 依賴 |
 |---|---|---|
 | core | Pipeline 撰寫契約：宣告、metadata、context 的 IO 類別、限制行為與可選的錄製模式（[WI-01](work-items/WI-01-pipeline-sdk.md)、[WI-04](work-items/WI-04-recording.md)） | 僅 JDK 與 Kotlin 標準函式庫 |
 | runner | Runner：獨立 class loader 執行、目錄準備與保留（[WI-02](work-items/WI-02-runner-core.md)、[WI-11](work-items/WI-11-workspace-directories.md)） | core |
+| accessors | 型別化共享資源在宿主側的實體與存取端：各型別的設定解析、實體、探測與綁定，供 Engine 與開發入口共用（[WI-43](work-items/WI-43-resource-accessor-boundary.md)、[ADR-019](adr/ADR-019-typed-shared-resources.md)）；責任依 [ADR-022](../architecture-simplification/adr/ADR-022-resource-type-ownership.md) 擴大為資源型別的唯一擁有者 | core、runner |
 | analyzer | 靜態分析與 safe／unsafe 判定、白名單模型、文字格式與預設白名單（[WI-16](work-items/WI-16-analyzer-module.md)） | 主程式僅依賴 JDK 與 Kotlin 標準函式庫；測試期依賴 core，用於編譯測試輸入的 pipeline |
-| devkit | 開發入口：在本機執行與除錯 pipeline、顯示 unsafe 判定、錄製 IO 並產生 metadata 提案（[WI-03](work-items/WI-03-runner-dev-entry.md)、[WI-04](work-items/WI-04-recording.md)） | core、runner、analyzer |
-| engine | 服務端：Bearer token 認證（[ADR-012](adr/ADR-012-api-authentication.md)）、上傳與探索、run 編排與排程、trigger、共享資源協調、白名單管理、run 與 log 的保留清理、run log 串流、API 文件、PostgreSQL、DI、監控、OpenTelemetry | core、runner、analyzer |
+| devkit | 開發入口：在本機執行與除錯 pipeline、顯示 unsafe 判定、錄製 IO 並產生 metadata 提案、以本機組態提供型別化資源（[WI-03](work-items/WI-03-runner-dev-entry.md)、[WI-04](work-items/WI-04-recording.md)） | core、runner、analyzer、accessors |
+| engine | 服務端：Bearer token 認證（[ADR-012](adr/ADR-012-api-authentication.md)）、上傳與探索、run 編排與排程、trigger、共享資源協調、金鑰庫、白名單管理、run 與 log 的保留清理、run log 串流、API 文件、PostgreSQL、DI、監控、OpenTelemetry | core、runner、analyzer、accessors |
 
-core、runner、analyzer 與 devkit 不依賴 Ktor 或 engine，可獨立於 engine 在 IDE 中使用。部署時 Engine 與 run 執行期目錄（Runner、core、Kotlin 標準函式庫）分開打包（見 [04](04-deployment.md)）。Engine 沒有任何開啟錄製的途徑。
+模組責任與依賴方向的目標狀態見[架構簡化](../architecture-simplification/README.md)；各工作項完成時本表隨之更新。
+
+core、runner、accessors、analyzer 與 devkit 不依賴 Ktor 或 engine，可獨立於 engine 在 IDE 中使用。部署時 Engine 與 run 執行期目錄（Runner、core、Kotlin 標準函式庫）分開打包（見 [04](04-deployment.md)）。Engine 沒有任何開啟錄製的途徑。
 
 ## 外部測試專案
 
@@ -31,7 +34,7 @@ core、runner、analyzer 與 devkit 不依賴 Ktor 或 engine，可獨立於 eng
 
 `.devcontainer/` 提供 devcontainer 與 compose。所有 JVM 模組與映像的 JDK 基準為 25。資料庫測試需要 Docker 相容的容器環境（見 [dev-environment](../dev-environment.md)）。測試等待皆有逾時保護（[WI-26](work-items/WI-26-test-timeouts.md)）。
 
-## 已知待處理
+## 已知限制
 
 - 系統為單實例；排程、run 佇列與共享資源狀態都假設單一行程（見 [07](07-nfr-risks.md)）。
 - 既有 Engine 部署的白名單不會自動取得新的預設條目，需由管理員以白名單管理 API 新增（見 [WI-25](work-items/WI-25-allow-list-format-and-default-refinement.md)）。

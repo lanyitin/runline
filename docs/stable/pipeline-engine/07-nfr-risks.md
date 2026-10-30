@@ -84,4 +84,11 @@
 
 ## 容量
 
-v1 預期規模小（單團隊）。並行 run 上限以 JVM 記憶體為依據，由組態設定；實際數值待壓測後決定。
+v1 預期規模小（單團隊）。並行 run 上限由必填組態 `RUNLINE_MAX_CONCURRENT_RUNS` 設定，數值由維運依部署主機的 JVM 記憶體決定；專案不提供壓測基準。
+
+## 已知限制
+
+- Run 結束後，pipeline 的執行緒若第一次使用某個類別，因 run 的 class loader 已關閉，可能得到 `NoClassDefFoundError` 而不是資源的 `ENDED`；run 內用過的類別不受影響。
+- 白名單變更的重判對每個版本各分析一次；同一內容雜湊的多個版本不共用分析結果（[ADR-020](adr/ADR-020-per-uploader-artifact-versions.md) 允許的最佳化未採用），成本隨版本數增加。
+- 關閉的收尾時間（10 秒）沒有行程內的強制手段：Engine 自身的資料庫不回應時，記錄「中斷」與關閉連線池可能超過 10 秒；此時由部署平台的停止逾時（寬限時間加 15 秒，[04](04-deployment.md)）結束行程，Engine 不自行以非 0 代碼提前結束。
+- `openai-compatible` 的多部分條目不支援 `audio.transcriptions` 的 `stream` 與 `timestamp_granularities[]` 欄位、`images.edits` 的多張 `image[]`。

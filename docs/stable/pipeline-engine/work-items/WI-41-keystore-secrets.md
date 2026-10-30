@@ -1,6 +1,6 @@
 # WI-41 金鑰庫機密機制
 
-本文回答：Engine 如何從 PKCS12 金鑰庫唯讀載入機密、以別名被資源引用、重載與保證機密不外洩。狀態：已核可（2026-10-06），已實作（2026-10-07，見「實作結果」）。相依：WI-40、WI-43（資源根目錄的組態）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 6 點。
+本文回答：Engine 如何從 PKCS12 金鑰庫唯讀載入機密、以別名被資源引用、重載與保證機密不外洩。狀態：已核可（2026-10-06）。相依：WI-40、WI-43（資源根目錄的組態）。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 6 點。
 
 ## 背景
 
@@ -58,18 +58,3 @@
 - 機密提供者保持可替換（沿用 [ADR-012](../adr/ADR-012-api-authentication.md) 的原則），日後可加入其他來源。
 - 同 JVM 內 unsafe pipeline 可讀取行程環境與記憶體，此限度接受並記載（[07](../07-nfr-risks.md)），本項不嘗試補強。
 - 測試使用真實 PKCS12 檔案（以 JDK 工具產生）與真實 PostgreSQL（Testcontainers），不使用 Stub 或 Mock；需要替代品時使用自製的簡易真實實作（Fake）；嚴格 TDD；不新增 CI；完成程式碼變更時依專案規則先以 ktfmt 格式化。
-
-## 實作結果（2026-10-07）
-
-組態與程式：`engine/src/main/kotlin/secret/`（`SecretStore` 介面與 `KeystoreSecretStore`、`NoSecretStore`、`KeystoreLoader`、`SecretCatalog`、`SecretMasking`），路由 `SecretRoutes.kt`，組態 `secrets.*`（`application.yaml`）。測試在 `engine/src/test/kotlin/secret/` 與 `config/SecretSettingsTest.kt`，金鑰庫一律由 JDK 25 的 `keytool` 產生（`support/Keystores.kt`）。
-
-實作時的決定與細節（超出條文之處，供審閱）：
-
-- 重載回應的 `changed` 包含新增、移除與內容有變的別名（被移除的別名其引用資源同樣受影響）；內容是否有變以 SHA-256 指紋判斷（機密為值，憑證項目為憑證，私鑰項目為憑證鏈，不碰私鑰本身），指紋不輸出。
-- 「對其他使用者可讀」的警告只看 others 的讀取權限；群組可讀不警告（根擁有、服務群組可讀是常見的正確設定）。
-- 機密值為空，或含非可列印 ASCII（0x20 至 0x7E 以外的位元組，含 `keytool -genseckey` 產生的二進位金鑰），為 `invalid_secret`。
-- 遮蔽（`SecretMasking`）是行程內全域的登記表：金鑰庫開啟時登記其可用機密與金鑰庫密碼，關閉時撤銷；掛在 logback 的 `%msg` 與例外轉換器（`logback.xml`）、run log 的每一行寫入（`RunRecorder`），以及 run 結束時記錄的失敗訊息與堆疊（`RunProgress`）。
-- 開啟失敗類別（`file_missing`、`wrong_password`、`corrupt`、`wrong_format`、`unreadable`）的辨識：先檢查檔頭（0x30 開頭才是 PKCS12，空檔為毀損，其餘為格式不符），再載入；檔案結尾例外為毀損，原因為 `UnrecoverableKeyException` 的 I/O 例外為密碼錯誤（依型別，不依訊息文字），其餘為無法開啟。`keystore.type.compat` 的實測與決定記於 ADR-019 第 6 點的「實測結果」。
-- 載入時遇到三種之外的項目類型：忽略並記錄警告（別名）。JDK 25 的 PKCS12 無法寫出這種項目，此分支沒有真實檔案可驗證。
-- 機密與金鑰庫的內部型別（`SecretValue` 等）只在 Engine 內；run 的 class loader 只有 Runner、core 與 Kotlin 函式庫（既有的封裝後行程測試驗證 run 看不到 Engine 的類別）。
-- 重載失敗回應的 `problem` 為失敗類別；Console 的文字只補了兩個新錯誤碼（`consoleApiDocCheck` 要求），畫面屬 WI-49。

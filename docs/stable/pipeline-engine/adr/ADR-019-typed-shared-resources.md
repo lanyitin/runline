@@ -1,6 +1,6 @@
 # ADR-019 共享資源對應實體：型別化資源、Engine 中介存取與金鑰庫保存機密
 
-狀態：已核可（2026-10-06）；`openai-compatible` 的端點目錄、容量算法與逾時（方案三、決策 4 與 13）為 2026-10-07 修訂，待使用者確認；決策 3 的開發入口、決策 12 的信任模型與主機名稱驗證、已決定事項 15 與 16、決策 4 的閒置逾時（含送出緩衝上限）為 2026-10-08 修訂。補充 [ADR-007](ADR-007-shared-resources.md) 與 [ADR-009](ADR-009-file-scopes.md)，不取代：ADR-007 的整體取得、先進先出、無死結與釋放語意全部保留。回答：共享資源如何對應到實際的檔案、資料庫連線池與 OpenAI 相容服務，Engine 如何把它們交給 run，機密如何保存與使用，資源如何刪除。
+狀態：已核可（2026-10-06）；`openai-compatible` 的端點目錄、容量算法與逾時（方案三、決策 4 與 13）為 2026-10-07 修訂；決策 3 的開發入口、決策 12 的信任模型與主機名稱驗證、已決定事項 15 與 16、決策 4 的閒置逾時（含送出緩衝上限）為 2026-10-08 修訂。補充 [ADR-007](ADR-007-shared-resources.md) 與 [ADR-009](ADR-009-file-scopes.md)，不取代：ADR-007 的整體取得、先進先出、無死結與釋放語意全部保留。回答：共享資源如何對應到實際的檔案、資料庫連線池與 OpenAI 相容服務，Engine 如何把它們交給 run，機密如何保存與使用，資源如何刪除。
 
 ## 背景
 
@@ -157,7 +157,7 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
   - **首位元組逾時：** 送出請求後到收到回應第一個位元組的上限。非串流呼叫沒有中間訊號，它實質等同整體生成上限，因此預設不短（建議預設 15 分鐘），由管理員依目標服務調整。串流呼叫時它涵蓋 prefill（大 context 時可能很長）。
   - **閒置逾時：** 傳輸中「兩次進度之間」的上限，預設 5 分鐘。串流回應以兩塊之間計時；上傳（多部分表單與二進位本文）以服務端實際收下的進度計時：Engine 在啟動時把 JVM 的 JDK HTTP 用戶端送出緩衝上限設為固定值 256 KiB（指設定值；作業系統可能依自身規則調整實際配置，例如 Linux 會加倍），開發入口也採同一值；管理員與 pipeline 都不能調整，數值記載於 08-api。這個設定作用於整個 JVM 的 JDK HTTP 用戶端，只影響高延遲網路下的上傳速度上限（256 KiB 在 100 ms 往返延遲下約 2.5 MB/s），不改變任何行為；允許 unsafe 執行的 pipeline 若自行以 JDK HTTP 用戶端上傳，同樣受此上限，這是接受的副作用。服務端停止讀取後，判定為閒置所需的時間不超過 `idleMs`，加上填滿 Engine 的送出緩衝與服務端接收緩衝所需的時間；服務端的接收緩衝由服務端的作業系統決定，不歸 Engine 控制。理由：作業系統的送出緩衝可大到數 MiB，若以「交出資料」計時，持續有進度的慢速上傳會被誤判為閒置；只在文件寫明精度受緩衝影響則語意不成立，且誤差隨部署環境的核心參數而變。JDK HTTP 用戶端的送出緩衝只能以 JVM 全域設定；上傳改走 Engine 自寫的 HTTP 傳輸需要自行解析 HTTP 回應（安全敏感）並重驗 TLS 行為，換用第三方 HTTP 用戶端則要改寫整個傳輸層，兩者代價都高於全域設定的副作用。服務端若不串流輸出 thinking 內容，可能出現長時間無資料，管理員據此調整。非串流、非上傳的呼叫不適用。
   - **總時間上限（選填）：** 單次呼叫的整體上限，預設不設（不限）。其他逾時之外，run 本身的逾時與取消（[WI-02](../work-items/WI-02-runner-core.md)）仍是最終的外部上限。
-  - 預設值為建議值，數值由管理員決定（待確認問題）。逾時以不同的錯誤類別回傳（連線、等待額度、首位元組、閒置、總時間），讓 pipeline 與可觀測性可以區分。
+  - 預設值見決定 14，數值由管理員逐資源調整。逾時以不同的錯誤類別回傳（連線、等待額度、首位元組、閒置、總時間），讓 pipeline 與可觀測性可以區分。
   - 檢查端點（決策 8）有自己的短逾時，不使用上述任何一個；檢查只做連線與一個輕量的讀取請求（啟用了模型端點時為模型列表，否則只驗證連線與回應），不產生內容、不取得容量與額度。目標服務並行為 1 且正在生成時，檢查可能逾時或被拒絕，結果以逾時類別呈現，Console 說明該結果不一定代表服務故障。
 - **串流回應（支援且為必要，分兩步交付，決定 8）：** pipeline 是循序阻塞的平台 thread（ADR-008），以「逐塊拉取」的方式消費串流是自然的，且不需要讓 Engine 內部的非同步型別穿過邊界。長時間生成使串流成為必要：串流使「閒置逾時」取代對整體時間的猜測，並讓進度可見。首步（[WI-46](../work-items/WI-46-openai-compatible-resource.md)）交付一次完整回傳，逾時機制從一開始就以首位元組、閒置與選填總時間三種設計，存取端契約預留串流；第二步（[WI-47](../work-items/WI-47-openai-compatible-streaming.md)）緊接其後交付串流，兩者之間不插入其他型別項目，且 WI-47 完成前不應把此型別視為可用於長時間生成的正式環境。串流的規則：串流佔用請求額度直到串流結束、被 pipeline 關閉或 run 終止；以首位元組逾時涵蓋第一塊、以閒置逾時涵蓋塊與塊之間；run 取消時關閉串流；回傳的每一塊只含 JDK 內建型別；token 用量取自串流結尾的用量欄位（若服務有提供）。
 - **相容性的限度：** 「OpenAI 相容」的範圍由端點目錄與請求參數的傳遞定義；Engine 不驗證服務端是否支援某個條目或參數，不支援的錯誤由服務端回報並以類別回傳（管理員只應啟用服務端實際支援的條目，檢查不逐一探測條目）。
@@ -263,7 +263,7 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 
 #### 實測結果（WI-52，JDK 25.0.4.1、PostgreSQL 驅動 42.7.13、PostgreSQL 17，2026-10-08）
 
-決策沒有改變；以下是待實測項目的結論，細節與測試在 [WI-52](../work-items/WI-52-tls-trust-and-mtls.md)「實作結果」。
+決策沒有改變；以下是實測的結論，驗收條件見 [WI-52](../work-items/WI-52-tls-trust-and-mtls.md)。
 
 - **私鑰的保護密碼**：`keytool` 對 PKCS12 指定不同的 `-keypass` 時只警告（`Different store and key passwords not supported for PKCS12 KeyStores. Ignoring user-specified -keypass value.`）並以金鑰庫密碼保護私鑰；以另一個密碼取私鑰得到 `UnrecoverableKeyException`，以金鑰庫密碼成功。JDK 的 API（`KeyStore.setEntry` 搭配另一個 `PasswordProtection`）**可以**寫出私鑰密碼不同的 PKCS12；Engine 對這種項目不使用並標示 `invalid_key`。
 - **金鑰庫密碼含非 ASCII**（以 `pässwörd-密碼` 實測）：`keytool -storepass:file` 與 Engine 的密碼檔（`RUNLINE_KEYSTORE_PASSWORD_FILE`）都以 UTF-8 讀檔（JDK 25 的預設字元集在 POSIX locale 下也是 UTF-8），可靠往返，Java API 以同一密碼寫出的檔案 `keytool` 也能開；`keytool` 的互動輸入（標準輸入）在 POSIX 與 C.UTF-8 locale 下都判為密碼錯誤；`-storepass:env` 與 Engine 的 `RUNLINE_KEYSTORE_PASSWORD` 只在 UTF-8 locale 下正確，POSIX locale 下環境變數被以 ASCII 解碼而成為另一個密碼（`wrong_password`）。結論：建議維持可列印 ASCII；需要非 ASCII 時只用密碼檔。
@@ -332,18 +332,15 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 | 15 | `jdbc-pool` 沒有任何憑證別名時的 TLS | 維持驅動預設（伺服器支援時加密但不驗證，不支援時不加密）；要驗證就設定 `trustAliases`；Console 與檢查不顯示未驗證提示，因為不是每個資料庫都支援憑證 |
 | 16 | 開發入口的 TLS 信任與用戶端憑證 | 不支援；設定了憑證別名的資源被明確拒絕 |
 
-## 待確認問題
+## 已定案的選擇
 
-- （已回答，2026-10-07）目標服務需要 OpenAI 相容 API 的全部端點；最高並行請求為 1，並應以資源容量控制；單次生成時間不固定（取決於 context 大小與是否 thinking），可能很長。結果見決定 6、13、14。
-- 逾時與大小上限的實際數值：建議預設見決定 14。推薦以目標服務典型最長生成時間的兩倍作為首位元組逾時；請使用者提供典型最長生成時間與大檔需求。影響：預設值與卡住服務占用容量的最長時間。
-- 目標服務（lemonade）對各端點的實際支援（尤其重排序的路徑是 `/rerank` 還是 `/reranking`、音訊與圖像端點、檔案與批次），以及「連線中斷後是否停止生成」。影響：目錄條目的有效路徑與取消後的真實並行。由 WI-46 與 WI-53 的本機手動腳本實測，結果回報，不得宣稱已驗證。
-- 容量 1 時同一時間只有一個 run 持有資源，其他 run 在初始化階段排隊（run 級持有）。若實際使用發現吞吐不足，推薦另開 ADR 引入請求級限流，而非現在改變語意。
-- （已解決，2026-10-07）`keystore.type.compat` 預設下，要求 PKCS12 的讀取也能開啟 JKS 檔；Engine 因此自行檢查檔頭，結果見決策 6 的「實測結果」，由 [WI-41](../work-items/WI-41-keystore-secrets.md) 的測試鎖定。
-- （已實測，2026-10-08）PKCS12 私鑰項目的保護密碼與金鑰庫密碼的關係、金鑰庫密碼含非 ASCII 字元時的往返：見決策 12 的「實測結果」；維運手冊的寫法由 WI-42 決定。
-- （已實測，2026-10-08）PostgreSQL 驅動以內建 socket 工廠承載連線池專屬安全上下文可行，主機名稱驗證生效；HTTP 用戶端的主機名稱驗證預設開啟：見決策 12 的「實測結果」。
-- （已決定，2026-10-08）開發入口對 TLS 信任與用戶端憑證：不支援，明確拒絕設定了憑證別名的資源，見決策 3。
-- （已決定，2026-10-08）`jdbc-pool` 沒有設定任何憑證別名時的 TLS：維持資料庫驅動預設，見決策 12「主機名稱驗證不可關閉」。
-- （已決定，2026-10-07）載入時被拒絕的別名（內容含非可列印 ASCII）在機密清單與資源狀態中的狀態為 `invalid_secret`（新增的狀態名稱，與 `found`、`missing` 並列）；08-api 與 WI-41 已記載，Console 顯示由 WI-49 實作。
+- 目標服務需要 OpenAI 相容 API 的全部端點，最高並行請求為 1、以資源容量控制，單次生成時間不固定且可能很長；對應決定 6、13、14。
+- 逾時與大小上限：決定 14 的預設值即為定案，管理員逐資源調整。
+- 目標服務對各端點的實際支援不屬於 Engine 的驗證範圍：Engine 不探測條目，管理員只啟用服務端實際支援的條目，並承擔此判斷（見「相容性的限度」）。管理員可用 `RUNLINE_OPENAI_VERIFY_URL=<根位址> RUNLINE_OPENAI_VERIFY_MODEL=<模型> ./gradlew :accessors:verifyOpenAiService`（不屬於 `check`，報告在 `accessors/build/reports/openai-verification.txt`）自行量測目標服務的條目可用性、並行、取消後是否停止生成與首位元組時間。
+- 容量語意維持 run 級持有；不引入請求級限流，吞吐不足時另提 ADR。
+- 金鑰庫讀取自行檢查檔頭，拒絕 PKCS12 以外的格式（決策 6）；私鑰保護密碼與金鑰庫密碼相同（決策 12）；連線池與 HTTP 用戶端的主機名稱驗證一律開啟（決策 12）。
+- 開發入口不支援 TLS 信任與用戶端憑證，明確拒絕設定了憑證別名的資源（決策 3、已決定事項 16）；`jdbc-pool` 沒有憑證別名時維持驅動預設（已決定事項 15）。
+- 載入時被拒絕的別名（內容含非可列印 ASCII）的狀態為 `invalid_secret`，與 `found`、`missing` 並列。
 
 ## 工作項
 
@@ -353,8 +350,6 @@ ADR-007 的資源只有名稱與容量：pipeline 宣告名稱，Engine 在記�
 | [WI-41](../work-items/WI-41-keystore-secrets.md) | 金鑰庫機密機制（含前置驗證） |
 | [WI-42](../work-items/WI-42-keystore-deployment.md) | 金鑰庫的部署掛載與維運手冊 |
 | [WI-43](../work-items/WI-43-resource-accessor-boundary.md) | 資源存取端與開發入口、檢查端點與實體狀態、`file` 型別（合併原 WI-43、WI-44、WI-45） |
-| [WI-44](../work-items/WI-44-resource-check-endpoint.md) | 已併入 WI-43 |
-| [WI-45](../work-items/WI-45-file-resource.md) | 已併入 WI-43 |
 | [WI-46](../work-items/WI-46-openai-compatible-resource.md) | `openai-compatible` 型別（端點目錄與 JSON 端點、一次完整回傳、逾時） |
 | [WI-47](../work-items/WI-47-openai-compatible-streaming.md) | `openai-compatible` 串流（必要） |
 | [WI-53](../work-items/WI-53-openai-compatible-multipart-and-binary.md) | `openai-compatible` 的多部分上傳與二進位回應（圖像、音訊、檔案端點） |

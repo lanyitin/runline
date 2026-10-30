@@ -23,8 +23,8 @@
 - 不新增 git hook 或 CI 流程；若需要，另開工作項。
 - 沒有網路或 ktfmt 無法取得時，行為是明確失敗並回報，不靜默略過。
 
-## 待確認問題
+## 已定案的選擇
 
-- ktfmt 的取得與執行形式（獨立執行檔、Gradle 外掛，或其他）。影響：決定放在 devcontainer 映像、建置檔，或兩者；工作項不預先指定，由 tdd-coder 評估後回報。
-- 是否要把「格式檢查」納入 `check` 這類既有的驗證流程。影響：納入後格式不合規會讓整體建置失敗。
-- 格式規則是否採用 ktfmt 預設。影響：自訂規則需另行記錄在專案文件中。
+- ktfmt 以 Gradle 外掛提供，版本固定在 version catalog 一處；格式化為 `ktfmtFormat`，檢查為 `ktfmtCheck`。
+- `ktfmtCheck` 不納入 `check`；各工作項的驗收條件明列它。
+- 採用 ktfmt 預設規則（Meta 風格），沒有自訂規則。

@@ -4,7 +4,7 @@
 
 ## 一、文件中的待確認問題
 
-結案方式一律是「依現行實作定案」：實作已經做出選擇，文件把問題改寫為決定。只有標「另立工作項」者會產生新工作。
+結案方式一律是「依現行實作定案」：實作已經做出選擇，文件把問題改寫為決定。本節已全部完成（2026-10-30），各文件改以「已定案的選擇」記載。
 
 | 來源 | 問題 | 結案 |
 |---|---|---|
@@ -38,6 +38,8 @@
 | [WI-51](../../stable/pipeline-engine/work-items/WI-51-secret-non-leak-verification.md) 整體驗證 | 相依項皆已實作，本身未執行 | WI-57 驗收後派工 |
 
 ## 三、文件衛生（架構師執行）
+
+本節已全部完成（2026-10-30）。事件敘述段落中仍有效的限制已移到 [07「已知限制」](../pipeline-engine/07-nfr-risks.md) 與 [ADR-019「已定案的選擇」](../pipeline-engine/adr/ADR-019-typed-shared-resources.md)；全量驗證指令移到 [WI-57](../pipeline-engine/work-items/WI-57-test-environment-robustness.md) 的驗收條件。
 
 | 項目 | 結案方式 |
 |---|---|

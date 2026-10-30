@@ -22,5 +22,5 @@
 ## 架構約束
 [ADR-003](../adr/ADR-003-jar-and-discovery.md)、[ADR-012](../adr/ADR-012-api-authentication.md)、[06](../06-data-model.md)。Artifact 先存於 PostgreSQL。Engine 與 run 的邊界只傳 JDK 內建型別（[05](../05-ipc.md)）。分析來自 analyzer 模組，Engine 不複製其邏輯。
 
-## 待確認問題
-- 組態提供的過渡白名單預設內容。影響：預設為空時，所有 Kotlin pipeline 都會被判 unsafe，需管理員逐一允許；預設內容受 [WI-10](WI-10-allowlist-admin.md) 的第一項待確認問題限制，定案前不列入提供 IO 能力的套件。
+## 已定案的選擇
+- 白名單的初始內容由預設白名單提供（[WI-25](WI-25-allow-list-format-and-default-refinement.md)），不使用過渡內容。

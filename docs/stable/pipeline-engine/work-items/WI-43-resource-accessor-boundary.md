@@ -2,7 +2,7 @@
 
 本文回答：Engine 如何把型別化資源的受控存取端交給 run、如何回收與失效、管理員如何檢查資源，以及第一個有實體的型別 `file` 如何以真實檔案系統驗證這些通用機制。狀態：已核可（2026-10-06）。相依：WI-39、WI-40。決策見 [ADR-019](../adr/ADR-019-typed-shared-resources.md) 第 3、4（`file`）、8 點與 [05](../05-ipc.md)「資源存取端」。
 
-本項合併原 WI-43（存取端邊界）、[WI-44](WI-44-resource-check-endpoint.md)（檢查端點）、[WI-45](WI-45-file-resource.md)（`file` 型別），一次交付；後兩份文件只保留指向本項的說明。檔名沿用 `WI-43-resource-accessor-boundary.md`。
+本項涵蓋存取端邊界、檢查端點與 `file` 型別三部分，一次交付（WI-44、WI-45 的編號不再使用）。
 
 ## 背景
 

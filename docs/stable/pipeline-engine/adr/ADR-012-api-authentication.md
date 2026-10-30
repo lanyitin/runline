@@ -46,7 +46,7 @@ Engine 的上傳 API（[WI-06](../work-items/WI-06-upload-and-discovery.md)）�
 - 呼叫者的身分與角色由 `GET /api/v1/system`（Bearer）回報（ADR-016），Console 以它驗證 token。
 - Token 登入是 Console 的過渡機制；日後 OIDC 與帳號密碼登入須另開 ADR 修訂本 ADR（[ADR-017](ADR-017-console-websocket-and-token.md)）。
 
-## 待確認問題
+## 已定案的選擇
 
-- 開發人員可否查詢他人上傳的 pipeline 與 run。影響：查詢 API 的授權範圍；現行預設為只允許查詢自己上傳的結果，管理員可查詢全部。
-- Token 的輪替方式（重啟生效，或支援不重啟的重新載入）。影響：維運方式；現行預設為重啟生效。
+- 開發人員只能查詢自己上傳的 pipeline 與 run；管理員可查詢全部。
+- Token 的變更於 Engine 重啟後生效，不支援不重啟的重新載入。

@@ -1,6 +1,6 @@
 # WI-66 資源型別知識集中到 accessors（engine 側）
 
-本文回答：資源型別的規則如何由 accessors 唯一擁有，engine 只保留與型別無關的協調，如何驗收。狀態：提案中（2026-10-30）。相依：WI-65。決策見 [ADR-022](../adr/ADR-022-resource-type-ownership.md)。
+本文回答：資源型別的規則如何由 accessors 唯一擁有，engine 只保留與型別無關的協調，如何驗收。狀態：提案中（2026-10-30）。相依：WI-70。決策見 [ADR-022](../adr/ADR-022-resource-type-ownership.md)。
 
 ## 背景
 

@@ -65,8 +65,11 @@ core（`core/src/main/kotlin/Metadata.kt:36`）與 analyzer（`analyzer/src/main
 - accessors 獨立於 engine：devkit 必須在沒有 Engine 的情況下使用同一份資源實作。
 - 型別集合封閉（[ADR-019](../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md)）：集中型別知識不等於開放外掛。
 
-## 文件與設定的觀察
+## 發現五：既有未結事項累積
 
-- `docs/draft/resource-type-catalog/` 與已核可的 [ADR-021](../../stable/pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md) 重複且內容不同，屬於晉升後未移除的 draft。
-- 架構師 agent 定義描述的模組為 `core`、`server`、`client`、`web`，與實際模組不符；專案沒有 `CLAUDE.md`。
-- 根目錄 `README.md` 約 330 行，混合入門、組態參考、部署與發佈流程；細節已有 stable 文件，README 有重複。
+- stable 文件有約 20 個待確認問題，多數已被實作做出選擇但文件未改寫；工作項總覽無法看出哪些已完成。
+- [WI-57](../../stable/pipeline-engine/work-items/WI-57-test-environment-robustness.md) 的重新驗收受阻：測試在 `/tmp` 留下暫存目錄，每次全量 `check` 約 1.6 GiB，累積後磁碟已滿。[WI-51](../../stable/pipeline-engine/work-items/WI-51-secret-non-leak-verification.md) 整體驗證未執行。
+- 19 份工作項含事件敘述段落；WI-44、WI-45 只剩指向；`docs/draft/resource-type-catalog/` 是晉升後未移除的舊稿。
+- 根目錄 `README.md` 約 330 行，組態表、部署與發佈流程與 stable 文件重複。
+
+結案方式見 [00](00-open-items-closure.md)。

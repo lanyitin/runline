@@ -22,6 +22,6 @@
 
 ## 後果
 
-- accessors 的責任由「存取端」擴大為「資源型別」，模組名稱是否調整見 [03](../03-options.md) 與待確認 Q2。
+- accessors 的責任由「存取端」擴大為「資源型別」，模組名稱維持不變（[03](../03-options.md)「模組名稱」）。
 - engine 的 `resource` 功能縮小為協調；型別專屬的可觀測只保留轉換。
 - accessors 不得依賴 engine、Ktor、OpenTelemetry、資料庫存取層或金鑰庫實作（依賴檢查見 [ADR-023](ADR-023-engine-feature-slices.md)）。

@@ -1,12 +1,12 @@
 # 既有未結事項結案清單
 
-本文回答：stable 文件與既有工作項中有哪些未結事項，各自如何結案。依童子軍原則，架構重整開始前先結清這些事項，讓重整從乾淨的基線出發。每一項的結案方式在對話中經使用者確認後執行。
+本文回答：stable 文件與既有工作項中有哪些未結事項，各自如何結案。依童子軍原則，架構重整開始前先結清這些事項，讓重整從乾淨的基線出發。狀態：已核可（2026-10-30）。
 
 ## 一、文件中的待確認問題
 
-推薦的結案方式一律是「依現行實作定案」：實作已經做出選擇，文件只需把問題改寫為決定。只有標「另立工作項」者會產生新工作。
+結案方式一律是「依現行實作定案」：實作已經做出選擇，文件把問題改寫為決定。只有標「另立工作項」者會產生新工作。
 
-| 來源 | 問題 | 推薦結案 |
+| 來源 | 問題 | 結案 |
 |---|---|---|
 | [dev-environment](../../stable/dev-environment.md) | devcontainer 是否提供統一的容器執行環境 | 不採用；現行說明即為定案 |
 | [01-requirements](../../stable/pipeline-engine/01-requirements.md) Q1 | 是否新增管理員設定的唯讀目錄範圍 | 不新增；檔案範圍只有兩種（[ADR-009](../../stable/pipeline-engine/adr/ADR-009-file-scopes.md)） |
@@ -27,7 +27,7 @@
 | [WI-17](../../stable/pipeline-engine/work-items/WI-17-external-test-project.md) | 指南是否依實測更新 | 結案；日後實測發現差異時直接以新需求處理 |
 | [WI-25](../../stable/pipeline-engine/work-items/WI-25-allow-list-format-and-default-refinement.md) | 是否提供「套用新的預設白名單」操作 | 不提供；以既有 API 逐一新增（現行），並保留於 07 的已知限制 |
 
-本提案自身的待確認事項，結案方式見 [01](01-requirements.md)「決定」。
+本提案自身的決定見 [01](01-requirements.md)「決定」。
 
 ## 二、未完成的工作
 
@@ -47,5 +47,3 @@
 | stable 的 02 模組表缺 accessors；入口索引寫「ADR-001 至 020」 | 修正 |
 | `docs/draft/resource-type-catalog/` 是晉升後未移除的舊稿 | 移除 |
 | 本提案晉升後的 draft 原檔 | 移除 |
-
-「移除」需要刪除檔案的權限，見對話中的設定變更確認。

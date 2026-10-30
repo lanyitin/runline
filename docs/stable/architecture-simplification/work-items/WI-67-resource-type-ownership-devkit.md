@@ -1,6 +1,6 @@
 # WI-67 devkit 使用同一份資源型別定義
 
-本文回答：開發入口如何以 accessors 的型別定義提供本機資源，並保證與 engine 的結果一致，如何驗收。狀態：提案中（2026-10-30）。相依：WI-66。決策見 [ADR-022](../adr/ADR-022-resource-type-ownership.md) 第 4 點。
+本文回答：開發入口如何以 accessors 的型別定義提供本機資源，並保證與 engine 的結果一致，如何驗收。狀態：已核可（2026-10-30）。相依：WI-66。決策見 [ADR-022](../adr/ADR-022-resource-type-ownership.md) 第 4 點。
 
 ## 背景
 

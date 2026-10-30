@@ -1,6 +1,6 @@
 # 架構簡化與模組內聚（入口文件）
 
-狀態：提案中（2026-10-30）。本頁回答：這次架構審閱發現什麼、建議怎麼調整、以什麼順序進行、細節在哪裡。修訂對象為 [pipeline-engine](../../stable/pipeline-engine/README.md) 的模組邊界；不改變任何對外行為、API、資料模型與部署形態。
+狀態：已核可（2026-10-30）。本頁回答：這次架構審閱發現什麼、怎麼調整、以什麼順序進行、細節在哪裡。修訂對象為 [pipeline-engine](../../stable/pipeline-engine/README.md) 的模組邊界；不改變任何對外行為、API、資料模型與部署形態。
 
 ## 目標與範圍
 
@@ -19,12 +19,12 @@
 
 | 主題 | 結論 | 詳見 | 狀態 |
 |---|---|---|---|
-| 未結事項 | 待確認問題依現行實作定案；測試暫存洩漏、WI-57 重新驗收與 WI-51 先完成；文件改寫為現況描述 | [00](00-open-items-closure.md) | 提案中 |
-| 整體方向 | 維持現有 6 個 Gradle 模組，不拆不併；以「責任歸位」與「依賴單向」降低複雜度 | [03](03-options.md) | 提案中 |
-| 資源型別 | 每個型別的設定驗證、正規化、描述、檢查與存取端建立集中在 accessors；engine 與 devkit 只做與型別無關的協調 | [ADR-022](adr/ADR-022-resource-type-ownership.md) | 提案中 |
-| Engine 內部 | 依功能切片組織，每個功能擁有自己的路由、組態段、儲存與可觀測；功能之間依賴單向無循環，並由建置自動檢查 | [ADR-023](adr/ADR-023-engine-feature-slices.md) | 提案中 |
-| core | 只保留 pipeline 撰寫契約；限制、錄製與存取端轉接等執行期實作移到 runner 的 run 側 | [ADR-024](adr/ADR-024-core-contract-only.md) | 提案中 |
-| analyzer | 主程式可依賴 core 的 metadata 模型，刪除重複模型；位元組讀取仍只在 analyzer（修訂 WI-16 的依賴限制） | [ADR-025](adr/ADR-025-analyzer-shares-core-metadata.md) | 提案中 |
+| 未結事項 | 待確認問題依現行實作定案；測試暫存洩漏、WI-57 重新驗收與 WI-51 先完成；文件改寫為現況描述 | [00](00-open-items-closure.md) | 已核可 |
+| 整體方向 | 維持現有 6 個 Gradle 模組，不拆不併；以「責任歸位」與「依賴單向」降低複雜度 | [03](03-options.md) | 已核可 |
+| 資源型別 | 每個型別的設定驗證、正規化、描述、檢查與存取端建立集中在 accessors；engine 與 devkit 只做與型別無關的協調 | [ADR-022](adr/ADR-022-resource-type-ownership.md) | 已核可 |
+| Engine 內部 | 依功能切片組織，每個功能擁有自己的路由、組態段、儲存與可觀測；功能之間依賴單向無循環，並由建置自動檢查 | [ADR-023](adr/ADR-023-engine-feature-slices.md) | 已核可 |
+| core | 只保留 pipeline 撰寫契約；限制、錄製與存取端轉接等執行期實作移到 runner 的 run 側 | [ADR-024](adr/ADR-024-core-contract-only.md) | 已核可 |
+| analyzer | 主程式可依賴 core 的 metadata 模型，刪除重複模型；位元組讀取仍只在 analyzer（修訂 WI-16 的依賴限制） | [ADR-025](adr/ADR-025-analyzer-shares-core-metadata.md) | 已核可 |
 
 ## 目標模組關係
 
@@ -54,13 +54,13 @@ flowchart TB
 
 | 章節 | 文件 | 狀態 |
 |---|---|---|
-| 0 既有未結事項結案清單 | [00-open-items-closure.md](00-open-items-closure.md) | 提案中 |
-| 1 需求摘要 | [01-requirements.md](01-requirements.md) | 提案中 |
-| 2 現況觀察（審閱發現） | [02-current-state.md](02-current-state.md) | 提案中 |
-| 3 方案比較與推薦 | [03-options.md](03-options.md) | 提案中 |
+| 0 既有未結事項結案清單 | [00-open-items-closure.md](00-open-items-closure.md) | 已核可 |
+| 1 需求摘要 | [01-requirements.md](01-requirements.md) | 已核可 |
+| 2 現況觀察（審閱發現） | [02-current-state.md](02-current-state.md) | 已核可 |
+| 3 方案比較與推薦 | [03-options.md](03-options.md) | 已核可 |
 | 4 部署架構 | 不適用：產物仍為 `engine.jar` 加 `run-runtime/`，run-runtime 仍只含 runner、core 與 Kotlin 標準函式庫（[04](../../stable/pipeline-engine/04-deployment.md)） | — |
 | 5 IPC 模型 | 不適用：Engine 與 run 的邊界仍只傳 JDK 內建型別，HTTP API 不變（[05](../../stable/pipeline-engine/05-ipc.md)、[08](../../stable/pipeline-engine/08-api.md)） | — |
 | 6 資料模型 | 不適用：資料庫結構與遷移不變（[06](../../stable/pipeline-engine/06-data-model.md)） | — |
-| 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 提案中 |
-| 8 決策記錄 | [adr/](adr/)（ADR-022 至 ADR-025） | 提案中 |
-| 9 工作項 | [work-items/README.md](work-items/README.md) | 提案中 |
+| 7 非功能與風險 | [07-nfr-risks.md](07-nfr-risks.md) | 已核可 |
+| 8 決策記錄 | [adr/](adr/)（ADR-022 至 ADR-025） | 已核可 |
+| 9 工作項 | [work-items/README.md](work-items/README.md) | 已核可 |

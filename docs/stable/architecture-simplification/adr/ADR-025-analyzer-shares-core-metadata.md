@@ -1,6 +1,6 @@
 # ADR-025 analyzer 主程式共用 core 的 metadata 模型
 
-狀態：提案中（2026-10-30）。修訂 [WI-16](../../../stable/pipeline-engine/work-items/WI-16-analyzer-module.md) 的「analyzer 主程式不依賴 core」約束與 [WI-19](../../../stable/pipeline-engine/work-items/WI-19-unified-metadata-reading.md) 的對照測試要求。回答：pipeline metadata 的模型應有幾份，analyzer 可以依賴什麼。
+狀態：已核可（2026-10-30）。修訂 [WI-16](../../../stable/pipeline-engine/work-items/WI-16-analyzer-module.md) 的「analyzer 主程式不依賴 core」約束與 [WI-19](../../../stable/pipeline-engine/work-items/WI-19-unified-metadata-reading.md) 的對照測試要求。回答：pipeline metadata 的模型應有幾份，analyzer 可以依賴什麼。
 
 ## 背景
 

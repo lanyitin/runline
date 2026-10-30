@@ -1,6 +1,6 @@
 # WI-69 analyzer 共用 core 的 metadata 模型
 
-本文回答：如何讓 pipeline metadata 模型只有一份，同時維持位元組讀取的單一來源，如何驗收。狀態：提案中（2026-10-30）。相依：WI-68。決策見 [ADR-025](../adr/ADR-025-analyzer-shares-core-metadata.md)。
+本文回答：如何讓 pipeline metadata 模型只有一份，同時維持位元組讀取的單一來源，如何驗收。狀態：已核可（2026-10-30）。相依：WI-68。決策見 [ADR-025](../adr/ADR-025-analyzer-shares-core-metadata.md)。
 
 ## 背景
 

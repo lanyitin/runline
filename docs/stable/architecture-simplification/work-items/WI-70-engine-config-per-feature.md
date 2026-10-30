@@ -1,6 +1,6 @@
 # WI-70 engine 組態依功能歸屬
 
-本文回答：engine 的組態讀取與驗證如何歸屬到各功能，如何驗收。狀態：提案中（2026-10-30）。相依：WI-65。決策見 [ADR-023](../adr/ADR-023-engine-feature-slices.md) 第 1、2 點。
+本文回答：engine 的組態讀取與驗證如何歸屬到各功能，如何驗收。狀態：已核可（2026-10-30）。相依：WI-65。決策見 [ADR-023](../adr/ADR-023-engine-feature-slices.md) 第 1、2 點。
 
 ## 背景
 

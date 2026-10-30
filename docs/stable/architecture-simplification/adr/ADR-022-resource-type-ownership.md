@@ -1,6 +1,6 @@
 # ADR-022 資源型別的知識集中於 accessors
 
-狀態：提案中（2026-10-30）。補充 [ADR-019](../../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md) 與 [ADR-021](../../../stable/pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md)，不改變其語意。回答：一個資源型別的規則應由哪個模組擁有，engine 與 devkit 如何使用。
+狀態：已核可（2026-10-30）。補充 [ADR-019](../../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md) 與 [ADR-021](../../../stable/pipeline-engine/adr/ADR-021-resource-type-catalog-endpoint.md)，不改變其語意。回答：一個資源型別的規則應由哪個模組擁有，engine 與 devkit 如何使用。
 
 ## 背景
 

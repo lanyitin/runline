@@ -1,6 +1,6 @@
 # ADR-024 core 只保留 pipeline 撰寫契約
 
-狀態：提案中（2026-10-30）。縮小 [ADR-002](../../../stable/pipeline-engine/adr/ADR-002-context-and-unsafe.md) 中「core 為受信任的葉節點」所涵蓋的範圍，不改變該規則本身。回答：哪些東西屬於 core，執行期實作放哪裡。
+狀態：已核可（2026-10-30）。縮小 [ADR-002](../../../stable/pipeline-engine/adr/ADR-002-context-and-unsafe.md) 中「core 為受信任的葉節點」所涵蓋的範圍，不改變該規則本身。回答：哪些東西屬於 core，執行期實作放哪裡。
 
 ## 背景
 
@@ -15,7 +15,7 @@ core 是 pipeline 撰寫者編譯時依賴的契約，也是靜態分析中受�
 ## 取捨
 
 - 得到：core 的公開面等於撰寫所需；受信任面縮小；撰寫者看到的 API 更聚焦。
-- 付出：直接使用被移走類別的 pipeline需修改，且會被判 unsafe；不保留過渡期，devkit 指南註明。儲存庫內只有 runner 使用這些類別。
+- 付出：直接使用被移走類別的 pipeline 需修改，且會被判 unsafe；不保留過渡期，devkit 指南註明。儲存庫內只有 runner 使用這些類別。
 
 ## 後果
 

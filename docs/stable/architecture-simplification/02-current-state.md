@@ -15,8 +15,6 @@
 | devkit | 約 1,100 | 開發入口、本機資源組裝、判定與提案輸出 | core、runner、analyzer、accessors |
 | engine | 約 13,600 | 服務端全部功能 | core、runner、analyzer、accessors |
 
-`docs/stable/pipeline-engine/02-current-state.md` 的模組表沒有 accessors，stable 文件與程式現況不一致。
-
 ## 發現一：資源型別的知識分散在四個模組
 
 同一個型別（例如 `jdbc-pool`）的規則分布如下：
@@ -58,13 +56,6 @@ core（`core/src/main/kotlin/Metadata.kt:36`）與 analyzer（`analyzer/src/main
 
 影響：metadata 新增一個欄位要改兩份模型、兩份讀取、一組對照測試；devkit 同時接觸兩種同名模型。
 
-## 必要的複雜度（保留）
-
-- `engine.jar` 與 `run-runtime/` 分開打包、每個 run 獨立 class loader（[ADR-001](../../stable/pipeline-engine/adr/ADR-001-isolated-classloader.md)）：安全隔離的核心，不簡化。
-- analyzer 獨立於 runner：分析程式不應進入每個 run 的 class loader（[WI-16](../../stable/pipeline-engine/work-items/WI-16-analyzer-module.md)）。
-- accessors 獨立於 engine：devkit 必須在沒有 Engine 的情況下使用同一份資源實作。
-- 型別集合封閉（[ADR-019](../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md)）：集中型別知識不等於開放外掛。
-
 ## 發現五：既有未結事項累積
 
 - stable 文件有約 20 個待確認問題，多數已被實作做出選擇但文件未改寫；工作項總覽無法看出哪些已完成。
@@ -73,3 +64,10 @@ core（`core/src/main/kotlin/Metadata.kt:36`）與 analyzer（`analyzer/src/main
 - 根目錄 `README.md` 約 330 行，組態表、部署與發佈流程與 stable 文件重複。
 
 結案方式見 [00](00-open-items-closure.md)。
+
+## 必要的複雜度（保留）
+
+- `engine.jar` 與 `run-runtime/` 分開打包、每個 run 獨立 class loader（[ADR-001](../../stable/pipeline-engine/adr/ADR-001-isolated-classloader.md)）：安全隔離的核心，不簡化。
+- analyzer 獨立於 runner：分析程式不應進入每個 run 的 class loader（[WI-16](../../stable/pipeline-engine/work-items/WI-16-analyzer-module.md)）。
+- accessors 獨立於 engine：devkit 必須在沒有 Engine 的情況下使用同一份資源實作。
+- 型別集合封閉（[ADR-019](../../stable/pipeline-engine/adr/ADR-019-typed-shared-resources.md)）：集中型別知識不等於開放外掛。
